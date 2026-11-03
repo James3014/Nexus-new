@@ -565,7 +565,7 @@ class SwarmBroker:
     def _git_output(self, args: List[str], cwd: Path) -> Optional[str]:
         try:
             result = run_hardened_git(cwd, *args)
-        except (subprocess.TimeoutExpired, OSError):
+        except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
             return None
         if result.returncode != 0:
             return None
