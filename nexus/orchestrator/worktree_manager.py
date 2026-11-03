@@ -1148,12 +1148,16 @@ class WorktreeManager:
             return None
         controller = _LIVE_CONTROLLER.get()
         if controller is None:
-            if self.root_dir.resolve() not in start.parents:
-                return None
             dotgit = start / ".git"
+            in_root = self.root_dir.resolve() in start.parents
+            # Outside the Target root, an unbound directory whose ``.git`` is a file or link
+            # is a Target no Controller vouches for: it is checked like one (a symlink or
+            # an unverifiable registration is refused) instead of using the older runner.
+            if not in_root and not (dotgit.is_symlink() or dotgit.is_file()):
+                return None
             if dotgit.is_symlink():
                 raise RuntimeError("TARGET_GITDIR_UNTRUSTED")
-            if not dotgit.is_file():
+            if in_root and not dotgit.is_file():
                 # A repository rooted here whose git dir lies inside it (no ``core.worktree``
                 # pointing elsewhere) and holds its own refs, objects and index; its git dir
                 # is pinned.
@@ -3559,6 +3563,14 @@ class WorktreeManager:
         task_states: Optional[Dict[str, dict]] = None,
     ) -> WorkspaceInventory:
         c_root = Path(controller_root or Path.cwd()).resolve()
+        # Bind the inventory's git calls to its Controller: every other worktree is then a
+        # Target verified against it and read by the hardened runner.
+        with _bind_live_controller(c_root):
+            return self._get_workspace_inventory(c_root, task_states)
+
+    def _get_workspace_inventory(
+        self, c_root: Path, task_states: Optional[Dict[str, dict]]
+    ) -> WorkspaceInventory:
         c_head = self._run_git(["rev-parse", "HEAD"], cwd=c_root)
         try:
             c_branch = self._run_git(["branch", "--show-current"], cwd=c_root)
@@ -3646,7 +3658,12 @@ class WorktreeManager:
             except Exception:
                 branch = reg.get("branch", "detached")
 
-            is_dirty = bool(self._status_bytes(wt_path))
+            status_unavailable = False
+            try:
+                is_dirty = bool(self._status_bytes(wt_path))
+            except Exception:
+                is_dirty = True
+                status_unavailable = True
 
             # Git's porcelain worktree output emits ``locked`` when an
             # operator explicitly protects a worktree.  Keep this signal
@@ -3779,6 +3796,7 @@ class WorktreeManager:
                 or process_evidence_unavailable
                 or branch_ref_unavailable
                 or unique_commits_unavailable
+                or status_unavailable
             ):
                 classification = (
                     "KEEP_ACTIVE_OR_RETAINED"
@@ -3790,6 +3808,8 @@ class WorktreeManager:
             elif current_review or task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
                 disposition = "FORENSIC_RETAIN"
             elif process_evidence_unavailable:
+                disposition = "OWNER_DECISION_REQUIRED"
+            elif status_unavailable and not (process_active or lock_present):
                 disposition = "OWNER_DECISION_REQUIRED"
             elif process_active or lock_present or is_dirty:
                 disposition = (
@@ -3824,6 +3844,8 @@ class WorktreeManager:
                 blocker_reason = "branch_ref_evidence_unavailable"
             elif unique_commits_unavailable:
                 blocker_reason = "unique_commit_evidence_unavailable"
+            elif status_unavailable:
+                blocker_reason = "status_evidence_unavailable"
 
             worktree_entries.append(
                 WorkspaceWorktreeEntry(
@@ -3845,6 +3867,7 @@ class WorktreeManager:
                         process_evidence_unavailable
                         or branch_ref_unavailable
                         or unique_commits_unavailable
+                        or status_unavailable
                     ),
                     lock_present=lock_present,
                     current_review=current_review,

@@ -747,6 +747,10 @@
     "kind": "function",
     "signature": "(POSITIONAL_OR_KEYWORD:self) -> set[str]"
    },
+   "_assist_cancelling_ids": {
+    "kind": "function",
+    "signature": "(POSITIONAL_OR_KEYWORD:self) -> set[str]"
+   },
    "_assist_command": {
     "kind": "staticmethod",
     "signature": "(KEYWORD_ONLY:executable: str, KEYWORD_ONLY:provider: str, KEYWORD_ONLY:model: str, KEYWORD_ONLY:prompt: str, KEYWORD_ONLY:explicit_effort: str = '', KEYWORD_ONLY:agy_print_timeout: str = '25s') -> list[str]"

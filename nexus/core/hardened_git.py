@@ -8,6 +8,7 @@ that is not rooted at the directory acted on is left alone.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -132,7 +133,8 @@ def run_hardened_git(
 
     ``separate_git_dir`` marks ``git_dir`` as one the caller created outside ``repo_dir``
     (``git init --separate-git-dir``) at a path it chose itself, never one read from a
-    ``.git`` pointer; it is then pinned as its own common dir."""
+    ``.git`` pointer; it is then pinned as its own common dir, after a self-contained check
+    (``git_dir_is_self_contained``): one that fails returns 128 without running git."""
     empty = "" if text else b""
     refused = _refused_caller_option(args)
     if refused is not None:
@@ -153,7 +155,9 @@ def run_hardened_git(
         # A linked worktree's admin dir: its registration is checked again and its common
         # dir pinned.
         if separate_git_dir:
-            common_dir = git_dir.resolve()
+            # Git run here may write wherever the git dir's own files point.
+            if git_dir_is_self_contained(git_dir):
+                common_dir = git_dir.resolve()
         elif linked_worktree_git_dir(repo_dir) == git_dir.resolve():
             try:
                 common_dir = _common_dir(git_dir.resolve())
@@ -277,23 +281,55 @@ def repository_git_dir(repo_dir: Path) -> Optional[Path]:
     return None
 
 
+_LOOSE_OBJECT_DIR = re.compile(r"[0-9a-f]{2}")
+_LOOSE_OBJECT_NAME = re.compile(r"[0-9a-f]{38}")
+
+
+def _is_content_addressed_object(parts: tuple[str, ...], name: str) -> bool:
+    """True for a loose object file (``objects/xx/<38 hex>``) or a pack file
+    (``objects/pack/*.pack`` or ``*.idx``), which git never rewrites."""
+    if len(parts) == 2 and parts[0] == "objects":
+        if parts[1] == "pack":
+            return name.endswith((".pack", ".idx"))
+        return bool(_LOOSE_OBJECT_DIR.fullmatch(parts[1]) and _LOOSE_OBJECT_NAME.fullmatch(name))
+    return False
+
+
 def git_dir_is_self_contained(git_dir: Path) -> bool:
     """True when git, run on ``git_dir``, reads and writes refs, objects and the index only
-    inside it: nothing in it is a symlink (hooks aside, which are never run here), and it
-    names no other repository through ``commondir`` or object alternates."""
+    inside it: nothing in it is a symlink (hooks aside, which are never run here), no file
+    git may append to in place (the reflogs under ``logs/``) or replace (config, HEAD, refs,
+    packed-refs, index) is hard-linked from elsewhere, and it names no other repository
+    through ``commondir`` or object alternates. Only content-addressed object files (loose
+    objects, ``objects/pack/*.pack`` and ``.idx``) may be hard links (``git clone --local``);
+    other files under ``objects/`` (``info/*``, commit-graph, multi-pack-index, bitmaps) are
+    rewritten in place and get the same checks as any other file. A file that cannot be
+    inspected counts as not self-contained. The walk is one pass before git starts, so it
+    holds only while nobody else writes the git dir."""
     git_dir = Path(git_dir)
     if git_dir.is_symlink() or not git_dir.is_dir():
         return False
     for named in ("commondir", "objects/info/alternates", "objects/info/http-alternates"):
         if os.path.lexists(git_dir / named):
             return False
-    for root, dirs, files in os.walk(git_dir):
+    unlistable: list[OSError] = []  # os.walk otherwise skips a directory it cannot list
+    for root, dirs, files in os.walk(git_dir, onerror=unlistable.append):
+        if unlistable:
+            return False
         if Path(root) == git_dir:
             dirs[:] = [name for name in dirs if name != "hooks"]
+        parts = Path(root).relative_to(git_dir).parts
         for name in (*dirs, *files):
-            if os.path.islink(os.path.join(root, name)):
+            path = os.path.join(root, name)
+            if os.path.islink(path):
                 return False
-    return True
+            if name in files and not _is_content_addressed_object(parts, name):
+                try:
+                    if os.lstat(path).st_nlink > 1:
+                        return False
+                except OSError:
+                    return False
+    return not unlistable
 
 
 def linked_worktree_git_dir(

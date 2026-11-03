@@ -431,6 +431,10 @@ class _AssistResponseMixin(_ResponseBase):
             if not self._assist_job_is_current(task_id, job):
                 return job
             process = self._assist_processes.get(task_id)
+            if task_id in (getattr(self, "_assist_cancelling", None) or ()):
+                # A cancel is terminating this provider and has not written its outcome: the
+                # exit it causes is not process-lost or provider-failed (#3187).
+                return job
         returncode = None
         group_clean, deadline_killed = True, False
         if process is not None:

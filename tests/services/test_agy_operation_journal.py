@@ -979,3 +979,25 @@ def test_terminal_reconciliation_receipt_records_reconciled_at(tmp_path: Path) -
 
     assert result["reconciled_at"] == at
     assert AgyOperationJournal(tmp_path / "journal").read(other_id)["reconciled_at"] == at
+
+
+def test_repository_created_in_cwd_during_operation_does_not_take_attribution(
+    tmp_path: Path,
+) -> None:
+    root = _make_source_repo(tmp_path)
+    work = root / "work"
+    work.mkdir()
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, work)
+    _git(work, "init", "-q")
+    (root / "tracked.txt").write_text("changed-by-agent\n", encoding="utf-8")
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(work),
+    )
+
+    assert record["source_attribution_state"] == "ATTRIBUTED"
+    assert "tracked.txt" in record["observed_changed_paths"]
