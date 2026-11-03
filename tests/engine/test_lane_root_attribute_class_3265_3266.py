@@ -5,9 +5,12 @@ without an OS barrier (Linux CI) the real-sandbox test asserts that nothing runs
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from nexus.engine import sandboxed_lane as lane
 
@@ -44,22 +47,25 @@ def test_describe_reports_restorations_and_failures(tmp_path, monkeypatch):
 
 
 def test_confined_command_cannot_change_root_attribute_class(tmp_path: Path):
+    if not lane.os_sandbox_available():
+        # No OS barrier (Linux CI): nothing confined can be built, so nothing runs.
+        with pytest.raises(lane.SandboxError, match="no_os_barrier"):
+            lane.confinement(sandbox=tmp_path)
+        return
     # The system temp dir supports the attribute class; a pytest basetemp elsewhere may not,
     # and the command would then fail for an unrelated reason.
-    sandbox = Path(tempfile.mkdtemp()).resolve() / "sandbox"
-    for name in ("home", "tmp"):
-        (sandbox / name).mkdir(parents=True)
-    conf = lane.confinement(sandbox=sandbox)
-    if not lane.os_sandbox_available():
-        try:
-            conf.run(["true"], cwd=sandbox, timeout=5)
-        except lane.SandboxError:
-            return
-        raise AssertionError("ran without an OS barrier")
-    proc = conf.run(
-        ["/bin/chmod", "+a", "everyone deny delete", str(sandbox)], cwd=sandbox, timeout=10
-    )
-    assert proc.returncode != 0
-    assert "not permitted" in proc.stderr
-    (sandbox / "host-write.txt").write_text("ok")  # host-side write still works
-    assert conf.describe()["root_restorations"] == []
+    top = Path(tempfile.mkdtemp()).resolve()
+    try:
+        sandbox = top / "sandbox"
+        for name in ("home", "tmp"):
+            (sandbox / name).mkdir(parents=True)
+        conf = lane.confinement(sandbox=sandbox)
+        proc = conf.run(
+            ["/bin/chmod", "+a", "everyone deny delete", str(sandbox)], cwd=sandbox, timeout=10
+        )
+        assert proc.returncode != 0
+        assert "not permitted" in proc.stderr
+        (sandbox / "host-write.txt").write_text("ok")  # host-side write still works
+        assert conf.describe()["root_restorations"] == []
+    finally:
+        shutil.rmtree(top, ignore_errors=True)
