@@ -7320,7 +7320,7 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
     root = tmp_path / "root"
     sub = _init_repo_with_sub(root)
 
-    def runner(**_kwargs):
+    def runner(write_boundary=None, **_kwargs):
         (sub / "x").write_text("changed by worker\n", encoding="utf-8")
         return 0, "done", "", False, 10
 
@@ -7336,5 +7336,5 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
         operation_hook=events.append,
     )
 
-    assert code == 0, events
+    assert code == 0
     assert not [e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"]
