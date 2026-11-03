@@ -384,6 +384,14 @@ class _AssistJobsMixin(_JobsBase):
             job[f"last_{name}_at"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
         job["stream_flush_status"] = "FLUSHED" if complete else "PARTIAL_OR_MISSING"
 
+    def _assist_cancelling_ids(self) -> set[str]:
+        """Task ids whose cancel is terminating the provider, before it writes CANCELLED (#3187)."""
+        with self._assist_lock:
+            ids = getattr(self, "_assist_cancelling", None)
+            if ids is None:
+                ids = self._assist_cancelling = set()
+            return ids
+
     def _assist_cancel(self, task_id: str) -> dict[str, Any]:
         job = self._assist_refresh(task_id)
         if job is None:
@@ -412,6 +420,9 @@ class _AssistJobsMixin(_JobsBase):
                     # A retry launched since this cancel's refresh: its record and provider are
                     # not the job this cancel read, and are left alone (#3076).
                     return self._assist_response(job, operation="cancel")
+                if task_id in self._assist_cancelling_ids():
+                    # Another cancel is settling this job: it releases and writes once (#3187).
+                    return self._assist_response(job, operation="cancel")
                 process = self._assist_processes.get(task_id)
                 if not pid:
                     # The submit writes the pid and registers the provider under this lock: re-read
@@ -426,59 +437,64 @@ class _AssistJobsMixin(_JobsBase):
                         # that the submit honours once the pid is written (#3076).
                         self._assist_cancel_requests().add(task_id)
                         return self._assist_response({**job, "blocker": "ASSIST_CANCEL_PENDING_LAUNCH"}, operation="cancel")
-            terminated = False
-            if process is not None:
-                # Not poll(): it reaps, after which the provider's group can no longer be
-                # signalled safely; the group is SIGKILLed before the reap, so no descendant
-                # outlives a lease release or the workspace removal below (#3052).
-                terminated = _terminate_provider_group(process)
-            elif pid:
-                # A restarted gateway: the provider is not this process's child, so its exit
-                # cannot be awaited without reaping it, and a leader gone after SIGTERM says
-                # nothing about the rest of its group. The provider counts as terminated only
-                # once a listing finds no live member of its group (#3076).
-                for sig in (signal.SIGTERM, signal.SIGKILL):
-                    try:
-                        os.killpg(int(job.get("pgid") or pid), sig)
-                    except OSError:
-                        pass
-                    deadline = time.monotonic() + _UNOWNED_GROUP_SETTLE_SECONDS
-                    while not (terminated := _provider_group_gone(job)) and time.monotonic() < deadline:
-                        time.sleep(0.1)
-                    if terminated:
-                        break
-            job.update({
-                "status": "CANCELLED",
-                "finished_at": self._utc_now(),
-                "blocker": "ASSIST_CANCELLED" if terminated else "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
-                "process_killed": terminated,
-                "exit_code": process.returncode if process is not None else None,
-            })
-            self._assist_record_stream_artifacts(job)
-            with self._assist_lock:
-                if self._assist_job_is_current(task_id, job):
-                    self._assist_processes.pop(task_id, None)
-            # No provider was ever started (no registered process, no pid): no group to wait for.
-            provider_gone = terminated or (process is None and not pid)
-            if provider_gone:
-                self._cleanup_assist_workspace(job)
-            if terminated:
-                self._release_assist_account_claim(task_id, job)
-            else:
-                if job.get("account_lease_id_hash"):
-                    self._abandon_assist_account_claim(task_id, job)
-                    job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
-                    job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
-                if not provider_gone:
-                    # The group is not known to be gone: keep the workspace and require
-                    # reconciliation (#3076).
-                    job.update({
-                        "status": "UNKNOWN_REQUIRES_RECONCILE",
-                        "blocker": "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
-                        "reconciliation_required": True,
-                        "process_cleanup": False,
-                    })
-            job = self._assist_write_current(task_id, job)
+                # Until CANCELLED is written, a refresh reports the job as still live instead of
+                # reading the provider's exit as process-lost or provider-failed (#3187).
+                self._assist_cancelling_ids().add(task_id)
+            try:
+                terminated = False
+                if process is not None:
+                    # Not poll(): it reaps, after which the provider's group can no longer be
+                    # signalled safely; the group is SIGKILLed before the reap, so no descendant
+                    # outlives a lease release or the workspace removal below (#3052).
+                    terminated = _terminate_provider_group(process)
+                elif pid:
+                    # A restarted gateway: the provider is not this process's child, so its exit
+                    # cannot be awaited without reaping it, and a leader gone after SIGTERM says
+                    # nothing about the rest of its group. The provider counts as terminated only
+                    # once a listing finds no live member of its group (#3076).
+                    for sig in (signal.SIGTERM, signal.SIGKILL):
+                        try:
+                            os.killpg(int(job.get("pgid") or pid), sig)
+                        except OSError:
+                            pass
+                        deadline = time.monotonic() + _UNOWNED_GROUP_SETTLE_SECONDS
+                        while not (terminated := _provider_group_gone(job)) and time.monotonic() < deadline:
+                            time.sleep(0.1)
+                        if terminated:
+                            break
+                job.update({
+                    "status": "CANCELLED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "ASSIST_CANCELLED" if terminated else "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
+                    "process_killed": terminated,
+                    "exit_code": process.returncode if process is not None else None,
+                })
+                self._assist_record_stream_artifacts(job)
+                # No provider was ever started (no registered process, no pid): no group to wait for.
+                provider_gone = terminated or (process is None and not pid)
+                if provider_gone:
+                    self._cleanup_assist_workspace(job)
+                if terminated:
+                    self._release_assist_account_claim(task_id, job)
+                else:
+                    if job.get("account_lease_id_hash"):
+                        self._abandon_assist_account_claim(task_id, job)
+                        job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
+                        job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
+                    if not provider_gone:
+                        # The group is not known to be gone: keep the workspace and require
+                        # reconciliation (#3076).
+                        job.update({
+                            "status": "UNKNOWN_REQUIRES_RECONCILE",
+                            "blocker": "ASSIST_CANCEL_CLEANUP_INCOMPLETE",
+                            "reconciliation_required": True,
+                            "process_cleanup": False,
+                        })
+                # The provider is unregistered in the same locked step as the final write (#3187).
+                job = self._assist_write_current(task_id, job, drop_process=True)
+            finally:
+                with self._assist_lock:
+                    self._assist_cancelling_ids().discard(task_id)
         elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
             self._release_assist_account_claim(task_id, job)
             job = self._assist_write_current(task_id, job)
