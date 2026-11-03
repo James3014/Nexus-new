@@ -557,3 +557,100 @@ def test_closure_verifier_that_moves_a_submodule_checkout_is_a_workspace_mutatio
             deletable_paths=[],
         )
     assert runs == ["1"]
+
+
+# --- fanout Core binding preflight and base blob reads (#3292) --------------------------
+
+FORGED_MODE = b"mode: forged\n"
+
+
+def _bound_lease(env: Path) -> tuple[Path, WorkspaceLease, ExecutionUnit]:
+    from tests.services.test_external_intelligence_core_binding import (
+        bound_unit_mapping,
+        make_bound_repo,
+    )
+
+    scenario = make_bound_repo(env)
+    unit = ExecutionUnit.from_mapping(bound_unit_mapping(env, scenario))
+    lease = GitWorktreeAllocator(scenario.repo, env / "workspaces").allocate(unit)
+    return scenario.repo, lease, unit
+
+
+def _preflight(unit: ExecutionUnit, lease: WorkspaceLease):
+    runtime = AdaptiveWorkerFanoutRuntime.__new__(AdaptiveWorkerFanoutRuntime)
+    return runtime._core_binding_preflight(unit, lease, Path(unit.envelope_ref), object())
+
+
+def _replace_mode_blob(git_dir: Path, base: str) -> bytes:
+    """Make ``git_dir`` serve a forged operating-mode blob in place of the real one."""
+    from nexus.services.external_intelligence_core_binding import OPERATING_MODE_PATH
+
+    real = _git(git_dir, "--git-dir", str(git_dir), "rev-parse", f"{base}:{OPERATING_MODE_PATH}")
+    forged = (
+        subprocess
+        .run(
+            ["git", "--git-dir", str(git_dir), "hash-object", "-w", "--stdin"],
+            input=FORGED_MODE,
+            capture_output=True,
+            check=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    _git(git_dir, "--git-dir", str(git_dir), "update-ref", f"refs/replace/{real}", forged)
+    return real.encode()
+
+
+def _planted_gitdir_with_forgeries(worktree: Path, controller: Path, base: str) -> None:
+    _plant_git_dir_inside(worktree, controller, worktree.parent / "markers")
+    planted = worktree / "planted"
+    _replace_mode_blob(planted, base)
+    with (planted / "config").open("a", encoding="utf-8") as handle:
+        handle.write('[remote "origin"]\n\turl = git@github.com:James3014/Nexus-new.git\n')
+
+
+def test_fanout_blob_read_ignores_a_replace_ref_the_worker_wrote(env):
+    from nexus.services.external_intelligence_core_binding import OPERATING_MODE_PATH
+
+    repo, lease, unit = _bound_lease(env)
+    genuine = fanout._git_blob_bytes(Path(lease.path), unit.expected_base_sha, OPERATING_MODE_PATH)
+    _replace_mode_blob(repo / ".git", unit.expected_base_sha)
+
+    assert genuine == b"mode: test\n"
+    assert (
+        _git(
+            Path(lease.path), "cat-file", "blob", f"{unit.expected_base_sha}:{OPERATING_MODE_PATH}"
+        )
+        == "mode: forged"
+    )
+    assert (
+        fanout._git_blob_bytes(Path(lease.path), unit.expected_base_sha, OPERATING_MODE_PATH)
+        == genuine
+    )
+
+
+def test_fanout_blob_read_refuses_a_git_pointer_the_worker_rewrote(env):
+    from nexus.services.external_intelligence_core_binding import OPERATING_MODE_PATH
+
+    repo, lease, unit = _bound_lease(env)
+    worktree = Path(lease.path)
+    _planted_gitdir_with_forgeries(worktree, repo, unit.expected_base_sha)
+
+    with pytest.raises(FanoutError, match="WORKSPACE_GIT_DIR_UNTRUSTED"):
+        fanout._git_blob_bytes(worktree, unit.expected_base_sha, OPERATING_MODE_PATH)
+
+
+def test_fanout_core_binding_preflight_ignores_a_replace_ref_the_worker_wrote(env):
+    repo, lease, unit = _bound_lease(env)
+    genuine = _preflight(unit, lease)
+    _replace_mode_blob(repo / ".git", unit.expected_base_sha)
+
+    assert _preflight(unit, lease) == genuine
+
+
+def test_fanout_core_binding_preflight_refuses_a_git_pointer_the_worker_rewrote(env):
+    repo, lease, unit = _bound_lease(env)
+    _planted_gitdir_with_forgeries(Path(lease.path), repo, unit.expected_base_sha)
+
+    with pytest.raises(FanoutError, match="CORE_BINDING_WORKSPACE_IDENTITY_UNAVAILABLE"):
+        _preflight(unit, lease)
