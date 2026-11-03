@@ -12,6 +12,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess  # nosec B404
 import sys
 import tarfile
@@ -1054,6 +1055,7 @@ def _run_codex_candidate(
         # Isolated clone (not a worktree): a worktree shares the parent's refs and
         # object store, so the agent could read branches that postdate the revision.
         _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
@@ -1091,7 +1093,10 @@ def _run_codex_candidate(
                 parse_error = f"{type(exc).__name__}:{exc}"
 
             sealing = seal_shadow_candidate(
-                source, git_dir=_shadow_git_dir(source), revision=revision
+                source,
+                git_dir=_shadow_git_dir(source),
+                revision=revision,
+                git_dir_digest=shadow_digest,
             )
             changed_files = sealing["changed_files"]
             oversized_untracked = sealing["oversized_untracked_files"]
@@ -1404,6 +1409,21 @@ def evaluate_agy_receipt(
     }
 
 
+@contextmanager
+def _fresh_index(source: Path, pin: Mapping[str, Any]) -> Iterator[Path]:
+    """An index the harness builds from HEAD in its own temp dir. The repository's index is
+    agent-writable: its skip-worktree and assume-unchanged flags and its stat data tell git
+    a changed file is clean, so the harness never reads it."""
+    with tempfile.TemporaryDirectory(prefix="nexus-shadow-index-") as temp:
+        index_file = Path(temp) / "index"
+        built = run_hardened_git(source, "read-tree", "HEAD", index_file=index_file, **pin)
+        if built.returncode != 0:
+            raise RuntimeError("shadow_candidate_status_failed")
+        # Fills the stat data from the files' content; exit 1 only lists files that differ.
+        run_hardened_git(source, "update-index", "-q", "--refresh", index_file=index_file, **pin)
+        yield index_file
+
+
 def seal_shadow_candidate(
     source: Path,
     *,
@@ -1411,6 +1431,7 @@ def seal_shadow_candidate(
     allowed_paths: Sequence[str] | None = None,
     max_file_size: int = 5_000_000,
     revision: str | None = None,
+    git_dir_digest: str | None = None,
 ) -> dict[str, Any]:
     """Seal the agent's changes in ``source``. Git is pinned to ``git_dir`` (a shadow git dir
     the harness created beside ``source``; default: the git dir inside ``source``) and runs
@@ -1420,6 +1441,12 @@ def seal_shadow_candidate(
     if git_dir is None:
         raise RuntimeError("shadow_candidate_status_failed")
     pin: dict[str, Any] = {"git_dir": git_dir, "separate_git_dir": separate}
+    if separate and git_dir_digest is None:
+        raise RuntimeError("shadow_git_dir_digest_missing")
+    if git_dir_digest is not None and _shadow_git_dir_digest(git_dir) != git_dir_digest:
+        # Anything that changed the shadow git dir since before dispatch (including a link
+        # made, written through and removed) is refused before git reads it.
+        raise RuntimeError("shadow_git_dir_changed")
     if repository_config_can_start_a_program(source, **pin):
         raise RuntimeError("shadow_candidate_config_refused")
     if revision is not None:
@@ -1427,16 +1454,27 @@ def seal_shadow_candidate(
         head = run_hardened_git(source, "rev-parse", "HEAD", **pin)
         if head.returncode != 0 or head.stdout.strip() != revision:
             raise RuntimeError("shadow_candidate_head_moved")
-    tracked = run_hardened_git(source, "diff", "--name-only", "-z", "HEAD", **pin)
-    untracked = run_hardened_git(source, "ls-files", "--others", "--exclude-standard", "-z", **pin)
-    if tracked.returncode != 0 or untracked.returncode != 0:
-        raise RuntimeError("shadow_candidate_status_failed")
+    with _fresh_index(source, pin) as index_file:
+        tracked = run_hardened_git(
+            source, "diff", "--name-only", "-z", "HEAD", index_file=index_file, **pin
+        )
+        untracked = run_hardened_git(
+            source,
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            index_file=index_file,
+            **pin,
+        )
+        if tracked.returncode != 0 or untracked.returncode != 0:
+            raise RuntimeError("shadow_candidate_status_failed")
+        diff = run_hardened_git(source, "diff", "--binary", "HEAD", index_file=index_file, **pin)
 
     tracked_paths = [item for item in tracked.stdout.split("\0") if item]
     untracked_paths = [item for item in untracked.stdout.split("\0") if item]
     changed_files = sorted(set(tracked_paths + untracked_paths))
 
-    diff = run_hardened_git(source, "diff", "--binary", "HEAD", **pin)
     if diff.returncode != 0:
         raise RuntimeError("shadow_candidate_diff_failed")
     diff_bytes = diff.stdout.encode("utf-8")
@@ -1723,6 +1761,77 @@ def _shadow_git_dir(source: Path) -> Path:
     return source.parent / f"{source.name}.git"
 
 
+def _shadow_git_dir_digest(git_dir: Path) -> str:
+    """Digest of a shadow git dir: relative path, file type, mode bits and content for every
+    entry. Under ``objects/`` only the name and size count (loose object and pack names are
+    content hashes). The top-level ``index`` is left out: git rewrites it when the agent only
+    runs ``git status``, and the harness never reads it (_fresh_index). Compared before and
+    after dispatch, it sees edits that a point-in-time link check cannot."""
+    digest = hashlib.sha256()
+
+    def add(*parts: str) -> None:
+        for part in parts:
+            digest.update(part.encode("utf-8", "surrogateescape"))
+            digest.update(b"\0")
+
+    for current, dirs, files in os.walk(git_dir, followlinks=False):
+        dirs.sort()
+        base = Path(current)
+        for name in sorted(dirs + files):
+            path = base / name
+            rel = path.relative_to(git_dir).as_posix()
+            if rel == "index":
+                continue
+            info = path.lstat()
+            mode = f"{stat.S_IMODE(info.st_mode):o}"
+            if stat.S_ISLNK(info.st_mode):
+                add(rel, "link", os.readlink(path))
+            elif stat.S_ISDIR(info.st_mode):
+                add(rel, "dir", mode)
+            elif stat.S_ISREG(info.st_mode):
+                if rel.startswith("objects/"):
+                    add(rel, "file", mode, str(info.st_size))
+                else:
+                    add(rel, "file", mode, _sha256_file(path))
+            else:
+                add(rel, "other", mode)
+    return digest.hexdigest()
+
+
+def _shadow_digest_path(source: Path) -> Path:
+    """Where the baseline digest of a persistent shadow is kept: beside ``source`` (as the
+    shadow git dir is), outside the agent's ``write_file({root}/**)`` grant."""
+    return source.parent / f"{source.name}.git.digest"
+
+
+def _store_shadow_digest(source: Path) -> None:
+    """Record the digest of a shadow git dir _prepare_shadow_checkout has just made. Written
+    once (exclusive create); never replaced."""
+    path = _shadow_digest_path(source)
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(_shadow_git_dir_digest(_shadow_git_dir(source)) + "\n")
+
+
+def _baseline_shadow_digest(source: Path, *, persistent: bool) -> str:
+    """The digest the seal compares with. A persistent shadow may already hold what an
+    earlier, crashed run wrote, so its baseline is the digest stored when it was made;
+    without one it is refused."""
+    if not persistent:
+        return _shadow_git_dir_digest(_shadow_git_dir(source))
+    path = _shadow_digest_path(source)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise OSError
+            stored = handle.read(128).decode("ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        raise RuntimeError("persistent_shadow_digest_missing") from None
+    if len(stored) != 64:
+        raise RuntimeError("persistent_shadow_digest_missing")
+    return stored
+
+
 def _prepare_shadow_checkout(
     *,
     repo: Path,
@@ -1827,6 +1936,7 @@ def _agy_shadow_checkout(
             source=source,
             default_branch=default_branch,
         )
+        _store_shadow_digest(source)
     yield source
 
 
@@ -1849,6 +1959,7 @@ def _run_agy_b_fallback(
         prospective_guard=prospective_guard,
         effect_slot="b-fallback",
     ) as source:
+        shadow_digest = _baseline_shadow_digest(source, persistent=prospective_guard is not None)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1865,14 +1976,25 @@ def _run_agy_b_fallback(
             )
             git_dir = _shadow_git_dir(source)
             # A git dir that now names a program, or a status that fails, counts as mutated.
-            mutated = repository_config_can_start_a_program(
+            mutated = _shadow_git_dir_digest(git_dir) != shadow_digest
+            mutated = mutated or repository_config_can_start_a_program(
                 source, git_dir=git_dir, separate_git_dir=True
             )
             if not mutated:
-                status_check = run_hardened_git(
-                    source, "status", "--porcelain=v1", git_dir=git_dir, separate_git_dir=True
-                )
+                pin = {"git_dir": git_dir, "separate_git_dir": True}
+                # The agent's own index is checked too (a broken or dirty one is a mutation),
+                # but only the harness-built index can show that every file is clean.
+                status_check = run_hardened_git(source, "status", "--porcelain=v1", **pin)
                 mutated = status_check.returncode != 0 or bool(status_check.stdout.strip())
+                try:
+                    with _fresh_index(source, pin) as index_file:
+                        fresh_check = run_hardened_git(
+                            source, "status", "--porcelain=v1", index_file=index_file, **pin
+                        )
+                    mutated = mutated or fresh_check.returncode != 0
+                    mutated = mutated or bool(fresh_check.stdout.strip())
+                except RuntimeError:
+                    mutated = True
             extra_checks = None
             if mutated:
                 extra_checks = {"valid": False, "reason": "REPOSITORY_MUTATION_REJECTED"}
@@ -1916,6 +2038,7 @@ def _run_agy_candidate(
         prospective_guard=prospective_guard,
         effect_slot="c",
     ) as source:
+        shadow_digest = _baseline_shadow_digest(source, persistent=prospective_guard is not None)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1935,6 +2058,7 @@ def _run_agy_candidate(
                 git_dir=_shadow_git_dir(source),
                 allowed_paths=allowed_paths,
                 revision=revision,
+                git_dir_digest=shadow_digest,
             )
             extra_checks = None
             if not sealing["scope_valid"]:

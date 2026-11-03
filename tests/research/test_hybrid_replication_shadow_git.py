@@ -7,6 +7,8 @@ marker file under tmp_path.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import hashlib
 import json
 import os
@@ -624,3 +626,322 @@ def test_seal_refuses_when_head_moved_off_the_revision(sandbox: Path) -> None:
         live.seal_shadow_candidate(source, revision=revision)
     sealing = live.seal_shadow_candidate(source, revision=_git(source, "rev-parse", "HEAD").strip())
     assert sealing["scope_valid"] is True
+
+
+def _candidate_with_shadow_change(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, tamper: Any
+) -> tuple[dict[str, Any], float]:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+        if tamper is not None:
+            tamper(live._shadow_git_dir(cwd))
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    return live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+
+def test_seal_is_refused_when_a_new_file_appears_in_the_shadow_git_dir(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        (git_dir / "planted").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_is_refused_when_a_ref_in_the_shadow_git_dir_is_rewritten(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        (git_dir / "refs" / "heads" / "other").write_text("0" * 40 + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_still_proceeds_when_the_shadow_git_dir_is_untouched(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt, _ = _candidate_with_shadow_change(sandbox, monkeypatch, None)
+
+    assert receipt["changed_files"] == ["f.txt"]
+
+
+def test_plan_mode_counts_a_changed_shadow_git_dir_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (live._shadow_git_dir(cwd) / "planted").write_text("x", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
+
+
+def _persistent_candidate(
+    guard: _PersistentSlots, repo: Path, revision: str, agent: Any
+) -> dict[str, Any]:
+    receipt, _ = live._run_agy_candidate(
+        repo=repo,
+        revision=revision,
+        prompt="edit",
+        binding={},
+        prospective_guard=guard,  # type: ignore[arg-type]
+    )
+    return receipt
+
+
+def test_resumed_persistent_shadow_is_compared_with_the_digest_stored_at_creation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    calls: list[int] = []
+
+    def agent(cwd: Path) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            # The first run writes into the shadow git dir, then dies before it seals.
+            (live._shadow_git_dir(cwd) / "planted").write_text("x", encoding="utf-8")
+            raise KeyboardInterrupt
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    with pytest.raises(KeyboardInterrupt):
+        _persistent_candidate(guard, repo, revision, agent)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _persistent_candidate(guard, repo, revision, agent)
+    assert len(calls) == 2
+
+
+def test_resumed_persistent_shadow_without_a_stored_digest_is_refused(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    _persistent_candidate(guard, repo, revision, None)
+    source = guard.shadow_source("c")
+    live._shadow_digest_path(source).unlink()
+
+    with pytest.raises(RuntimeError, match="persistent_shadow_digest_missing"):
+        _persistent_candidate(guard, repo, revision, None)
+
+
+def test_stored_digest_is_never_overwritten_by_a_resume(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    _persistent_candidate(guard, repo, revision, None)
+    stored = live._shadow_digest_path(guard.shadow_source("c"))
+    first = stored.read_text(encoding="utf-8")
+    _persistent_candidate(guard, repo, revision, None)
+
+    assert stored.read_text(encoding="utf-8") == first
+
+
+def test_seal_still_proceeds_when_the_agent_rewrites_a_file_and_runs_git_status(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    seen: dict[str, bytes] = {}
+
+    def agent(cwd: Path) -> None:
+        index = live._shadow_git_dir(cwd) / "index"
+        seen["before"] = index.read_bytes()
+        target = cwd / "f.txt"
+        target.write_bytes(target.read_bytes())
+        stat_info = target.stat()
+        os.utime(target, ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns + 10_000_000_000))
+        _git(cwd, "status", "--porcelain")
+        seen["after"] = index.read_bytes()
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    assert seen["before"] != seen["after"]
+    assert receipt["changed_files"] == []
+
+
+@pytest.mark.parametrize("target", ["HEAD", "config"])
+def test_seal_is_refused_when_a_shadow_git_file_is_rewritten_in_place_at_the_same_size(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        path = git_dir / target
+        data = path.read_bytes()
+        changed = data.replace(data[:1], b"X" if data[:1] != b"X" else b"Y", 1)
+        assert len(changed) == len(data) and changed != data
+        path.write_bytes(changed)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_is_refused_when_only_a_shadow_git_file_mode_changes(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        path = git_dir / "config"
+        path.chmod(path.stat().st_mode ^ stat.S_IXUSR)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_refuses_a_separate_git_dir_given_without_a_digest(sandbox: Path) -> None:
+    repo, revision = _origin(sandbox)
+    source = sandbox / "shadow" / "source"
+    source.parent.mkdir()
+    live._prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_digest_missing"):
+        live.seal_shadow_candidate(source, git_dir=live._shadow_git_dir(source))
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_seal_sees_a_change_to_a_file_the_agent_marked_clean_in_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        _git(cwd, "update-index", flag, "f.txt")
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+        assert _git(cwd, "diff", "--name-only", "HEAD") == ""
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    assert receipt["changed_files"] == ["f.txt"]
+
+
+def test_seal_sees_a_change_whose_stat_the_agent_copied_into_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        target = cwd / "f.txt"
+        target.write_text("b\n", encoding="utf-8")  # same size as the committed "a\n"
+        os.utime(target, (1_000_000_000, 1_000_000_000))
+        info = target.lstat()
+        index = live._shadow_git_dir(cwd) / "index"
+        data = bytearray(index.read_bytes())
+        fields = [
+            int(info.st_ctime),
+            info.st_ctime_ns % 1_000_000_000,
+            int(info.st_mtime),
+            info.st_mtime_ns % 1_000_000_000,
+            info.st_dev,
+            info.st_ino,
+        ]
+        for at, value in enumerate(fields):
+            data[12 + 4 * at : 16 + 4 * at] = (value & 0xFFFFFFFF).to_bytes(4, "big")
+        data[12 + 36 : 12 + 40] = (info.st_size & 0xFFFFFFFF).to_bytes(4, "big")
+        data[-20:] = hashlib.sha1(bytes(data[:-20])).digest()
+        index.write_bytes(bytes(data))
+        assert _git(cwd, "diff", "--name-only", "HEAD") == ""
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    assert receipt["changed_files"] == ["f.txt"]
+
+
+def test_plan_mode_counts_a_change_hidden_by_an_index_flag_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        _git(cwd, "update-index", "--assume-unchanged", "f.txt")
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
+
+
+def test_resume_reads_a_stored_digest_that_is_a_link_as_missing(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    _persistent_candidate(guard, repo, revision, None)
+    stored = live._shadow_digest_path(guard.shadow_source("c"))
+    elsewhere = sandbox / "elsewhere.digest"
+    elsewhere.write_text(stored.read_text(encoding="utf-8"), encoding="utf-8")
+    stored.unlink()
+    stored.symlink_to(elsewhere)
+
+    with pytest.raises(RuntimeError, match="persistent_shadow_digest_missing"):
+        _persistent_candidate(guard, repo, revision, None)
+
+
+def _sealed_diff(receipt: dict[str, Any]) -> str:
+    return gzip.decompress(base64.b64decode(receipt["diff_gzip_base64"])).decode("utf-8")
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_sealed_diff_carries_a_change_the_agent_marked_clean_in_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """The sealed diff bytes (not only the changed-file list) hold the hidden change."""
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        _git(cwd, "update-index", flag, "f.txt")
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    diff = _sealed_diff(receipt)
+    assert "+changed by agent" in diff
+    assert receipt["diff_sha256"] == hashlib.sha256(diff.encode("utf-8")).hexdigest()
+
+
+def test_sealed_diff_carries_a_change_whose_stat_the_agent_copied_into_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sealed diff bytes hold a same-size change hidden by copied index stat data."""
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        target = cwd / "f.txt"
+        target.write_text("b\n", encoding="utf-8")  # same size as the committed "a\n"
+        os.utime(target, (1_000_000_000, 1_000_000_000))
+        info = target.lstat()
+        index = live._shadow_git_dir(cwd) / "index"
+        data = bytearray(index.read_bytes())
+        fields = [
+            int(info.st_ctime),
+            info.st_ctime_ns % 1_000_000_000,
+            int(info.st_mtime),
+            info.st_mtime_ns % 1_000_000_000,
+            info.st_dev,
+            info.st_ino,
+        ]
+        for at, value in enumerate(fields):
+            data[12 + 4 * at : 16 + 4 * at] = (value & 0xFFFFFFFF).to_bytes(4, "big")
+        data[12 + 36 : 12 + 40] = (info.st_size & 0xFFFFFFFF).to_bytes(4, "big")
+        data[-20:] = hashlib.sha1(bytes(data[:-20])).digest()
+        index.write_bytes(bytes(data))
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    diff = _sealed_diff(receipt)
+    assert "-a" in diff and "+b" in diff
