@@ -940,3 +940,65 @@ def test_a_normal_separate_git_dir_still_runs(env):
     )
 
     assert ok.returncode == 0
+
+
+def test_a_hard_linked_reflog_is_refused_before_git_appends_to_it(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-reflog"
+    outside.write_text("outside\n", encoding="utf-8")
+    _git(work, "config", "--file", str(git_dir / "config"), "user.name", "t")
+    _git(work, "config", "--file", str(git_dir / "config"), "user.email", "t@example.invalid")
+    (git_dir / "logs" / "HEAD").unlink()
+    (git_dir / "logs" / "HEAD").hardlink_to(outside)
+    (work / "notes.py").write_text("x = 2\n", encoding="utf-8")
+
+    refused = hardened_git.run_hardened_git(
+        work, "commit", "-aqm", "again", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+@pytest.mark.parametrize("name", ["packs", "commit-graph"])
+def test_a_hard_linked_non_content_addressed_object_file_is_refused(env, name):
+    _, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-object-file"
+    outside.write_text("outside\n", encoding="utf-8")
+    (git_dir / "objects" / "info").mkdir(exist_ok=True)
+    (git_dir / "objects" / "info" / name).hardlink_to(outside)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def test_hard_linked_loose_objects_and_packs_stay_exempt(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    loose = env / "loose-clone"
+    _git(env, "clone", "-q", "--local", str(work), str(loose))
+    assert any(p.stat().st_nlink > 1 for p in (loose / ".git" / "objects").glob("??/*"))
+    _git(work, "gc", "-q")
+    packed = env / "packed-clone"
+    _git(env, "clone", "-q", "--local", str(work), str(packed))
+    packs = list((packed / ".git" / "objects" / "pack").glob("*.pack"))
+    assert packs and all(p.stat().st_nlink > 1 for p in packs)
+
+    assert hardened_git.git_dir_is_self_contained(loose / ".git") is True
+    assert hardened_git.git_dir_is_self_contained(packed / ".git") is True
+
+
+def test_a_file_that_vanishes_during_the_walk_is_refused_not_raised(env, monkeypatch):
+    work, git_dir = _separate_git_dir_repo(env)
+    real = hardened_git.os.lstat
+
+    def vanishing(path, *args, **kwargs):
+        if str(path).endswith("config"):
+            raise FileNotFoundError(path)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git.os, "lstat", vanishing)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+    assert refused.returncode == 128
