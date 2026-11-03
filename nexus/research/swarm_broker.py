@@ -385,6 +385,48 @@ def _recovery_key(swarm_dir: Path, pinned: int) -> tuple[str, int, int]:
     return (str(swarm_dir), *_fd_identity(pinned))
 
 
+_HOLDER_MARK_PREFIX = b"held pid="
+
+
+def _holder_mark() -> bytes:
+    return _HOLDER_MARK_PREFIX + str(os.getpid()).encode("ascii") + b"\n"
+
+
+# Largest pid any supported host hands out (Linux pid_max ceiling; macOS stays far below).
+_MAX_PID = 2**22
+
+
+def _lock_holder_pid(lock_fd: int) -> Optional[int]:
+    """The pid recorded in a held lock (`held pid=<n>`); None for a lock without one (an older
+    lock, one already marked) or one whose value is not a pid this host could have handed out.
+
+    The lock sits at the root of a directory the lease's own commands run in, so its content
+    is not trusted: pid 0 or 1 (never a lease), or a number past `_MAX_PID`, reads as no
+    holder, and the lock then ages out on the TTL like one without a mark."""
+    head = os.pread(lock_fd, 64, 0)
+    if not head.startswith(_HOLDER_MARK_PREFIX):
+        return None
+    digits = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
+    if not digits.isdigit() or len(digits) > 8:
+        return None
+    pid = int(digits)
+    return pid if 1 < pid <= _MAX_PID else None
+
+
+def _process_exists(pid: int) -> bool:
+    """Whether a process with `pid` exists on this host; nothing is delivered to it. A pid
+    the OS cannot take is treated as absent rather than raised."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OverflowError, ValueError):
+        return False
+    return True
+
+
 def _write_release_failed_mark(lock_fd: int) -> None:
     os.ftruncate(lock_fd, 0)
     os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
@@ -555,9 +597,15 @@ class SwarmBroker:
                 return None
             try:
                 # Exclusive create in the validated directory: cross-process lock.
-                os.close(os.open(_LOCK_NAME, _NEW_FILE_FLAGS, 0o644, dir_fd=pinned))
+                lock_fd = os.open(_LOCK_NAME, _NEW_FILE_FLAGS, 0o644, dir_fd=pinned)
             except FileExistsError:
                 return False
+            try:
+                # The holder's pid, so an unattended cleanup can tell a lease that is still
+                # running from one whose holder is gone (#3232).
+                os.write(lock_fd, _holder_mark())
+            finally:
+                os.close(lock_fd)
             # 🚀 [Shared Cache] 加速啟動：掛載重型依賴
             self._mount_shared_cache(swarm_dir, pinned)
             if not _names_dir(swarm_dir, pinned):
@@ -822,8 +870,10 @@ class SwarmBroker:
         `recover_failed_releases` resets the swarm before it goes back to the pool; True when
         marked.
 
-        For an operator who knows the holder is gone: the lock is never removed here, and a
-        link standing at the swarm path or at its lock is not followed.
+        A lock that names its holder (every lock `acquire` takes, #3232) is not marked while
+        that process still exists, however old the lock is: the unattended NightShift cleanup
+        would otherwise reset a lease that is still running. The lock is never removed here,
+        and a link standing at the swarm path or at its lock is not followed.
         """
         if not self._is_swarm_child_dir(swarm_dir):
             return False
@@ -837,6 +887,15 @@ class SwarmBroker:
                 return False
             try:
                 if time.time() - os.fstat(lock_fd).st_mtime <= older_than_sec:
+                    return False
+                holder = _lock_holder_pid(lock_fd)
+                if holder is not None and _process_exists(holder):
+                    logger.warning(
+                        "⚠️ [SwarmBroker] Lock older than the TTL but its holder (pid %d) is "
+                        "still running; not marked: %s",
+                        holder,
+                        swarm_dir,
+                    )
                     return False
                 _write_release_failed_mark(lock_fd)
                 return True

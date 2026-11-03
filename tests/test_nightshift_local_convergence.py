@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -445,6 +446,13 @@ def test_cleanup_resets_a_swarm_whose_holder_is_gone_before_unlocking_it(tmp_pat
     assert SwarmBroker(controller).acquire(timeout_sec=0.05) is not None
     (swarm / "leftover.py").write_text("LEFT = 1\n", encoding="utf-8")
     _age(swarm / ".swarm_lock")  # the holder died without releasing
+
+    def holder_gone(pid, sig):
+        raise ProcessLookupError(pid)
+
+    # #3232: the lock names its holder (this process); the cleanup only resets once the
+    # holder is gone, so the dead holder is simulated.
+    monkeypatch.setattr(os, "kill", holder_gone)
 
     assert _cleanup_stale_swarm_locks(controller, ttl_minutes=180) == 1
 
