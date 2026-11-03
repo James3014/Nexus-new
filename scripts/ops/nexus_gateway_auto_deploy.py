@@ -665,6 +665,29 @@ class DeployerTerminated(BaseException):
         self.signum = signum
 
 
+# While a child is being spawned the handler below only records the signal;
+# ``_defer_termination`` raises it once the handle exists (#3304).  No signal
+# mask: the child would inherit it.
+_SPAWN_DEFER: Dict[str, Any] = {"active": False, "pending": None}
+
+
+@contextlib.contextmanager
+def _defer_termination() -> Iterator[None]:
+    """Hold a termination signal until the spawned child has a handle (#3304).
+
+    On leaving the body the deferred signal, if any, raises
+    ``DeployerTerminated`` so the caller's existing stop path runs.
+    """
+    _SPAWN_DEFER["active"], _SPAWN_DEFER["pending"] = True, None
+    try:
+        yield
+    finally:
+        _SPAWN_DEFER["active"] = False
+        pending, _SPAWN_DEFER["pending"] = _SPAWN_DEFER["pending"], None
+    if pending is not None:
+        raise DeployerTerminated(pending)
+
+
 @contextlib.contextmanager
 def termination_raises() -> Iterator[None]:
     """Turn SIGTERM/SIGHUP into ``DeployerTerminated`` inside the body (#3199).
@@ -687,6 +710,9 @@ def termination_raises() -> Iterator[None]:
         if fired:
             return
         fired.append(signum)
+        if _SPAWN_DEFER["active"]:
+            _SPAWN_DEFER["pending"] = signum
+            return
         raise DeployerTerminated(signum)
 
     previous: Dict[int, Any] = {}
@@ -780,14 +806,16 @@ class Host:
         log = open(log_path, "ab")  # noqa: SIM115 - closed by the returned stop()
         proc: "Optional[subprocess.Popen[bytes]]" = None
         try:
-            proc = subprocess.Popen(  # noqa: S603 - fixed /bin/zsh wrapper, quoted paths
-                [self.shell, "-c", command],
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-            )
-            return _CandidateProcess(proc, log)
+            with _defer_termination():
+                proc = subprocess.Popen(  # noqa: S603 - fixed /bin/zsh wrapper, quoted paths
+                    [self.shell, "-c", command],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
+                stopper = _CandidateProcess(proc, log)
+            return stopper
         except BaseException:
             # Interrupted right after the start (#3199): stop the group before leaving.
             if proc is None:
@@ -845,15 +873,16 @@ class Host:
         with termination_raises():
             proc: "Optional[subprocess.Popen[str]]" = None
             try:
-                proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
-                    argv,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-                    text=True,
-                    start_new_session=True,
-                )
+                with _defer_termination():
+                    proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
+                        argv,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                        text=True,
+                        start_new_session=True,
+                    )
                 stdout, _ = proc.communicate(timeout=timeout)
                 return proc.returncode, stdout or ""
             except BaseException:
