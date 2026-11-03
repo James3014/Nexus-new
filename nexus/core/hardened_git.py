@@ -312,7 +312,10 @@ def git_dir_is_self_contained(git_dir: Path) -> bool:
     for named in ("commondir", "objects/info/alternates", "objects/info/http-alternates"):
         if os.path.lexists(git_dir / named):
             return False
-    for root, dirs, files in os.walk(git_dir):
+    unlistable: list[OSError] = []  # os.walk otherwise skips a directory it cannot list
+    for root, dirs, files in os.walk(git_dir, onerror=unlistable.append):
+        if unlistable:
+            return False
         if Path(root) == git_dir:
             dirs[:] = [name for name in dirs if name != "hooks"]
         parts = Path(root).relative_to(git_dir).parts
@@ -326,7 +329,7 @@ def git_dir_is_self_contained(git_dir: Path) -> bool:
                         return False
                 except OSError:
                     return False
-    return True
+    return not unlistable
 
 
 def linked_worktree_git_dir(

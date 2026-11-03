@@ -1006,3 +1006,30 @@ def test_a_file_that_vanishes_during_the_walk_is_refused_not_raised(env, monkeyp
         work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
     )
     assert refused.returncode == 128
+
+
+def test_a_directory_the_walk_cannot_list_is_refused(env, monkeypatch):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-unlisted"
+    outside.write_text("outside\n", encoding="utf-8")
+    (git_dir / "logs" / "HEAD").unlink()
+    (git_dir / "logs" / "HEAD").hardlink_to(outside)
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    # A directory that cannot be listed (for example mode 0300: write and search, no read)
+    # hides the hard link from the walk, while git can still open the file by name.
+    # Simulated so the test holds for any user, root included.
+    real = hardened_git.os.scandir
+    logs = str(git_dir / "logs")
+
+    def unlistable(path=".", *args, **kwargs):
+        if hardened_git.os.fspath(path) == logs:
+            raise PermissionError(13, "Permission denied", logs)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git.os, "scandir", unlistable)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+    assert refused.returncode == 128
