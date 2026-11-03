@@ -213,12 +213,14 @@ def config_names_a_repository_program(names: List[str]) -> bool:
     remotes (a missing object is fetched, which can start a transport program), and
     ``diff.submodule`` (a diff or log then descends into a populated submodule and reads its
     config, which the runner's ``--ignore-submodules=all`` only prevents while no caller flag
-    behind it turns submodules back on, #3227). Harmless keys such as ``diff.algorithm`` are
+    behind it turns submodules back on, #3227), and one status-format setting that does the same
+    for ``status`` (#3257). Harmless keys such as ``diff.algorithm`` are
     not refused."""
     for name in (raw.lower() for raw in names):
         if name.startswith(("filter.", "gpg.", "hook.", "include.", "includeif.")):
             return True
-        if name == "diff.submodule":
+        # Settings only the long ``status`` format reads (see the private tracking record).
+        if name in ("diff.submodule", "status.submodulesummary"):
             return True
         if name == "diff.external" or (
             name.startswith("diff.") and name.endswith((".command", ".textconv"))
