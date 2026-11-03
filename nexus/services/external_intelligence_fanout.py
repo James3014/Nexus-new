@@ -2008,13 +2008,19 @@ _CORE_BOUND_ATTEMPT_FIELDS = (
 )
 
 
-def _git_blob_bytes(root: Path, revision: str, rel_path: str) -> bytes | None:
-    result = subprocess.run(
-        ["git", "cat-file", "blob", f"{revision}:{rel_path}"],
-        cwd=root,
-        capture_output=True,
+def _git_blob_bytes(
+    root: Path, revision: str, rel_path: str, git_dir: Path | None = None
+) -> bytes | None:
+    if git_dir is None:
+        git_dir = _worker_git_dir(root)
+    result = run_hardened_git(
+        root,
+        "cat-file",
+        "blob",
+        f"{revision}:{rel_path}",
+        git_dir=git_dir,
         timeout=30.0,
-        check=False,
+        text=False,
     )
     if result.returncode != 0:
         return None
@@ -2303,8 +2309,11 @@ class AdaptiveWorkerFanoutRuntime:
             root = Path(workspace.path)
             base = unit.expected_base_sha
             try:
-                origin = _run_git(root, "remote", "get-url", "origin")
-                source_tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}")
+                git_dir = _worker_git_dir(root, workspace.controller_root)
+                origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
+                source_tree = _run_git(
+                    root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir
+                )
             except FanoutError as exc:
                 raise FanoutError("CORE_BINDING_WORKSPACE_IDENTITY_UNAVAILABLE") from exc
             if (
@@ -2312,8 +2321,8 @@ class AdaptiveWorkerFanoutRuntime:
                 or canonical_origin_repository(origin) != inputs.repository.lower()
             ):
                 raise FanoutError("CORE_BINDING_ORIGIN_MISMATCH")
-            index_bytes = _git_blob_bytes(root, base, CAPABILITY_DISCOVERY_INDEX_PATH)
-            operating_mode = _git_blob_bytes(root, base, OPERATING_MODE_PATH)
+            index_bytes = _git_blob_bytes(root, base, CAPABILITY_DISCOVERY_INDEX_PATH, git_dir)
+            operating_mode = _git_blob_bytes(root, base, OPERATING_MODE_PATH, git_dir)
             if operating_mode is None:
                 raise CoreBindingError("CORE_OPERATING_MODE_MISSING")
             worker = dict(unit.selected_worker)
