@@ -7194,3 +7194,107 @@ def test_run_agy_effect_watch_uses_recorded_repo_root_when_repo_appears_in_cwd(
 
     assert code == 0
     assert any(event.get("first_effect_at") for event in events)
+
+
+def _normal_mode_runner_seen(tmp_path: Path, cwd: Path, **dispatch_kwargs) -> dict[str, object]:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    seen: dict[str, object] = {}
+
+    def runner(*, source_repo_root=None, **_kwargs):
+        seen["root"] = source_repo_root
+        return 0, "done", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="read only",
+        cwd=str(cwd),
+        mode="plan",
+        coordinator=_WriteScopeCoordinator(home),
+        run_agy_fn=runner,
+        **dispatch_kwargs,
+    )
+    assert code == 0
+    return seen
+
+
+def test_dispatch_run_binds_the_recorded_root_itself_on_the_foreground_path(
+    tmp_path: Path,
+) -> None:
+    """#3335: with no root passed in (foreground), dispatch_run binds the repository
+    root the journal records for cwd at its own entry."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+    recorded = dispatch.direct_operation_journal._git_identity(str(sub))[0]
+    assert recorded
+
+    seen = _normal_mode_runner_seen(tmp_path, sub)
+
+    assert seen["root"] == recorded
+
+
+def test_dispatch_run_keeps_a_passed_root_over_a_rebound_one(tmp_path: Path) -> None:
+    """#3335: a root the background supervisor passed is kept as is."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+
+    seen = _normal_mode_runner_seen(tmp_path, sub, source_repo_root="/passed/root")
+
+    assert seen["root"] == "/passed/root"
+
+
+def test_normal_mode_dispatch_run_hands_the_root_to_the_runner(tmp_path: Path) -> None:
+    """#3335: the hand-off of the recorded root to the runner in normal mode."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    seen = _normal_mode_runner_seen(tmp_path, plain, source_repo_root=str(plain))
+
+    assert seen["root"] == str(plain)
+
+
+def test_write_paths_without_a_source_baseline_are_refused(
+    tmp_path: Path, pass_through_boundary
+) -> None:
+    """#3335: write_paths with no source baseline (cwd outside git) refuse instead of
+    reporting UNCONSTRAINED; without write_paths the same cwd still completes."""
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    events: list[dict[str, object]] = []
+
+    def runner(write_boundary=None, **_kwargs):
+        return 0, "done", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "x")],
+        coordinator=_WriteScopeCoordinator(home),
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    assert _normal_mode_runner_seen(tmp_path, work)["root"] is None
+
+
+def test_start_up_git_helper_runs_through_the_hardened_runner(tmp_path: Path) -> None:
+    """#3335: a repository config that names a program (fsmonitor) must not be run by the
+    start-up git helper."""
+    repo = tmp_path / "repo"
+    _init_repo_with_sub(repo)
+    marker = tmp_path / "ran"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+    hook.chmod(0o700)
+    subprocess.run(["git", "config", "core.fsmonitor", str(hook)], cwd=repo, check=True)
+
+    assert dispatch._git_is_dirty(str(repo)) is False
+    assert not marker.exists()
+    # control: a plain git status does run it
+    subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True)
+    assert marker.exists()

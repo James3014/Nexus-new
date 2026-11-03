@@ -2796,6 +2796,14 @@ def _recorded_repo_root(record: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _bind_repo_root(cwd: str) -> str | None:
+    """The root the journal would record for ``cwd`` (None outside a checked repository)."""
+    try:
+        return direct_operation_journal._git_identity(cwd)[0]
+    except Exception:
+        return None
+
+
 def _repo_root_kwargs(source_repo_root: str | None) -> dict[str, str]:
     """``repo_root`` for the journal's git helpers only when a root was recorded."""
     return {"repo_root": source_repo_root} if source_repo_root else {}
@@ -3302,17 +3310,24 @@ _WORKTREE_GITFILE_RE = re.compile(r"^gitdir:\s*(.+)$", re.MULTILINE)
 
 
 def _run_git(*args: str, cwd: str) -> tuple[int, str]:
-    """Run a git command, return (returncode, stdout). Never raises."""
+    """Run a git command through the hardened runner, return (returncode, stdout).
+
+    The repository enclosing ``cwd`` is bound (work tree and git dir) and checked the way
+    the journal checks it; a ``cwd`` with no repository, or one whose config names a
+    program, runs nothing, except ``clone`` whose ``cwd`` is only the parent directory.
+    Never raises."""
     try:
-        result = subprocess.run(
-            ["git"] + list(args),
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=15,
-            check=False,
-        )
+        if args and args[0] == "clone":
+            result = import_module("nexus.core.hardened_git").run_hardened_git(
+                Path(cwd), *args, timeout=15
+            )
+        else:
+            repository = direct_operation_journal._enclosing_repository(cwd)
+            if repository is None:
+                return 1, ""
+            result = import_module("nexus.core.hardened_git").run_hardened_git(
+                repository[0], *args, git_dir=repository[1], timeout=15
+            )
         return result.returncode, result.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return 1, ""
@@ -4553,6 +4568,10 @@ def dispatch_run(
     source_repo_root: str | None = None,
 ) -> int:
     _refuse_if_pool_stopped()
+    if source_repo_root is None:
+        # Foreground: bind the root here the way the journal records it; the
+        # background supervisor passes the recorded one, kept as is.
+        source_repo_root = _bind_repo_root(cwd)
     started_at = _monotonic()
     limits: dict[str, Any] = {}
     empty_output_failovers = 0
@@ -5867,7 +5886,11 @@ def dispatch_run(
                 write_paths=write_paths,
                 observed_changed_paths=attempt_changed_paths,
             )
-            scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+            # Declared write paths with nothing observed (no baseline) cannot be
+            # verified: refuse (fail closed) like an out-of-scope change.
+            scope_blocked = bool(
+                write_paths and scope_state in ("VIOLATION_OUT_OF_SCOPE", "UNCONSTRAINED")
+            )
             no_tool_violation = bool(
                 permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
             )
