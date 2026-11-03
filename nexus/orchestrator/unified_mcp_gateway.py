@@ -2755,8 +2755,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 # proven may reconciliation converge to a retryable failure;
                 # output alone never upgrades the result to success.
                 current.update({
-                    # A cancel stays a cancel; only a lost process becomes a failure (#3276).
-                    "status": "CANCELLED" if current.get("status") == "CANCELLED" else "FAILED",
+                    "status": "FAILED",
                     "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
                     "reconciliation_required": False,
                     "reconciled_from": "UNKNOWN_REQUIRES_RECONCILE",

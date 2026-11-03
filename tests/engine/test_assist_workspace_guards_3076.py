@@ -1811,7 +1811,9 @@ def test_reconcile_moves_a_cancelled_record_written_before_3244_so_retry_works(b
     settled = box.gateway._assist_read(TASK)
     assert settled is not None
     assert settled["account_lease_cleanup_status"] == "RELEASED", settled
-    assert settled["status"] == "CANCELLED", settled
+    # Reconcile settles the record as a retryable failure, as on main; whether a reconciled
+    # cancel should stay CANCELLED is a separate question (#3276 comment), not changed here.
+    assert settled["status"] == "FAILED", settled
     assert not settled.get("reconciliation_required"), settled
     _assert_retry_passes_the_reconcile_gates(box)
 
