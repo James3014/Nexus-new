@@ -1002,3 +1002,34 @@ def test_resolve_manager_root_explicit_manager_path_empty_root_unchanged_2638(
 
     assert root == str(derived.resolve())
     assert not caplog.records
+
+
+def test_release_with_closed_lock_file_still_returns_manager_lease(tmp_path):
+    """#3237: a closed lock file object must not stop release() before the manager step."""
+    from nexus.services.agy_account_pool import AccountLeaseClaim
+
+    released: list[object] = []
+
+    class _Manager:
+        def release(self, lease):
+            released.append(lease)
+
+    lock_path = tmp_path / "acct.lock"
+    lock_file = open(lock_path, "w")  # noqa: SIM115
+    lock_file.close()
+    claim = AccountLeaseClaim(
+        lease="lease-1",  # type: ignore[arg-type]
+        lock_file_obj=lock_file,
+        lock_path=lock_path,
+        receipt_path=tmp_path / "receipt.json",
+        account_alias_hash="a",
+        lease_id_hash="b",
+        manager=_Manager(),
+        internal_id="i",
+    )
+    claim.release()
+    assert released == ["lease-1"]
+    assert claim.released is True
+    assert claim.release_errors == ("lock_release:ValueError",)
+    claim.release()
+    assert claim.release_errors == ("lock_release:ValueError",)
