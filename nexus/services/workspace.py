@@ -31,6 +31,31 @@ class WorkspaceManager:
     def _env_enabled(name: str) -> bool:
         return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
+    @staticmethod
+    def _hardened_git_dir(cwd) -> typing.Optional[Path]:
+        """The verified git dir of ``cwd``, or None when it is unusable or its config names a
+        program (git is then not run there)."""
+        from nexus.core.hardened_git import repository_config_can_start_a_program, repository_git_dir
+
+        git_dir = repository_git_dir(Path(cwd))
+        if git_dir is None or repository_config_can_start_a_program(Path(cwd), git_dir=git_dir):
+            return None
+        return git_dir
+
+    def _run_git(self, cwd, *args: str, timeout: float = 120.0) -> "subprocess.CompletedProcess":
+        """git through the hardened runner; refusal (128) and timeout (124) are non-zero results."""
+        from nexus.core.hardened_git import run_hardened_git
+
+        try:
+            git_dir = self._hardened_git_dir(cwd)
+            if git_dir is None:
+                return subprocess.CompletedProcess(
+                    ["git", *args], 128, "", f"git dir unusable or config names a program: {cwd}"
+                )
+            return run_hardened_git(Path(cwd), *args, git_dir=git_dir, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(["git", *args], 124, "", "git timed out")
+
     def _acquire_workspace_lock(self, workspace_path: Path, timeout_sec: int = 10) -> bool:
         lock_file = workspace_path / ".lock"
         start_time = time.time()
@@ -156,13 +181,12 @@ class WorkspaceManager:
 
         # 建立隔離分支與 Worktree (Optimized Index Handling)
         try:
-            subprocess.run(
-                ["git", "worktree", "add", "-b", branch_name, str(work_path), "HEAD"],
-                cwd=self.project_root,
-                check=True,
-                capture_output=True,
-                timeout=45
+            added = self._run_git(
+                self.project_root, "worktree", "add", "-b", branch_name, str(work_path), "HEAD",
+                timeout=45,
             )
+            if added.returncode != 0:
+                raise subprocess.CalledProcessError(added.returncode, added.args, stderr=added.stderr)
 
             self._sync_brain_to_path(work_path)
 
@@ -210,7 +234,7 @@ class WorkspaceManager:
                         continue
                     try:
                         logger.info(f"🧹 [Auto-GC] Pruning stale workspace: {folder.name}")
-                        subprocess.run(["git", "worktree", "remove", "--force", str(folder)], cwd=self.project_root, capture_output=True)
+                        self._run_git(self.project_root, "worktree", "remove", "--force", str(folder))
                     except Exception:
                         pass
 
@@ -303,30 +327,26 @@ class WorkspaceManager:
 
     def _ensure_sandbox_committed(self, sandbox_path: Path):
         """確保隔離工作區的所有變更都已提交。"""
-        subprocess.run(
-            ["git", "commit", "-m", "fix(isolation): automated audit pass"],
-            cwd=sandbox_path, capture_output=True,
-        )
+        self._run_git(sandbox_path, "commit", "-m", "fix(isolation): automated audit pass")
 
     def _prepare_main_for_merge(self):
         """獲取主分支最新狀態並 Rebase，確保原子化對齊。"""
         print("🔄 [Harvest] Reversing parity check (Fetching latest main)...")
-        subprocess.run(["git", "checkout", "main"], cwd=self.project_root, capture_output=True)
-        subprocess.run(["git", "fetch", "origin", "main"], cwd=self.project_root, capture_output=True)
-        subprocess.run(["git", "rebase", "origin/main"], cwd=self.project_root, capture_output=True)
+        self._run_git(self.project_root, "checkout", "main")
+        self._run_git(self.project_root, "fetch", "origin", "main")
+        self._run_git(self.project_root, "rebase", "origin/main")
 
     def _execute_merge(self, branch_name: str) -> bool:
         """執行正式合併。"""
-        res = subprocess.run(
-            ["git", "merge", branch_name, "--no-ff", "-m", f"Merge isolated task: {branch_name}"],
-            cwd=self.project_root, capture_output=True, text=True,
+        res = self._run_git(
+            self.project_root, "merge", branch_name, "--no-ff", "-m", f"Merge isolated task: {branch_name}"
         )
         if res.returncode == 0:
             print(f"✅ [SUCCESS] Task {branch_name} harvested and merged.")
             return True
         else:
             print(f"❌ [CONFLICT] Merge failed: {res.stderr}")
-            subprocess.run(["git", "merge", "--abort"], cwd=self.project_root)
+            self._run_git(self.project_root, "merge", "--abort")
             return False
 
     def _trigger_flash_crystallization(self):
@@ -360,12 +380,9 @@ class WorkspaceManager:
         # 2. 原有的 Worktree 清理邏輯
         work_path = self.workspace_base / task_id
         if work_path.exists():
-            subprocess.run(
-                ["git", "worktree", "remove", str(work_path), "--force"],
-                cwd=self.project_root,
-            )
+            self._run_git(self.project_root, "worktree", "remove", str(work_path), "--force")
             if self._env_enabled(self.LEGACY_MUTATION_ENV):
-                subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_root, capture_output=True)
+                self._run_git(self.project_root, "branch", "-D", branch_name)
             else:
                 logger.info(
                     "[Cleanup] Retaining legacy branch %s; branch deletion requires explicit %s",
