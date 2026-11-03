@@ -7286,9 +7286,7 @@ def test_linked_worktree_subdir_with_program_config_is_still_refused(tmp_path: P
 
     assert dispatch._is_linked_worktree(str(wt / "sub")) is True
     with pytest.raises(dispatch.WorktreeFallbackError):
-        dispatch._resolve_cwd_for_dispatch(
-            requested_cwd=str(wt / "sub"), fallback_clone_path=None
-        )
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(wt / "sub"), fallback_clone_path=None)
 
 
 def test_run_git_does_not_raise_on_a_non_utf8_config_name(tmp_path: Path) -> None:
@@ -7337,4 +7335,6 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
     )
 
     assert code == 0
-    assert not [e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"]
+    assert not [
+        e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    ]
