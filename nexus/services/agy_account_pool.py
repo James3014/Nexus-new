@@ -183,7 +183,7 @@ class AccountLeaseClaim:
         try:
             if self.receipt_path.exists():
                 self.receipt_path.unlink()
-        except OSError as exc:
+        except Exception as exc:
             errors.append(f"receipt_unlink:{type(exc).__name__}")
         try:
             if self.lock_file_obj:
@@ -191,13 +191,15 @@ class AccountLeaseClaim:
 
                 fcntl.flock(self.lock_file_obj.fileno(), fcntl.LOCK_UN)
                 self.lock_file_obj.close()
-        except OSError as exc:
+        except Exception as exc:
+            # ValueError from a closed lock file object must not skip the manager step (#3237).
             errors.append(f"lock_release:{type(exc).__name__}")
         try:
             self.manager.release(self.lease)
         except Exception as exc:
             errors.append(f"manager_release:{type(exc).__name__}")
-        self.release_errors = tuple(errors)
+        finally:
+            self.release_errors = tuple(errors)
 
     def mark_worker_run(
         self,
