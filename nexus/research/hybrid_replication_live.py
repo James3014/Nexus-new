@@ -1426,6 +1426,8 @@ def seal_shadow_candidate(
     if git_dir is None:
         raise RuntimeError("shadow_candidate_status_failed")
     pin: dict[str, Any] = {"git_dir": git_dir, "separate_git_dir": separate}
+    if separate and git_dir_digest is None:
+        raise RuntimeError("shadow_git_dir_digest_missing")
     if git_dir_digest is not None and _shadow_git_dir_digest(git_dir) != git_dir_digest:
         # Anything that changed the shadow git dir since before dispatch (including a link
         # made, written through and removed) is refused before git reads it.
@@ -1733,11 +1735,54 @@ def _shadow_git_dir(source: Path) -> Path:
     return source.parent / f"{source.name}.git"
 
 
+def _index_entries_digest(data: bytes) -> bytes | None:
+    """Digest of what a git index says (path, mode, object id, stage, flags of each entry),
+    without the stat data and extensions git rewrites when it only refreshes the index.
+    None when the index is not a plain version 2 or 3 index: the caller then hashes bytes."""
+    if len(data) < 32 or data[:4] != b"DIRC":
+        return None
+    version = int.from_bytes(data[4:8], "big")
+    count = int.from_bytes(data[8:12], "big")
+    if version not in (2, 3):
+        return None
+    end = len(data) - 20
+    digest = hashlib.sha256()
+    pos = 12
+    for _ in range(count):
+        if pos + 62 > end:
+            return None
+        mode = data[pos + 24 : pos + 28]
+        oid = data[pos + 40 : pos + 60]
+        flags = int.from_bytes(data[pos + 60 : pos + 62], "big")
+        fixed = 62
+        extra = b""
+        if flags & 0x4000:
+            if version < 3 or pos + 64 > end:
+                return None
+            extra = data[pos + 62 : pos + 64]
+            fixed = 64
+        stop = data.find(b"\0", pos + fixed, end)
+        if stop < 0:
+            return None
+        name = data[pos + fixed : stop]
+        digest.update(len(name).to_bytes(4, "big") + name + mode + oid)
+        digest.update((flags & 0x3000).to_bytes(2, "big") + extra)
+        pos += (fixed + len(name) + 8) & ~7
+    if pos > end:
+        return None
+    while pos < end:
+        if pos + 8 > end or data[pos : pos + 4] == b"link":
+            return None
+        pos += 8 + int.from_bytes(data[pos + 4 : pos + 8], "big")
+    return digest.digest() if pos == end else None
+
+
 def _shadow_git_dir_digest(git_dir: Path) -> str:
-    """Digest of a shadow git dir: relative path, file type and content for every entry.
-    Under ``objects/`` only the name and size count (loose object and pack names are
-    content hashes). Compared before and after dispatch, it sees edits that a
-    point-in-time link check cannot."""
+    """Digest of a shadow git dir: relative path, file type, mode bits and content for every
+    entry. Under ``objects/`` only the name and size count (loose object and pack names are
+    content hashes). The top-level ``index`` counts by its entries, not its bytes: git
+    rewrites the stat data when the agent only runs ``git status``. Compared before and
+    after dispatch, it sees edits that a point-in-time link check cannot."""
     digest = hashlib.sha256()
 
     def add(*parts: str) -> None:
@@ -1752,18 +1797,54 @@ def _shadow_git_dir_digest(git_dir: Path) -> str:
             path = base / name
             rel = path.relative_to(git_dir).as_posix()
             info = path.lstat()
+            mode = f"{stat.S_IMODE(info.st_mode):o}"
             if stat.S_ISLNK(info.st_mode):
                 add(rel, "link", os.readlink(path))
             elif stat.S_ISDIR(info.st_mode):
-                add(rel, "dir")
+                add(rel, "dir", mode)
             elif stat.S_ISREG(info.st_mode):
                 if rel.startswith("objects/"):
-                    add(rel, "file", str(info.st_size))
+                    add(rel, "file", mode, str(info.st_size))
+                elif rel == "index":
+                    entries = _index_entries_digest(path.read_bytes())
+                    add(rel, "file", mode, entries.hex() if entries else _sha256_file(path))
                 else:
-                    add(rel, "file", _sha256_file(path))
+                    add(rel, "file", mode, _sha256_file(path))
             else:
-                add(rel, "other")
+                add(rel, "other", mode)
     return digest.hexdigest()
+
+
+def _shadow_digest_path(source: Path) -> Path:
+    """Where the baseline digest of a persistent shadow is kept: beside ``source`` (as the
+    shadow git dir is), outside the agent's ``write_file({root}/**)`` grant."""
+    return source.parent / f"{source.name}.git.digest"
+
+
+def _store_shadow_digest(source: Path) -> None:
+    """Record the digest of a shadow git dir _prepare_shadow_checkout has just made. Written
+    once (exclusive create); never replaced."""
+    path = _shadow_digest_path(source)
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(_shadow_git_dir_digest(_shadow_git_dir(source)) + "\n")
+
+
+def _baseline_shadow_digest(source: Path, *, persistent: bool) -> str:
+    """The digest the seal compares with. A persistent shadow may already hold what an
+    earlier, crashed run wrote, so its baseline is the digest stored when it was made;
+    without one it is refused."""
+    if not persistent:
+        return _shadow_git_dir_digest(_shadow_git_dir(source))
+    path = _shadow_digest_path(source)
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise OSError
+        stored = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        raise RuntimeError("persistent_shadow_digest_missing") from None
+    if len(stored) != 64:
+        raise RuntimeError("persistent_shadow_digest_missing")
+    return stored
 
 
 def _prepare_shadow_checkout(
@@ -1870,6 +1951,7 @@ def _agy_shadow_checkout(
             source=source,
             default_branch=default_branch,
         )
+        _store_shadow_digest(source)
     yield source
 
 
@@ -1892,7 +1974,7 @@ def _run_agy_b_fallback(
         prospective_guard=prospective_guard,
         effect_slot="b-fallback",
     ) as source:
-        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
+        shadow_digest = _baseline_shadow_digest(source, persistent=prospective_guard is not None)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1961,7 +2043,7 @@ def _run_agy_candidate(
         prospective_guard=prospective_guard,
         effect_slot="c",
     ) as source:
-        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
+        shadow_digest = _baseline_shadow_digest(source, persistent=prospective_guard is not None)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(

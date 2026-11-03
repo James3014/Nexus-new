@@ -628,7 +628,7 @@ def test_seal_refuses_when_head_moved_off_the_revision(sandbox: Path) -> None:
 
 def _candidate_with_shadow_change(
     sandbox: Path, monkeypatch: pytest.MonkeyPatch, tamper: Any
-) -> None:
+) -> tuple[dict[str, Any], float]:
     repo, revision = _origin(sandbox)
 
     def agent(cwd: Path) -> None:
@@ -680,3 +680,127 @@ def test_plan_mode_counts_a_changed_shadow_git_dir_as_mutation(
     receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
 
     assert receipt["repository_mutated"] is True
+
+
+def _persistent_candidate(
+    guard: _PersistentSlots, repo: Path, revision: str, agent: Any
+) -> dict[str, Any]:
+    receipt, _ = live._run_agy_candidate(
+        repo=repo,
+        revision=revision,
+        prompt="edit",
+        binding={},
+        prospective_guard=guard,  # type: ignore[arg-type]
+    )
+    return receipt
+
+
+def test_resumed_persistent_shadow_is_compared_with_the_digest_stored_at_creation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    calls: list[int] = []
+
+    def agent(cwd: Path) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            # The first run writes into the shadow git dir, then dies before it seals.
+            (live._shadow_git_dir(cwd) / "planted").write_text("x", encoding="utf-8")
+            raise KeyboardInterrupt
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    with pytest.raises(KeyboardInterrupt):
+        _persistent_candidate(guard, repo, revision, agent)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _persistent_candidate(guard, repo, revision, agent)
+    assert len(calls) == 2
+
+
+def test_resumed_persistent_shadow_without_a_stored_digest_is_refused(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    _persistent_candidate(guard, repo, revision, None)
+    source = guard.shadow_source("c")
+    live._shadow_digest_path(source).unlink()
+
+    with pytest.raises(RuntimeError, match="persistent_shadow_digest_missing"):
+        _persistent_candidate(guard, repo, revision, None)
+
+
+def test_stored_digest_is_never_overwritten_by_a_resume(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    guard = _PersistentSlots(sandbox / "task")
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    _persistent_candidate(guard, repo, revision, None)
+    stored = live._shadow_digest_path(guard.shadow_source("c"))
+    first = stored.read_text(encoding="utf-8")
+    _persistent_candidate(guard, repo, revision, None)
+
+    assert stored.read_text(encoding="utf-8") == first
+
+
+def test_seal_still_proceeds_when_the_agent_rewrites_a_file_and_runs_git_status(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    seen: dict[str, bytes] = {}
+
+    def agent(cwd: Path) -> None:
+        index = live._shadow_git_dir(cwd) / "index"
+        seen["before"] = index.read_bytes()
+        target = cwd / "f.txt"
+        target.write_bytes(target.read_bytes())
+        stat_info = target.stat()
+        os.utime(target, ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns + 10_000_000_000))
+        _git(cwd, "status", "--porcelain")
+        seen["after"] = index.read_bytes()
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    assert seen["before"] != seen["after"]
+    assert receipt["changed_files"] == []
+
+
+@pytest.mark.parametrize("target", ["HEAD", "config"])
+def test_seal_is_refused_when_a_shadow_git_file_is_rewritten_in_place_at_the_same_size(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        path = git_dir / target
+        data = path.read_bytes()
+        changed = data.replace(data[:1], b"X" if data[:1] != b"X" else b"Y", 1)
+        assert len(changed) == len(data) and changed != data
+        path.write_bytes(changed)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_is_refused_when_only_a_shadow_git_file_mode_changes(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        path = git_dir / "config"
+        path.chmod(path.stat().st_mode ^ stat.S_IXUSR)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_refuses_a_separate_git_dir_given_without_a_digest(sandbox: Path) -> None:
+    repo, revision = _origin(sandbox)
+    source = sandbox / "shadow" / "source"
+    source.parent.mkdir()
+    live._prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_digest_missing"):
+        live.seal_shadow_candidate(source, git_dir=live._shadow_git_dir(source))
