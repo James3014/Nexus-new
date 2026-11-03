@@ -8464,9 +8464,19 @@ def test_terminate_signal_then_spawn_oserror_still_terminates(
     assert ad._SPAWN_DEFER == {"active": False, "pending": None}
 
 
+@pytest.fixture
+def default_sigint() -> Iterator[None]:
+    """A background runner may inherit SIGINT as ignored: pin the interactive default."""
+    old = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old)
+
+
 @pytest.mark.parametrize("entry", ["start", "run_bounded"])
 def test_sigint_during_spawn_is_deferred_and_child_group_stopped(
-    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_sigint: None
 ) -> None:
     """#3325: Ctrl-C inside Popen's constructor stops the new group afterwards."""
     killed: list[tuple[int, int]] = []
@@ -8500,7 +8510,7 @@ def test_sigint_during_spawn_is_deferred_and_child_group_stopped(
     assert ad._SPAWN_DEFER == {"active": False, "pending": None}
 
 
-def test_sigint_outside_spawn_still_raises_keyboard_interrupt() -> None:
+def test_sigint_outside_spawn_still_raises_keyboard_interrupt(default_sigint: None) -> None:
     """#3325: outside the spawn window Ctrl-C is the plain KeyboardInterrupt, repeatable."""
     before = signal.getsignal(signal.SIGINT)
     with ad.termination_raises():
