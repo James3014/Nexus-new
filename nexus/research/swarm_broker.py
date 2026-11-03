@@ -2,6 +2,7 @@ import errno
 import fcntl
 import logging
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -386,31 +387,80 @@ def _recovery_key(swarm_dir: Path, pinned: int) -> tuple[str, int, int]:
 
 
 _HOLDER_MARK_PREFIX = b"held pid="
+_HOLDER_ID_PREFIX = b" id="
+# What a recorded or read start identity may look like: no whitespace, bounded length.
+_HOLDER_ID_RE = re.compile(rb"[A-Za-z0-9_:.\-]{1,96}")
+_LOCK_HEAD_BYTES = 160
+
+
+def _process_start_identity(pid: int) -> Optional[str]:
+    """A second identity for process `pid`: its start time (with the boot id where the host
+    has one), so a reused pid or a pid seen from another pid namespace does not pass for the
+    holder. None when it cannot be read; callers then treat the holder as unknown.
+
+    Linux reads /proc (boot id plus start ticks since boot); other hosts (macOS) ask `ps` for
+    the start time. No dependency is added."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            stat_line = handle.read().decode("ascii", "replace")
+        # The command name sits in parentheses and may hold spaces; the fields after the last
+        # ")" start at field 3, so starttime (field 22) is index 19.
+        ticks = stat_line.rsplit(")", 1)[1].split()[19]
+        with open("/proc/sys/kernel/random/boot_id", "rb") as handle:
+            boot = handle.read().decode("ascii", "replace").strip()
+        candidate = f"{boot}:{ticks}"
+    except (OSError, IndexError, ValueError):
+        candidate = None
+    if candidate is None:
+        try:
+            ran = subprocess.run(
+                ["/bin/ps", "-o", "lstart=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env={"LC_ALL": "C", "PATH": "/bin:/usr/bin"},
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+        started = "_".join(ran.stdout.split())
+        if ran.returncode != 0 or not started:
+            return None
+        candidate = "ps:" + started
+    return candidate if _HOLDER_ID_RE.fullmatch(candidate.encode("ascii", "replace")) else None
 
 
 def _holder_mark() -> bytes:
-    return _HOLDER_MARK_PREFIX + str(os.getpid()).encode("ascii") + b"\n"
+    mark = _HOLDER_MARK_PREFIX + str(os.getpid()).encode("ascii")
+    identity = _process_start_identity(os.getpid())
+    if identity is not None:
+        mark += _HOLDER_ID_PREFIX + identity.encode("ascii")
+    return mark + b"\n"
 
 
 # Largest pid any supported host hands out (Linux pid_max ceiling; macOS stays far below).
 _MAX_PID = 2**22
 
 
-def _lock_holder_pid(lock_fd: int) -> Optional[int]:
-    """The pid recorded in a held lock (`held pid=<n>`); None for a lock without one (an older
-    lock, one already marked) or one whose value is not a pid this host could have handed out.
+def _lock_holder(lock_fd: int) -> Optional[tuple[int, str]]:
+    """The holder recorded in a held lock (`held pid=<n> id=<start identity>`); None for a
+    lock without both parts (an older lock, one already marked, one whose start identity could
+    not be read when it was taken) or one whose values this host could not have written.
 
     The lock sits at the root of a directory the lease's own commands run in, so its content
     is not trusted: pid 0 or 1 (never a lease), or a number past `_MAX_PID`, reads as no
     holder, and the lock then ages out on the TTL like one without a mark."""
-    head = os.pread(lock_fd, 64, 0)
+    head = os.pread(lock_fd, _LOCK_HEAD_BYTES, 0)
     if not head.startswith(_HOLDER_MARK_PREFIX):
         return None
-    digits = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
-    if not digits.isdigit() or len(digits) > 8:
+    line = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
+    digits, sep, identity = line.partition(_HOLDER_ID_PREFIX)
+    if not sep or not digits.isdigit() or len(digits) > 8:
+        return None
+    if not _HOLDER_ID_RE.fullmatch(identity):
         return None
     pid = int(digits)
-    return pid if 1 < pid <= _MAX_PID else None
+    return (pid, identity.decode("ascii")) if 1 < pid <= _MAX_PID else None
 
 
 def _process_exists(pid: int) -> bool:
@@ -427,9 +477,31 @@ def _process_exists(pid: int) -> bool:
     return True
 
 
+def _holder_is_running(holder: tuple[int, str]) -> bool:
+    """The recorded holder still runs: its pid exists and its start identity is the recorded
+    one. An identity that cannot be read now does not vouch for the holder."""
+    pid, recorded = holder
+    return _process_exists(pid) and _process_start_identity(pid) == recorded
+
+
 def _write_release_failed_mark(lock_fd: int) -> None:
     os.ftruncate(lock_fd, 0)
     os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
+
+
+def _is_empty_real_dir_or_absent(path: str) -> bool:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if not stat.S_ISDIR(info.st_mode):
+        return False
+    try:
+        return not os.listdir(path)
+    except OSError:
+        return False
 
 
 class SwarmBroker:
@@ -871,7 +943,7 @@ class SwarmBroker:
         marked.
 
         A lock that names its holder (every lock `acquire` takes, #3232) is not marked while
-        that process still exists, however old the lock is: the unattended NightShift cleanup
+        that process still runs (same pid and same start time), however old the lock is: the unattended NightShift cleanup
         would otherwise reset a lease that is still running. The lock is never removed here,
         and a link standing at the swarm path or at its lock is not followed.
         """
@@ -888,12 +960,12 @@ class SwarmBroker:
             try:
                 if time.time() - os.fstat(lock_fd).st_mtime <= older_than_sec:
                     return False
-                holder = _lock_holder_pid(lock_fd)
-                if holder is not None and _process_exists(holder):
+                holder = _lock_holder(lock_fd)
+                if holder is not None and _holder_is_running(holder):
                     logger.warning(
                         "⚠️ [SwarmBroker] Lock older than the TTL but its holder (pid %d) is "
                         "still running; not marked: %s",
-                        holder,
+                        holder[0],
                         swarm_dir,
                     )
                     return False
@@ -1131,6 +1203,10 @@ class SwarmBroker:
             logger.warning(
                 "⚠️ [SwarmBroker] No lease base recorded; resetting to HEAD: %s", swarm_dir
             )
+        # A sparse-checkout the lease turned on is disabled first, restoring the full tree, so
+        # the next lease does not inherit the paths it left out (#3256).
+        if not self._disable_sparse_checkout(swarm_dir, git_dir, pinned):
+            return False
         # Index flags that hide a changed tracked file from status and from the forced
         # checkout are cleared first; the clean takes nested repositories too (#3231).
         if not self._clear_index_flags(swarm_dir, git_dir, pinned):
@@ -1148,6 +1224,68 @@ class SwarmBroker:
                     args[0],
                     swarm_dir,
                     result.stderr.strip(),
+                )
+                return False
+        return self._submodules_are_uninitialised(swarm_dir, git_dir, pinned)
+
+    def _disable_sparse_checkout(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
+        """Turn off a sparse-checkout and restore the full tree; False leaves the swarm locked
+        (#3256). The swarm is created as a full checkout, so any sparse state is the lease's."""
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        enabled = run_hardened_git(
+            swarm_dir, "config", "--bool", "--get", "core.sparseCheckout", git_dir=git_dir
+        )
+        # `config --get` exits 1 for a key that is not set.
+        if enabled.returncode not in (0, 1):
+            logger.warning(
+                "⚠️ [SwarmBroker] git config failed in %s; left locked: %s",
+                swarm_dir,
+                enabled.stderr.strip(),
+            )
+            return False
+        if enabled.returncode != 0 or enabled.stdout.strip() != "true":
+            return True
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        disabled = run_hardened_git(swarm_dir, "sparse-checkout", "disable", git_dir=git_dir)
+        if disabled.returncode != 0:
+            logger.warning(
+                "⚠️ [SwarmBroker] git sparse-checkout disable failed in %s; left locked: %s",
+                swarm_dir,
+                disabled.stderr.strip(),
+            )
+            return False
+        return True
+
+    def _submodules_are_uninitialised(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
+        """False, leaving the swarm locked, when a submodule of the reset tree is initialised
+        (#3256). The reset acts on the superproject only, and git run inside a submodule reads
+        that repository's own config, which the hardened runner is built not to trust; a
+        submodule working tree therefore cannot be confirmed clean from here, and what a lease
+        wrote in it must not reach the next lease. An uninitialised submodule path is an empty
+        directory (or absent); anything else there is the lease's, and `git clean` leaves it."""
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        listed = run_hardened_git(swarm_dir, "ls-files", "-s", "-z", git_dir=git_dir, text=False)
+        if listed.returncode != 0:
+            logger.warning(
+                "⚠️ [SwarmBroker] git ls-files failed in %s; left locked: %s",
+                swarm_dir,
+                listed.stderr.decode("utf-8", "replace").strip(),
+            )
+            return False
+        for entry in listed.stdout.split(b"\0"):
+            meta, _, path = entry.partition(b"\t")
+            if not meta.startswith(b"160000 "):
+                continue
+            if not _is_empty_real_dir_or_absent(os.path.join(swarm_dir, os.fsdecode(path))):
+                logger.warning(
+                    "⚠️ [SwarmBroker] Submodule path %s holds lease content that cannot be "
+                    "confirmed clean; "
+                    "left locked: %s",
+                    os.fsdecode(path),
+                    swarm_dir,
                 )
                 return False
         return True
