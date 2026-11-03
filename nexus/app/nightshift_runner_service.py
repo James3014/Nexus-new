@@ -221,15 +221,10 @@ class AutoResearchNightShift:
         return ordered
 
     def _workspace_revision(self, workpath: Path) -> str:
-        try:
-            return subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                cwd=str(workpath),
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
+        head = self._workpath_git(Path(workpath), "rev-parse", "HEAD")
+        if head is None or head.returncode != 0:
             return ""
+        return head.stdout.strip()
 
     def _ask_unified_candidate(
         self,
@@ -1433,16 +1428,19 @@ class AutoResearchNightShift:
         git there is not trusted or the commit did not land."""
         if self._workpath_git(workpath, "add", ".") is None:
             return False
-        self._workpath_git(
+        committed = self._workpath_git(
             workpath,
             "-c",
             "user.name=Nexus NightShift",
             "-c",
             "user.email=nightshift@nexus.invalid",
             "commit",
+            "--allow-empty",
             "-m",
             f"opt(nightshift): optimize {self.task} (score: {score:.2f})",
         )
+        if committed is None or committed.returncode != 0:
+            return False
         head = self._workpath_git(workpath, "rev-parse", "HEAD")
         if head is None or head.returncode != 0 or not head.stdout.strip():
             return False

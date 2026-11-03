@@ -286,3 +286,183 @@ def test_ollama_patch_apply_is_refused_when_git_pointer_is_rewritten(tmp_path, m
     assert not marker.exists()
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert (target / "f.txt").read_text() == "old\n"
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 (#3291): each site's test goes red when that site runs plain git again
+# ---------------------------------------------------------------------------
+
+
+def _worker_clone(src: Path, dest: Path) -> Path:
+    """A non-bare copy of ``src`` the worker made; its own config is the worker's to write."""
+    _git(src.parent, "clone", "-q", str(src), str(dest))
+    return dest
+
+
+def _run_shift(tmp_path: Path, monkeypatch, worker_round):
+    from nexus.app.nightshift_runner_service import RoundOutcome  # noqa: F401
+
+    monkeypatch.setenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "1")
+    root = _repo(tmp_path / "root")
+    (root / "target.py").write_text("value = 1\n")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "target")
+    shift = AutoResearchNightShift(
+        "target.py", project_root=root, max_rounds=1, convergence_patience=1
+    )
+    shift.keep_worktree = True
+    shift.tracelog_path = tmp_path / "tracelog.jsonl"
+    shift.lesson_writeback_path = tmp_path / "lesson.json"
+    shift.pending_manifest_path = root / ".nexus/nightshift/pending.json"
+    shift.worktree_mgr.workspace_base = tmp_path / "leases"
+    shift.worktree_mgr.workspace_base.mkdir()
+    shift.resolved_target_file = "target.py"
+    shift._resolve_target_file = lambda: "target.py"
+    shift._run_round = lambda round_id, workpath: worker_round(root, Path(workpath))
+    shift._run_tier2_validation = lambda _workpath: (True, "tier2_pass")
+    records: list = []
+    shift._log_trace = lambda *args, **kwargs: records.append(args[1])
+    queued: list = []
+    shift._append_to_pending_manifest = lambda *a, **k: queued.append(a)
+    shift.run()
+    return shift, records, queued
+
+
+def test_nightshift_run_reset_runs_no_file_monitor_program(tmp_path, monkeypatch):
+    from nexus.app.nightshift_runner_service import RoundOutcome
+
+    marker = tmp_path / "marker"
+    monitor = _program(tmp_path / "monitor.sh", marker)
+
+    def worker_round(root: Path, workpath: Path):
+        _git(root, "config", "core.fsmonitor", str(monitor))
+        (workpath / "target.py").write_text("scratch\n")
+        return RoundOutcome(0.0, "", "NO_CHANGE", "same file")
+
+    _, records, _ = _run_shift(tmp_path, monkeypatch, worker_round)
+
+    assert "NO_CHANGE" in records
+    assert not marker.exists()
+
+
+def test_nightshift_commit_ignores_git_pointer_to_worker_clone_with_hooks(tmp_path):
+    runner, root, workpath = _leased_runner(tmp_path)
+    marker = tmp_path / "marker"
+    clone = _worker_clone(root, tmp_path / "clone")
+    hooks = tmp_path / "clone-hooks"
+    hooks.mkdir()
+    _program(hooks / "pre-commit", marker)
+    _git(clone, "config", "core.hooksPath", str(hooks))
+    (workpath / ".git").write_text(f"gitdir: {clone / '.git'}\n")
+    (workpath / "f.txt").write_text("new\n")
+    base_before = runner.base_commit
+
+    committed = runner._commit_improvement(workpath, 1.0)
+
+    assert not marker.exists()
+    assert committed is False
+    assert runner.base_commit == base_before
+
+
+def test_nightshift_revision_ignores_git_pointer_to_decoy(tmp_path):
+    runner, root, workpath = _leased_runner(tmp_path)
+    real = _git(root, "rev-parse", "HEAD").stdout.strip()
+    assert runner._workspace_revision(workpath) == real
+    decoy = _repo(tmp_path / "decoy", "forged\n")
+    decoy_head = _git(decoy, "rev-parse", "HEAD").stdout.strip()
+    (workpath / ".git").write_text(f"gitdir: {decoy / '.git'}\n")
+
+    assert runner._workspace_revision(workpath) != decoy_head
+
+
+def test_nightshift_run_does_not_promote_when_git_pointer_rewritten_mid_round(
+    tmp_path, monkeypatch
+):
+    from nexus.app.nightshift_runner_service import RoundOutcome
+
+    decoy = _repo(tmp_path / "decoy", "forged\n")
+
+    def worker_round(root: Path, workpath: Path):
+        (workpath / ".git").write_text(f"gitdir: {decoy / '.git'}\n")
+        return RoundOutcome(9.0, "value = 2\n", "SCORED", "improved")
+
+    shift, records, queued = _run_shift(tmp_path, monkeypatch, worker_round)
+
+    assert "GIT_UNTRUSTED" in records
+    assert "IMPROVED" not in records
+    assert queued == []
+    assert not shift.pending_manifest_path.exists()
+
+
+def test_repair_candidate_diff_ignores_git_pointer_to_worker_clone_with_diff_program(tmp_path):
+    marker = tmp_path / "marker"
+    program = _program(tmp_path / "driver.sh", marker)
+
+    def plant(root: Path, wt: Path):
+        clone = _worker_clone(root, tmp_path / "clone")
+        _git(clone, "config", "diff.external", str(program))
+        (wt / ".git").write_text(f"gitdir: {clone / '.git'}\n")
+
+    payload = _candidate_diff(tmp_path, plant)
+
+    assert not marker.exists()
+    assert payload == ""
+
+
+def test_repair_candidate_diff_ignores_git_pointer_to_worker_clone_with_replaced_object(tmp_path):
+    def plant(root: Path, wt: Path):
+        clone = _worker_clone(root, tmp_path / "clone")
+        old = _git(clone, "rev-parse", "HEAD:f.txt").stdout.strip()
+        forged = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=clone,
+            input="forged\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        _git(clone, "replace", old, forged)
+        (wt / ".git").write_text(f"gitdir: {clone / '.git'}\n")
+
+    payload = _candidate_diff(tmp_path, plant)
+
+    assert "forged" not in payload
+    assert payload == ""
+
+
+def _filter_plant(tmp_path: Path, marker: Path):
+    program = _program(tmp_path / "filter.sh", marker)
+
+    def plant(target: Path):
+        _git(target, "config", "filter.x.clean", str(program))
+        _git(target, "config", "filter.x.smudge", str(program))
+        (target / ".gitattributes").write_text("*.txt filter=x\n")
+
+    return plant
+
+
+def test_ollama_patch_apply_refuses_when_target_config_names_a_program(tmp_path, monkeypatch):
+    marker = tmp_path / "marker"
+
+    target, receipt = _run_ollama(tmp_path, monkeypatch, _filter_plant(tmp_path, marker))
+
+    assert not marker.exists()
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert (target / "f.txt").read_text() == "old\n"
+
+
+def test_nightshift_commit_that_does_not_land_is_not_promoted(tmp_path):
+    runner, root, workpath = _leased_runner(tmp_path)
+    (workpath / "f.txt").write_text("new\n")
+    base_before = runner.base_commit
+    real = runner._workpath_git
+
+    def commit_fails(path, *args):
+        if "commit" in args:
+            return subprocess.CompletedProcess(args, 1, "", "commit failed")
+        return real(path, *args)
+
+    runner._workpath_git = commit_fails
+
+    assert runner._commit_improvement(workpath, 1.0) is False
+    assert runner.base_commit == base_before

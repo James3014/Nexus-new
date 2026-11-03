@@ -15,7 +15,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from nexus.core.hardened_git import repository_git_dir, run_hardened_git
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.executors.agy_write_admission import (
     AGY_IMPLEMENTATION_ROLES,
     AGY_PERMISSION_BYPASS_FLAGS,
@@ -2259,7 +2263,9 @@ class OllamaPatchWorkerAdapter:
         failure_reason = None
         if result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0 and patch:
             target = str(Path(lease.target_worktree).resolve())
-            if target_git_dir is None:
+            if target_git_dir is None or repository_config_can_start_a_program(
+                Path(target), git_dir=target_git_dir
+            ):
                 failure_reason = "target worktree git is not trusted"
             else:
                 # The patch goes through a file outside the worktree: the hardened runner
