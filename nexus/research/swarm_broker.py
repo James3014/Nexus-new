@@ -392,24 +392,38 @@ def _holder_mark() -> bytes:
     return _HOLDER_MARK_PREFIX + str(os.getpid()).encode("ascii") + b"\n"
 
 
+# Largest pid any supported host hands out (Linux pid_max ceiling; macOS stays far below).
+_MAX_PID = 2**22
+
+
 def _lock_holder_pid(lock_fd: int) -> Optional[int]:
     """The pid recorded in a held lock (`held pid=<n>`); None for a lock without one (an older
-    lock, or one already marked)."""
+    lock, one already marked) or one whose value is not a pid this host could have handed out.
+
+    The lock sits at the root of a directory the lease's own commands run in, so its content
+    is not trusted: pid 0 or 1 (never a lease), or a number past `_MAX_PID`, reads as no
+    holder, and the lock then ages out on the TTL like one without a mark."""
     head = os.pread(lock_fd, 64, 0)
     if not head.startswith(_HOLDER_MARK_PREFIX):
         return None
     digits = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
-    return int(digits) if digits.isdigit() else None
+    if not digits.isdigit() or len(digits) > 8:
+        return None
+    pid = int(digits)
+    return pid if 1 < pid <= _MAX_PID else None
 
 
 def _process_exists(pid: int) -> bool:
-    """Whether a process with `pid` exists on this host; nothing is delivered to it."""
+    """Whether a process with `pid` exists on this host; nothing is delivered to it. A pid
+    the OS cannot take is treated as absent rather than raised."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
+    except (OverflowError, ValueError):
+        return False
     return True
 
 

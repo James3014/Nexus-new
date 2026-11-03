@@ -2212,3 +2212,52 @@ def test_a_lock_without_a_holder_is_still_marked_by_age_alone(tmp_path: Path, mo
 
     assert SwarmBroker(controller).mark_stale_lease(swarm, 2 * 3600) is True
     assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        b"held pid=99999999999999999999\n",
+        b"held pid=0\n",
+        b"held pid=1\n",
+        b"held pid=-7\n",
+        b"held pid=12abc\n",
+    ],
+    ids=["overlong", "zero", "one", "negative", "mixed"],
+)
+def test_mark_stale_lease_treats_a_lock_value_that_is_not_a_pid_as_no_holder(
+    tmp_path: Path, monkeypatch, mark: bytes
+):
+    """The lock sits where the lease's commands run; a value that is not a pid this host
+    could hand out must not raise out of the cleanup nor count as a live holder."""
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    (swarm / ".swarm_lock").write_bytes(mark)
+    _age(swarm / ".swarm_lock")
+
+    assert SwarmBroker(controller).mark_stale_lease(swarm, 60) is True
+
+
+def test_mark_stale_lease_sweep_continues_past_a_lock_with_a_bad_holder_value(
+    tmp_path: Path, monkeypatch
+):
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller, first = _registered_swarm(tmp_path)
+    second = first.parent / ".nexus-swarm-002"
+    _git(controller, "worktree", "add", "-q", str(second), "HEAD")
+    (first / ".swarm_lock").write_bytes(b"held pid=99999999999999999999\n")
+    (second / ".swarm_lock").write_bytes(b"held pid=4194303\n")  # a pid nothing runs under
+    _age(first / ".swarm_lock")
+    _age(second / ".swarm_lock")
+    broker = SwarmBroker(controller)
+
+    marked = [broker.mark_stale_lease(path, 60) for path in (first, second)]
+
+    assert marked == [True, True]
+
+
+def test_process_exists_is_false_for_a_pid_the_os_cannot_take():
+    from nexus.research.swarm_broker import _process_exists
+
+    assert _process_exists(2**40) is False
+    assert _process_exists(os.getpid()) is True
