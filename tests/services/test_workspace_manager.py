@@ -453,3 +453,26 @@ def test_merge_steps_fail_closed_when_git_hangs(tmp_path, monkeypatch):
     assert mgr._execute_merge("feature") is False
     _hang_on(monkeypatch, "checkout")
     mgr._prepare_main_for_merge()  # bounded: returns instead of hanging
+
+
+def test_run_git_stays_pinned_to_the_probed_git_dir_when_the_pointer_is_rewritten(
+    tmp_path, monkeypatch
+):
+    """#3351: git runs on the git dir probed before the call, never on one a rewritten
+    .git pointer names afterwards."""
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    work = tmp_path / "work"
+    _git(controller, "worktree", "add", "-q", "--detach", str(work))
+    other = tmp_path / "other"
+    other_head = _init_repo(other)
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    mgr = WorkspaceManager(controller)
+    probed = mgr._hardened_git_dir(work)
+    assert probed is not None
+    monkeypatch.setattr(WorkspaceManager, "_hardened_git_dir", staticmethod(lambda cwd: probed))
+    (work / ".git").write_text(f"gitdir: {other / '.git'}\n", encoding="utf-8")
+
+    mgr._run_git(work, "commit", "--allow-empty", "-q", "-m", "should not land in other")
+
+    assert _git(other, "rev-parse", "HEAD") == other_head
