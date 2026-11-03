@@ -97,6 +97,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -1926,8 +1927,18 @@ class Prober:
         return self._http(f"http://127.0.0.1:{LIVE_PORT}/health")
 
     def public_connector_health(self) -> Any:
-        """The public connector's unauthenticated /healthz (#3241); raises when unreachable."""
-        return self._http(f"http://127.0.0.1:{PUBLIC_CONNECTOR_PORT}/healthz")
+        """The public connector's unauthenticated /healthz (#3241); raises when unreachable.
+
+        While the connector is drifted it answers 503 with the same JSON body, so a
+        non-2xx answer that carries JSON is returned like a 200; anything else raises.
+        """
+        try:
+            return self._http(f"http://127.0.0.1:{PUBLIC_CONNECTOR_PORT}/healthz")
+        except urllib.error.HTTPError as exc:
+            try:
+                return json.loads(exc.read(1024 * 1024).decode("utf-8"))
+            except ValueError:
+                raise exc from None
 
     def core_provenance(self, *, root: Path, python: Path, core: Any) -> Dict[str, Any]:
         """The candidate's transport must resolve Core as CORE_REVISION_PINNED at ``core``."""
@@ -4749,7 +4760,8 @@ class _Cycle:
         Informational only: a connector that is not loaded here is recorded and skipped;
         a failed restart, or a connector that does not report ``ok`` within
         ``PUBLIC_CONNECTOR_HEALTH_SECONDS``, adds one warning and never changes the
-        outcome or rolls back.  Never raises.
+        outcome or rolls back.  Never raises.  Called from ``finish_switch`` only, so a
+        crash-reconciled switch gets it too while the read-only R1 finalize does not.
         """
         summary: Dict[str, Any] = {"label": PUBLIC_CONNECTOR_LABEL, "restarted": False}
         warnings = receipt.setdefault("warnings", [])
@@ -4925,7 +4937,6 @@ class _Cycle:
                         return self.postpone(receipt, block)
                     receipt["deployer_link"] = self.move_tool_link(root)
                     receipt["outcome"] = "DEPLOYED"
-                    self.restart_public_connector(receipt)
                 elif is_candidate:
                     # The switch got as far as the plist write; make sure launchd
                     # runs it, keep it if it passes, otherwise roll back.

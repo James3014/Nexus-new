@@ -8301,3 +8301,43 @@ def test_public_connector_is_left_alone_when_the_candidate_is_rolled_back(
     assert result["receipt"]["rolled_back"] is True
     assert host.launchctl == []
     assert "public_connector" not in result["receipt"]
+
+
+def test_public_connector_health_reads_the_json_body_of_a_503(monkeypatch) -> None:
+    """A drifted connector answers 503 with the same JSON body as a healthy one."""
+    import io
+    import urllib.error
+
+    prober = ad.Prober(ad.Host())
+    body = json.dumps({"ok": False, "manifest_status": "drifted"}).encode("utf-8")
+
+    def http_503(url, **_kw):
+        raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(prober, "_http", http_503)
+    assert prober.public_connector_health() == {"ok": False, "manifest_status": "drifted"}
+
+    def http_503_html(url, **_kw):
+        raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, io.BytesIO(b"<html>"))
+
+    monkeypatch.setattr(prober, "_http", http_503_html)
+    with pytest.raises(urllib.error.HTTPError):
+        prober.public_connector_health()
+
+
+def test_reconciled_switch_restarts_the_public_connector_too(cfg: ad.Config) -> None:
+    """A switch that crashed after the plist write is finished next cycle through
+    finish_switch, so the connector restart runs there as well."""
+    host = FakeHost()
+    host.on_reload = lambda _count: (_ for _ in ()).throw(Crash())
+    with pytest.raises(Crash):
+        cycle(cfg, host, FakeProber())
+    assert cfg.journal.exists()
+
+    host2, prober2 = ConnectorHost(), ConnectorProber()
+    result = cycle(cfg, host2, prober2)
+    assert result["status"] == "RECONCILED_DEPLOYED"
+    receipt = ad.last_receipt(cfg.state_dir)
+    assert receipt["reconciled"] is True
+    assert receipt["public_connector"]["restarted"] is True
+    assert host2.launchctl[-1] == ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN]
