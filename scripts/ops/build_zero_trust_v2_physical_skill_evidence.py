@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import Counter
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nexus.learning.skill_fit_closure import read_json, write_json
 from nexus.learning.zero_trust_v2_physical_runner import run_zero_trust_v2_physical_rows
+from nexus.learning.zero_trust_v2_signing_secret import SigningSecretError, resolve_signing_secret  # noqa: E402
 
 
 DEFAULT_REPLAY_MATRIX = Path("docs/reports/NEXUS_ZERO_TRUST_V2_REPLAY_MATRIX_2026-05-21.json")
@@ -111,13 +111,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--command-specs", default=str(DEFAULT_COMMAND_SPECS))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--allow-promotion-credit", action="store_true")
+    parser.add_argument("--secret-file", default=None, help="0600 file holding the signing secret")
+    parser.add_argument("--allow-nonproduction-secret", action="store_true", help="allow the built-in default secret; output is marked non-production")
     args = parser.parse_args(argv)
+    try:
+        secret = resolve_signing_secret(
+            secret_file=args.secret_file,
+            allow_nonproduction=args.allow_nonproduction_secret,
+            nonproduction_default="local-nonproduction-v2-skill-evidence",
+        )
+    except SigningSecretError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     result = build_zero_trust_v2_physical_skill_evidence(
         replay_matrix=read_json(args.replay_matrix),
         command_specs=read_json(args.command_specs),
-        signing_secret=os.environ.get("NEXUS_V2_RUNNER_SIGNING_SECRET", "local-nonproduction-v2-skill-evidence"),
+        signing_secret=secret.value,
         allow_promotion_credit=args.allow_promotion_credit,
     )
+    result["signing_secret_source"] = secret.source
+    result["nonproduction_secret"] = secret.nonproduction
     write_json(args.output, result)
     print(json.dumps({"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True))
     return 0

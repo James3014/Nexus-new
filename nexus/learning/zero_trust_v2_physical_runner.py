@@ -125,5 +125,7 @@ def run_zero_trust_v2_physical_rows(
     for row in executed:
         if row.get("arm_type") in {"candidate_skill_v2", "shadow_candidate_v2"}:
             row["negative_control_blocked_count"] = negative_blocks.get(_arm_key(row), 0)
-            row["promotion_evaluation"] = evaluate_zero_trust_v2_promotion_candidate(row, min_v2_evidence_count=1)
+            row["promotion_evaluation"] = evaluate_zero_trust_v2_promotion_candidate(
+                row, min_v2_evidence_count=1, signing_secret=signing_secret
+            )
     return executed

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from datetime import UTC, datetime
@@ -17,6 +18,12 @@ from nexus.learning.skill_fit_closure import read_json, write_json
 from nexus.learning.zero_trust_v2_promotion import (
     READY_FOR_MANUAL_APPLY,
     evaluate_zero_trust_v2_promotion_candidate,
+)
+from nexus.learning.zero_trust_v2_signing_secret import (  # noqa: E402
+    SECRET_ENV,
+    SECRET_FILE_ENV,
+    SigningSecretError,
+    resolve_signing_secret,
 )
 
 
@@ -33,11 +40,13 @@ def _candidate_rows(replay_matrix: Mapping[str, Any]) -> list[Mapping[str, Any]]
 
 
 def build_zero_trust_v2_promotion_report(
-    *, replay_matrix: Mapping[str, Any], min_v2_evidence_count: int = 3
+    *, replay_matrix: Mapping[str, Any], min_v2_evidence_count: int = 3, signing_secret: str | None = None
 ) -> dict[str, Any]:
     candidates = []
     for row in _candidate_rows(replay_matrix):
-        verdict = evaluate_zero_trust_v2_promotion_candidate(row, min_v2_evidence_count=min_v2_evidence_count)
+        verdict = evaluate_zero_trust_v2_promotion_candidate(
+            row, min_v2_evidence_count=min_v2_evidence_count, signing_secret=signing_secret
+        )
         candidates.append(
             {
                 "capability_id": verdict["capability_id"],
@@ -83,10 +92,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replay-matrix", default=str(DEFAULT_REPLAY_MATRIX))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--min-v2-evidence-count", type=int, default=3)
+    parser.add_argument("--secret-file", default=None, help="0600 file with the runner signing secret, to re-verify attestations")
     args = parser.parse_args(argv)
+    signing_secret = None
+    if args.secret_file or os.environ.get(SECRET_FILE_ENV) or os.environ.get(SECRET_ENV):
+        try:
+            signing_secret = resolve_signing_secret(secret_file=args.secret_file, nonproduction_default="").value
+        except SigningSecretError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     result = build_zero_trust_v2_promotion_report(
         replay_matrix=read_json(args.replay_matrix),
         min_v2_evidence_count=args.min_v2_evidence_count,
+        signing_secret=signing_secret,
     )
     write_json(args.output, result)
     print(json.dumps({"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True))

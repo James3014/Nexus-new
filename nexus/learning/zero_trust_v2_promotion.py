@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from nexus.learning.zero_trust_v2_sandbox import validate_sandbox_attestation
+from nexus.learning.zero_trust_v2_signing_secret import NONPRODUCTION_DEFAULT_SECRETS
 
 READY_FOR_MANUAL_APPLY = "READY_FOR_MANUAL_APPLY"
 BLOCKED = "BLOCKED"
@@ -17,7 +19,11 @@ def _get_path(row: Mapping[str, Any], *path: str) -> Any:
     return value
 
 
-def evaluate_zero_trust_v2_promotion_candidate(row: Mapping[str, Any], *, min_v2_evidence_count: int = 3) -> dict[str, Any]:
+def evaluate_zero_trust_v2_promotion_candidate(
+    row: Mapping[str, Any], *, min_v2_evidence_count: int = 3, signing_secret: str | None = None
+) -> dict[str, Any]:
+    """``signing_secret`` re-verifies the sandbox attestation signature here, where it is
+    consumed for credit (#3249); without it, or with a source-default secret, nothing earns credit."""
     capability_id = str(row.get("capability_id") or "")
     skill_id = str(row.get("skill_id") or "")
     reasons: list[str] = []
@@ -53,6 +59,17 @@ def evaluate_zero_trust_v2_promotion_candidate(row: Mapping[str, Any], *, min_v2
         reasons.append("missing_receipt_signature")
     if _get_path(row, "sandbox_attestation", "status") != "PASS":
         reasons.append("sandbox_attestation_not_pass")
+    if not signing_secret:
+        reasons.append("sandbox_signature_not_verified")
+    elif signing_secret in NONPRODUCTION_DEFAULT_SECRETS or row.get("nonproduction_secret") is True:
+        reasons.append("nonproduction_signing_secret")
+    else:
+        attestation = row.get("sandbox_attestation")
+        verdict = validate_sandbox_attestation(
+            attestation if isinstance(attestation, Mapping) else {}, signing_secret=signing_secret
+        )
+        if verdict["status"] != "PASS" or verdict["sandbox_mode"] == "mocked_non_promotion":
+            reasons.append("sandbox_signature_invalid")
     if _get_path(row, "baseline_sandwich", "baseline_delta_status") != "CLEAN":
         reasons.append("baseline_not_clean")
     if _get_path(row, "cleanup_attestation", "teardown_status") != "PASS":
