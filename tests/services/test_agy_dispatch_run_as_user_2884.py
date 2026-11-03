@@ -1341,6 +1341,40 @@ def test_dispatch_run_as_user_runs_agy_in_the_worker_copy(worker_env, monkeypatc
     assert coordinator.claim.released is True
 
 
+def test_dispatch_run_as_user_runner_does_not_get_the_recorded_source_root(
+    worker_env, monkeypatch, capsys
+):
+    """#3328: the runner works in the per-run copy, so the recorded root is not passed."""
+    _patch_prepare(monkeypatch, worker_env, _Run("AGY_WORKER_SWEEP clean\n"))
+    monkeypatch.setattr(cli_worker, "sweep_run", lambda *a, **k: True)
+    target = worker_env["target"]
+    coordinator = _Coordinator(worker_env["home"])
+    seen: dict = {}
+
+    def runner(
+        *, env, prompt, cwd, mode, model, effort, timeout, write_boundary, source_repo_root=None
+    ):
+        seen["root"] = source_repo_root
+        write_boundary.before_launch()
+        write_boundary._launched = True
+        write_boundary._tracker = _Tracker(())
+        (write_boundary.run_root / worker_mod.WRAPPER_STARTED_MARKER).write_text("")
+        return 0, "ok", "", False, 1
+
+    dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(target),
+        mode="accept-edits",
+        write_paths=[str(target / "src" / "a.py")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        run_as_user="_cairnwork_worker",
+        source_repo_root=str(target),
+    )
+    capsys.readouterr()
+    assert seen["root"] is None
+
+
 @pytest.mark.parametrize("gc_raises", [False, True], ids=["gc-ok", "gc-exception"])
 def test_dispatch_gc_runs_before_prepare_and_never_fails_dispatch(
     worker_env, monkeypatch, capsys, gc_raises

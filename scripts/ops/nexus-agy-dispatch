@@ -5600,7 +5600,12 @@ def dispatch_run(
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary
-                if source_repo_root is not None and _runner_accepts(runner, "source_repo_root"):
+                # Run-as-user: the runner works in a per-run copy, not the recorded root.
+                if (
+                    source_repo_root is not None
+                    and agent_cwd == cwd
+                    and _runner_accepts(runner, "source_repo_root")
+                ):
                     runner_kwargs["source_repo_root"] = source_repo_root
                 lease_lock_obj = getattr(claim, "lock_file_obj", None)
                 if lease_lock_obj is not None and _runner_accepts(runner, "lease_fd"):

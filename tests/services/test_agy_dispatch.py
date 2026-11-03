@@ -7089,3 +7089,108 @@ def test_attempt_write_scope_uses_recorded_repo_root_when_repo_appears_in_cwd(
     assert code == 1
     failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
     assert failures[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+
+
+def _init_repo_with_sub(root: Path) -> Path:
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "outside.txt").write_text("before\n", encoding="utf-8")
+    (sub / "x").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=root, check=True)
+    return sub
+
+
+def test_background_supervisor_passes_recorded_repo_root_to_dispatch_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#3328: the supervisor hands the root recorded at start to dispatch_run."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+    ops = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(ops)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(sub),
+        provider="agy",
+        model="gemini-test",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    recorded = journal.read(operation_id)["repo_root"]
+    assert recorded
+    dispatch._write_private_prompt(journal.prompt_path(operation_id), "task")
+    seen: dict[str, object] = {}
+
+    def fake_dispatch_run(**kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+
+    dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(journal.prompt_path(operation_id)),
+        cwd=str(sub),
+        mode="accept-edits",
+        model="gemini-test",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=ops,
+        heartbeat_interval=0.01,
+    )
+
+    assert seen["source_repo_root"] == recorded
+
+
+def test_run_agy_effect_watch_uses_recorded_repo_root_when_repo_appears_in_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#3328: run_agy's own effect watch must keep the recorded root when a repository
+    with a refused config appears inside cwd while the worker runs."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport subprocess, sys, time\n"
+        + f"open({str(repo / 'outside.txt')!r}, 'w').write('changed\\n')\n"
+        + f"subprocess.run(['git', 'init', '-q'], cwd={str(sub)!r}, check=True)\n"
+        + f"open({str(sub / '.git' / 'config')!r}, 'a').write('[filter \"x\"]\\n\\tclean = cat\\n')\n"
+        + "time.sleep(0.3)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    events: list[dict[str, object]] = []
+
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        write_boundary=_PassThroughBoundary(os.environ.copy()),
+        prompt="edit",
+        cwd=str(sub),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        source_repo_root=str(repo),
+    )
+
+    assert code == 0
+    assert any(event.get("first_effect_at") for event in events)
