@@ -8398,3 +8398,67 @@ def test_reconciled_switch_restarts_the_public_connector_too(cfg: ad.Config) -> 
     assert receipt["reconciled"] is True
     assert receipt["public_connector"]["restarted"] is True
     assert host2.launchctl[-1] == ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN]
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+def test_terminate_signal_during_spawn_still_stops_child_group(
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3304: a SIGTERM inside Popen's constructor stops the new group afterwards."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ad.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    class SlowPopen:
+        pid = 424242
+        returncode = 0
+        stdout = None
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            # The child exists; the constructor has not returned yet.
+            signal.raise_signal(signal.SIGTERM)
+            signal.raise_signal(signal.SIGHUP)  # second signal: absorbed
+
+        def wait(self, timeout: Any = None) -> int:
+            return 0
+
+        def communicate(self, timeout: Any = None) -> tuple[str, None]:
+            return "", None
+
+    monkeypatch.setattr(ad.subprocess, "Popen", SlowPopen)
+    before = {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS}
+    host = ad.Host()
+    with pytest.raises(ad.DeployerTerminated) as caught:
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    assert caught.value.signum == signal.SIGTERM
+    assert killed and all(pid == 424242 for pid, _ in killed)
+    assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+def test_terminate_signal_then_spawn_oserror_still_terminates(
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3304: a held SIGTERM wins over an OSError raised by Popen itself."""
+
+    class FailingPopen:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            signal.raise_signal(signal.SIGTERM)
+            raise OSError("spawn failed")
+
+    monkeypatch.setattr(ad.subprocess, "Popen", FailingPopen)
+    before = {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS}
+    host = ad.Host()
+    with pytest.raises(ad.DeployerTerminated) as caught:
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    assert caught.value.signum == signal.SIGTERM
+    assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}

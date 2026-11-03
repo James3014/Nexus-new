@@ -792,9 +792,12 @@ def test_a_separate_git_dir_is_its_own_common_dir(env):
     _git(env, "--git-dir", str(elsewhere), "config", "hook.planted.command", "true")
     (git_dir / "commondir").write_text(f"{elsewhere}\n", encoding="utf-8")
 
-    assert not hardened_git.repository_config_can_start_a_program(
-        work, git_dir=git_dir, separate_git_dir=True
+    # Naming another repository makes the git dir not self-contained: refused, never read.
+    refused = hardened_git.run_hardened_git(
+        work, "config", "--list", git_dir=git_dir, separate_git_dir=True
     )
+    assert refused.returncode == 128
+    assert "hook.planted" not in refused.stdout
 
 
 @pytest.mark.parametrize("key", ["core.hooksPath", "CORE.HOOKSPATH"])
@@ -892,3 +895,141 @@ def test_both_git_argv_builders_allow_the_same_caller_keys():
     from nexus.orchestrator import measure_external_target as external
 
     assert hardened_git._CALLER_CONFIG_KEYS == external._CALLER_CONFIG_KEYS
+
+
+def test_a_hard_linked_metadata_file_makes_a_git_dir_not_self_contained(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-config"
+    outside.write_text("[core]\n\tbare = false\n", encoding="utf-8")
+    (git_dir / "config").unlink()
+    (git_dir / "config").hardlink_to(outside)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def test_a_local_clone_with_hard_linked_objects_is_still_self_contained(env):
+    work, _ = _separate_git_dir_repo(env)
+    clone = env / "clone"
+    _git(env, "clone", "-q", "--local", str(work), str(clone))
+    _git(env, "clone", "-q", "--local", "--bare", str(work), str(env / "bare.git"))
+
+    assert hardened_git.git_dir_is_self_contained(clone / ".git") is True
+    assert hardened_git.git_dir_is_self_contained(env / "bare.git") is True
+
+
+def test_a_separate_git_dir_that_is_not_self_contained_is_refused(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-head"
+    outside.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_dir / "HEAD").unlink()
+    (git_dir / "HEAD").hardlink_to(outside)
+
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert "not a worktree" in refused.stderr
+
+
+def test_a_normal_separate_git_dir_still_runs(env):
+    work, git_dir = _separate_git_dir_repo(env)
+
+    ok = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert ok.returncode == 0
+
+
+def test_a_hard_linked_reflog_is_refused_before_git_appends_to_it(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-reflog"
+    outside.write_text("outside\n", encoding="utf-8")
+    _git(work, "config", "--file", str(git_dir / "config"), "user.name", "t")
+    _git(work, "config", "--file", str(git_dir / "config"), "user.email", "t@example.invalid")
+    (git_dir / "logs" / "HEAD").unlink()
+    (git_dir / "logs" / "HEAD").hardlink_to(outside)
+    (work / "notes.py").write_text("x = 2\n", encoding="utf-8")
+
+    refused = hardened_git.run_hardened_git(
+        work, "commit", "-aqm", "again", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+@pytest.mark.parametrize("name", ["packs", "commit-graph"])
+def test_a_hard_linked_non_content_addressed_object_file_is_refused(env, name):
+    _, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-object-file"
+    outside.write_text("outside\n", encoding="utf-8")
+    (git_dir / "objects" / "info").mkdir(exist_ok=True)
+    (git_dir / "objects" / "info" / name).hardlink_to(outside)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def test_hard_linked_loose_objects_and_packs_stay_exempt(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    loose = env / "loose-clone"
+    _git(env, "clone", "-q", "--local", str(work), str(loose))
+    assert any(p.stat().st_nlink > 1 for p in (loose / ".git" / "objects").glob("??/*"))
+    _git(work, "gc", "-q")
+    packed = env / "packed-clone"
+    _git(env, "clone", "-q", "--local", str(work), str(packed))
+    packs = list((packed / ".git" / "objects" / "pack").glob("*.pack"))
+    assert packs and all(p.stat().st_nlink > 1 for p in packs)
+    # Auxiliary hard-linked files (.rev, objects/info/*) are not exempt; drop them.
+    for aux in (packed / ".git" / "objects").rglob("*"):
+        if aux.is_file() and aux.stat().st_nlink > 1 and aux.suffix not in {".pack", ".idx"}:
+            aux.unlink()
+
+    assert hardened_git.git_dir_is_self_contained(loose / ".git") is True
+    assert hardened_git.git_dir_is_self_contained(packed / ".git") is True
+
+
+def test_a_file_that_vanishes_during_the_walk_is_refused_not_raised(env, monkeypatch):
+    work, git_dir = _separate_git_dir_repo(env)
+    real = hardened_git.os.lstat
+
+    def vanishing(path, *args, **kwargs):
+        if str(path).endswith("config"):
+            raise FileNotFoundError(path)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git.os, "lstat", vanishing)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+    assert refused.returncode == 128
+
+
+def test_a_directory_the_walk_cannot_list_is_refused(env, monkeypatch):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-unlisted"
+    outside.write_text("outside\n", encoding="utf-8")
+    (git_dir / "logs" / "HEAD").unlink()
+    (git_dir / "logs" / "HEAD").hardlink_to(outside)
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    # A directory that cannot be listed (for example mode 0300: write and search, no read)
+    # hides the hard link from the walk, while git can still open the file by name.
+    # Simulated so the test holds for any user, root included.
+    real = hardened_git.os.scandir
+    logs = str(git_dir / "logs")
+
+    def unlistable(path=".", *args, **kwargs):
+        if hardened_git.os.fspath(path) == logs:
+            raise PermissionError(13, "Permission denied", logs)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git.os, "scandir", unlistable)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+    assert refused.returncode == 128
