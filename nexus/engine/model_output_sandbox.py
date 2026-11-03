@@ -459,10 +459,12 @@ def _remove_private_dir(private: str) -> None:
     entry by entry, top down, by directory descriptor and without following any link, and
     removal is tried again. A dir that still cannot be removed raises."""
 
+    # Before 3.14 ``rmtree`` recurses once per directory level, so a very deep tree raises
+    # RecursionError here even when nothing is locked; the walk below flattens it.
     try:
         shutil.rmtree(private)
         return
-    except OSError:
+    except (OSError, RecursionError):
         pass
     parent = os.open(os.path.dirname(private), _DIR_NOFOLLOW)
     try:
@@ -476,7 +478,7 @@ def _remove_private_dir(private: str) -> None:
         os.close(root)
     try:
         shutil.rmtree(private)
-    except OSError as exc:
+    except (OSError, RecursionError) as exc:
         # Do not leave it quietly under its own name: set it aside and say so (#3238). Only
         # the name goes into the error: it ends up in receipts.
         aside = f"{private}.stale-{os.getpid()}"
