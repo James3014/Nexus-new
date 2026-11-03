@@ -1001,3 +1001,23 @@ def test_repository_created_in_cwd_during_operation_does_not_take_attribution(
 
     assert record["source_attribution_state"] == "ATTRIBUTED"
     assert "tracked.txt" in record["observed_changed_paths"]
+
+
+def test_enclosing_repository_refuses_a_config_that_cannot_be_decoded(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    with (root / ".git" / "config").open("ab") as fh:
+        fh.write(b'\n[remote "\xff\xfe"]\n\turl = https://example.invalid/x\n')
+
+    assert direct_journal._enclosing_repository(str(root)) is None
+    assert direct_journal._git_identity(str(root)) == (None, None)
+    assert direct_journal.capture_source_baseline(str(root)) is None
+
+
+def test_empty_dotgit_between_cwd_and_repository_is_not_a_clearance(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    work = root / "work"
+    (work / ".git").mkdir(parents=True)
+
+    assert direct_journal._checked_git_dir(work) is None
+    assert direct_journal._enclosing_repository(str(work)) is None
+    assert direct_journal._git_identity(str(work)) == (None, None)
