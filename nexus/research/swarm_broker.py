@@ -51,6 +51,27 @@ _RECOVERY_BACKOFF_SEC = 10 * 60
 _RECOVERY_FAILED_AT: dict[tuple[str, int, int], float] = {}
 
 
+_ARGV_BATCH_BYTES = 64 * 1024
+
+
+def _argv_batches(paths: list[str], budget: int = _ARGV_BATCH_BYTES) -> list[list[str]]:
+    """Split `paths` into argv batches whose encoded size stays under `budget` bytes, so a
+    long index never hits the kernel's argument-list limit (#3231)."""
+    batches: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for path in paths:
+        cost = len(os.fsencode(path)) + 1
+        if current and size + cost > budget:
+            batches.append(current)
+            current, size = [], 0
+        current.append(path)
+        size += cost
+    if current:
+        batches.append(current)
+    return batches
+
+
 def _remove_stale_lock_at(
     git_dir_fd: int, parents: list[str], name: str, stale_after: float
 ) -> bool:
@@ -976,6 +997,46 @@ class SwarmBroker:
         logger.debug(f"🐝 [SwarmBroker] Released and reset swarm sandbox: {swarm_dir.name}")
         return True
 
+    def _clear_index_flags(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
+        """Drop skip-worktree and assume-unchanged from every entry of the swarm's index, so
+        the reset sees each tracked file as it is; False leaves the swarm locked (#3231)."""
+        if not _names_dir(swarm_dir, pinned):
+            raise _SwarmDirSwapped(swarm_dir)
+        # Bytes in and out: a path the lease put in the index need not be UTF-8, and a
+        # decode error here would leave the swarm locked for good.
+        listed = run_hardened_git(swarm_dir, "ls-files", "-v", "-z", git_dir=git_dir, text=False)
+        if listed.returncode != 0:
+            logger.warning(
+                "⚠️ [SwarmBroker] git ls-files failed in %s; left locked: %s",
+                swarm_dir,
+                listed.stderr.decode("utf-8", "replace").strip(),
+            )
+            return False
+        # `-v` tags each entry: ``S`` skip-worktree, a lowercase tag assume-unchanged (``s``
+        # both). git applies one of the two clears per call, so each gets its own. Paths go
+        # back as argv through os.fsdecode, which round-trips any bytes, in batches that
+        # stay under the argument-list limit.
+        entries = [entry for entry in listed.stdout.split(b"\0") if entry]
+        for option, flagged in (
+            ("--no-skip-worktree", [os.fsdecode(e[2:]) for e in entries if e[:1] in (b"S", b"s")]),
+            ("--no-assume-unchanged", [os.fsdecode(e[2:]) for e in entries if e[:1].islower()]),
+        ):
+            for batch in _argv_batches(flagged):
+                if not _names_dir(swarm_dir, pinned):
+                    raise _SwarmDirSwapped(swarm_dir)
+                cleared = run_hardened_git(
+                    swarm_dir, "update-index", option, "--", *batch, git_dir=git_dir
+                )
+                if cleared.returncode != 0:
+                    logger.warning(
+                        "⚠️ [SwarmBroker] git update-index %s failed in %s; left locked: %s",
+                        option,
+                        swarm_dir,
+                        cleared.stderr.strip(),
+                    )
+                    return False
+        return True
+
     def _reset_worktree(self, swarm_dir: Path, pinned: int) -> bool:
         """Put the swarm back at the commit its lease started from (`_LEASE_BASE_REF`, else
         its HEAD) and remove every untracked file, ignored ones included, through the hardened
@@ -1011,9 +1072,13 @@ class SwarmBroker:
             logger.warning(
                 "⚠️ [SwarmBroker] No lease base recorded; resetting to HEAD: %s", swarm_dir
             )
+        # Index flags that hide a changed tracked file from status and from the forced
+        # checkout are cleared first; the clean takes nested repositories too (#3231).
+        if not self._clear_index_flags(swarm_dir, git_dir, pinned):
+            return False
         for args in (
             ("checkout", "--force", "--detach", target),
-            ("clean", "-f", "-d", "-x", "-e", f"/{_LOCK_NAME}"),
+            ("clean", "-f", "-f", "-d", "-x", "-e", f"/{_LOCK_NAME}"),
         ):
             if not _names_dir(swarm_dir, pinned):
                 raise _SwarmDirSwapped(swarm_dir)
