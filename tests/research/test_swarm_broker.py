@@ -2398,9 +2398,8 @@ def test_release_stays_locked_while_a_submodule_is_initialised(tmp_path: Path, m
 
     broker.release(swarm)
 
-    # #3279: the submodule working tree is removed instead of leaving the swarm locked.
-    assert not (swarm / ".swarm_lock").exists()
-    assert (swarm / "vendor").is_dir() and not any((swarm / "vendor").iterdir())
+    assert (swarm / ".swarm_lock").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
     assert (sandbox / "SENTINEL").exists()
 
 
@@ -2414,9 +2413,8 @@ def test_release_stays_locked_when_files_were_written_in_an_uninitialised_submod
 
     broker.release(swarm)
 
-    # #3279: the submodule working tree is removed instead of leaving the swarm locked.
-    assert not (swarm / ".swarm_lock").exists()
-    assert (swarm / "vendor").is_dir() and not any((swarm / "vendor").iterdir())
+    assert (swarm / ".swarm_lock").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
     assert (sandbox / "SENTINEL").exists()
 
 
@@ -2493,61 +2491,3 @@ def test_release_does_not_remove_modules_of_a_git_dir_the_lease_pointed_the_swar
 
     assert victim.exists()
     assert (swarm / ".swarm_lock").exists()
-
-
-def test_release_recovers_an_initialised_submodule_and_the_swarm_can_be_leased_again(
-    tmp_path: Path, monkeypatch
-):
-    _sentinel_cwd(tmp_path, monkeypatch)
-    controller, swarm = _swarm_with_submodule(tmp_path)
-    _git(swarm, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
-    git_dir = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
-    assert (git_dir / "modules" / "vendor").exists()
-    (swarm / "vendor" / "lease_note.txt").write_text("lease output\n", encoding="utf-8")
-    broker = SwarmBroker(controller)
-
-    broker.release(swarm)
-
-    assert not (swarm / ".swarm_lock").exists()
-    assert broker.locked_swarms() == []
-    assert (swarm / "vendor").is_dir() and not any((swarm / "vendor").iterdir())
-    assert not (git_dir / "modules" / "vendor").exists()
-    assert _git(swarm, "status", "--porcelain") == ""
-
-
-def test_release_does_not_follow_a_link_inside_the_submodule_working_tree(
-    tmp_path: Path, monkeypatch
-):
-    _sentinel_cwd(tmp_path, monkeypatch)
-    controller, swarm = _swarm_with_submodule(tmp_path)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
-    (swarm / "vendor" / "escape").symlink_to(outside)
-
-    SwarmBroker(controller).release(swarm)
-
-    assert not (swarm / ".swarm_lock").exists()
-    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep\n"
-    assert not os.path.lexists(swarm / "vendor" / "escape")
-
-
-def test_release_stays_locked_when_the_submodule_working_tree_cannot_be_removed(
-    tmp_path: Path, monkeypatch
-):
-    import nexus.research.swarm_broker as broker_module
-
-    _sentinel_cwd(tmp_path, monkeypatch)
-    controller, swarm = _swarm_with_submodule(tmp_path)
-    (swarm / "vendor" / "lease_note.txt").write_text("lease output\n", encoding="utf-8")
-
-    def refuse(_path):
-        raise broker_module.UntrustedTreeNotRemoved("tree_not_removed:vendor")
-
-    monkeypatch.setattr(broker_module, "remove_untrusted_tree", refuse)
-    broker = SwarmBroker(controller)
-
-    broker.release(swarm)
-
-    assert (swarm / ".swarm_lock").exists()
-    assert broker.locked_swarms() == [(swarm, "release_failed")]

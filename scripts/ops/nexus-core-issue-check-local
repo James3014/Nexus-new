@@ -197,7 +197,6 @@ _TERMINATING_SIGNALS = tuple(
 # cleanup is done, so a signal never cuts the cleanup short (#3189, #3203).
 _held_depth = 0
 _held_signal: int | None = None
-_held_interrupt = False
 
 
 def _on_terminating_signal(signum: int, frame: Any) -> None:
@@ -209,38 +208,19 @@ def _on_terminating_signal(signum: int, frame: Any) -> None:
     raise SystemExit(128 + signum)
 
 
-def _on_interrupt(signum: int, frame: Any) -> None:
-    global _held_interrupt
-    _held_interrupt = True
-
-
 @contextlib.contextmanager
 def _signals_held() -> Iterator[None]:
-    """Hold the terminating signals (and SIGINT, #3296) for the block; once it ends, a held
-    one exits with 128 + its number (SIGINT: KeyboardInterrupt). Only for cleanup that ends
-    on its own: no signal can stop it."""
-    global _held_depth, _held_signal, _held_interrupt
-    interrupt_previous = None
-    if (
-        _held_depth == 0
-        and threading.current_thread() is threading.main_thread()
-        and signal.getsignal(signal.SIGINT) is signal.default_int_handler
-    ):
-        interrupt_previous = signal.signal(signal.SIGINT, _on_interrupt)
+    """Hold the terminating signals for the block; once it ends, a held one exits with
+    128 + its number. Only for cleanup that ends on its own: no signal can stop it."""
+    global _held_depth, _held_signal
     _held_depth += 1
     try:
         yield
     finally:
         _held_depth -= 1
-        if interrupt_previous is not None:
-            signal.signal(signal.SIGINT, interrupt_previous)
-        if _held_depth == 0:
-            interrupted, _held_interrupt = _held_interrupt, False
-            if _held_signal is not None:
-                signum, _held_signal = _held_signal, None
-                raise SystemExit(128 + signum)
-            if interrupted:
-                raise KeyboardInterrupt
+        if _held_depth == 0 and _held_signal is not None:
+            signum, _held_signal = _held_signal, None
+            raise SystemExit(128 + signum)
 
 
 def _raise_on_signals() -> dict[int, Any]:
@@ -561,15 +541,12 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     output_dir = output_dir or (cache_root / "runs" / f"issue-{args.issue}-{head[:12]}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # The directory and the worktree are made inside the protected block (#3296): an
-    # interrupt at any point leaves nothing the cleanup below does not remove.
-    tmp_parent: Path | None = None
-    worktree: Path | None = None
+    tmp_parent = Path(tempfile.mkdtemp(prefix="nexus-core-local-"))
+    worktree = tmp_parent / "wt"
+    added = False
     try:
-        with _signals_held():
-            tmp_parent = Path(tempfile.mkdtemp(prefix="nexus-core-local-"))
-        worktree = tmp_parent / "wt"
         _git(repo, "worktree", "add", "--detach", str(worktree), head, code="WORKTREE_FAILED")
+        added = True
         refuse_candidate_receipts(repo, head, worktree)
         # The worktree shares refs with the source repo, so the base ref still names
         # base_sha here (no second fetch that could move it).
@@ -669,15 +646,11 @@ def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         # temporary worktree is never left registered (#3189, #3203). The directory goes
         # before the prune: a ``worktree remove`` that did not finish (its git killed by
         # a hangup sent to the whole terminal group) is then still pruned.
-        # An interrupted ``worktree add`` leaves a half-made, locked registration, so this
-        # always runs for the path this run chose: removal, then unlock and prune (#3296).
         with _signals_held():
-            if worktree is not None:
-                _git_cleanup(repo, "worktree", "remove", "--force", "--force", str(worktree))
-            if tmp_parent is not None:
-                shutil.rmtree(tmp_parent, ignore_errors=True)
-            if worktree is not None:
-                _git_cleanup(repo, "worktree", "unlock", str(worktree))
+            if added:
+                _git_cleanup(repo, "worktree", "remove", "--force", str(worktree))
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+            if added:
                 _git_cleanup(repo, "worktree", "prune")
 
 

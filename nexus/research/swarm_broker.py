@@ -1296,34 +1296,9 @@ class SwarmBroker:
             return False
         return True
 
-    def _empty_submodule_path(self, swarm_dir: Path, rel: str, pinned: int) -> bool:
-        """Leave the gitlink path `rel` of the reset tree as an empty directory (#3279): what
-        the lease put there is removed by descriptor without following links, and no git runs
-        inside it. The path comes from the superproject's index, never from `.gitmodules`; a
-        parent that is not a real directory is refused. False leaves the swarm locked."""
-        path = os.path.join(swarm_dir, rel)
-        if _is_empty_real_dir_or_absent(path):
-            return True
-        if not _names_dir(swarm_dir, pinned):
-            raise _SwarmDirSwapped(swarm_dir)
-        parent = os.fspath(swarm_dir)
-        for part in Path(rel).parts[:-1]:
-            parent = os.path.join(parent, part)
-            try:
-                if not stat.S_ISDIR(os.lstat(parent).st_mode):
-                    return False
-            except OSError:
-                return False
-        try:
-            remove_untrusted_tree(path)
-            os.mkdir(path)
-        except (UntrustedTreeNotRemoved, OSError, RecursionError):
-            return False
-        return _is_empty_real_dir_or_absent(path)
-
     def _submodules_are_uninitialised(self, swarm_dir: Path, git_dir: Path, pinned: int) -> bool:
-        """False, leaving the swarm locked, when a submodule of the reset tree cannot be
-        emptied (#3256, #3279: its working tree is removed rather than refused). The reset acts on the superproject only, and git run inside a submodule reads
+        """False, leaving the swarm locked, when a submodule of the reset tree is initialised
+        (#3256). The reset acts on the superproject only, and git run inside a submodule reads
         that repository's own config, which the hardened runner is built not to trust; a
         submodule working tree therefore cannot be confirmed clean from here, and what a lease
         wrote in it must not reach the next lease. An uninitialised submodule path is an empty
@@ -1342,7 +1317,7 @@ class SwarmBroker:
             meta, _, path = entry.partition(b"\t")
             if not meta.startswith(b"160000 "):
                 continue
-            if not self._empty_submodule_path(swarm_dir, os.fsdecode(path), pinned):
+            if not _is_empty_real_dir_or_absent(os.path.join(swarm_dir, os.fsdecode(path))):
                 logger.warning(
                     "⚠️ [SwarmBroker] Submodule path %s holds lease content that cannot be "
                     "confirmed clean; "

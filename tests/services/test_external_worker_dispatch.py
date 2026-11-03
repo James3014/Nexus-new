@@ -1410,7 +1410,7 @@ def _signal_background_supervisor(
     return supervisor_pid, status, provider_pid, grandchild_pid
 
 
-@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP, signal.SIGINT])
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP])
 def test_signalled_claude_supervisor_stops_provider_group_and_marks_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signum: int
 ) -> None:

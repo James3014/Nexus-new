@@ -177,13 +177,7 @@ class _SupervisorSignalError(BaseException):
 
 
 _SUPERVISOR_SIGNALS = tuple(
-    sig
-    for sig in (
-        getattr(signal, "SIGTERM", None),
-        getattr(signal, "SIGHUP", None),
-        getattr(signal, "SIGINT", None),  # #3295: explicit SIGINT must also stop the group
-    )
-    if sig
+    sig for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if sig
 )
 # "received" is the first termination signal; "deferred" is set while the
 # supervisor settles an outcome, so the signal is recorded but not raised there.

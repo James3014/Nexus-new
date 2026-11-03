@@ -15,11 +15,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from nexus.core.hardened_git import (
-    repository_config_can_start_a_program,
-    repository_git_dir,
-    run_hardened_git,
-)
 from nexus.executors.agy_write_admission import (
     AGY_IMPLEMENTATION_ROLES,
     AGY_PERMISSION_BYPASS_FLAGS,
@@ -2255,44 +2250,30 @@ class OllamaPatchWorkerAdapter:
             cwd=str(Path(lease.target_worktree).resolve()),
             timeout_seconds=timeout_seconds or 900.0,
         )
-        # Resolved once, before the worker runs in the target; the apply below is pinned to it.
-        target_git_dir = repository_git_dir(Path(lease.target_worktree).resolve())
         result = run_cli_worker(request, on_process_group=on_process_group)
         patch = self._extract_patch(result.stdout)
         applied = False
         failure_reason = None
         if result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0 and patch:
             target = str(Path(lease.target_worktree).resolve())
-            if target_git_dir is None or repository_config_can_start_a_program(
-                Path(target), git_dir=target_git_dir
-            ):
-                failure_reason = "target worktree git is not trusted"
+            check = subprocess.run(
+                ["git", "apply", "--check", "--binary", "--whitespace=nowarn", "-"],
+                cwd=target,
+                input=patch,
+                capture_output=True,
+            )
+            if check.returncode == 0:
+                applied_result = subprocess.run(
+                    ["git", "apply", "--binary", "--whitespace=nowarn", "-"],
+                    cwd=target,
+                    input=patch,
+                    capture_output=True,
+                )
+                applied = applied_result.returncode == 0
+                if not applied:
+                    failure_reason = applied_result.stderr.decode("utf-8", errors="replace")
             else:
-                # The patch goes through a file outside the worktree: the hardened runner
-                # takes no stdin, and the worker may have written anywhere inside it.
-                with tempfile.TemporaryDirectory(prefix="nexus-ollama-patch-") as patch_dir:
-                    patch_file = Path(patch_dir) / "worker.patch"
-                    patch_file.write_bytes(patch)
-                    apply_args = ("apply", "--binary", "--whitespace=nowarn", str(patch_file))
-                    check = run_hardened_git(
-                        Path(target),
-                        "apply",
-                        "--check",
-                        *apply_args[1:],
-                        git_dir=target_git_dir,
-                        text=False,
-                    )
-                    if check.returncode == 0:
-                        applied_result = run_hardened_git(
-                            Path(target), *apply_args, git_dir=target_git_dir, text=False
-                        )
-                        applied = applied_result.returncode == 0
-                        if not applied:
-                            failure_reason = applied_result.stderr.decode(
-                                "utf-8", errors="replace"
-                            )
-                    else:
-                        failure_reason = check.stderr.decode("utf-8", errors="replace")
+                failure_reason = check.stderr.decode("utf-8", errors="replace")
         else:
             failure_reason = "Ollama did not return a usable unified diff"
         outcome = WorkerOutcome.EXECUTION_COMPLETED if applied else WorkerOutcome.FAILED
