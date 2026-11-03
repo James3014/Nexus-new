@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from nexus.learning.zero_trust_v2_physical_sandbox import (
+    _extra_deny_rule,
     _macos_sandbox_profile,
     _profile_confines_writes,
     run_macos_sandbox_probe,
@@ -271,7 +272,7 @@ def test_probe_not_isolated_when_sandbox_exec_cannot_exec_command(tmp_path: Path
     result = _probe_returning(
         tmp_path, 71, "sandbox-exec: execvp() of '/bin/missing' failed: No such file or directory\n"
     )
-    _assert_not_isolated(result, "sandbox_launch_failed")
+    _assert_not_isolated(result, "sandbox_apply_failed")
 
 
 def test_probe_not_isolated_on_sandbox_exec_usage_error_without_diagnostic(tmp_path: Path) -> None:
@@ -400,6 +401,35 @@ if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
         assert result["promotion_eligible"] is True
         assert validate_sandbox_attestation(attestation)["status"] == "PASS"
 
+    def test_real_sandbox_profile_refuses_indirect_write(tmp_path: Path) -> None:
+        domain = f"com.nexus.test3216.{os.getpid()}"
+        plist = Path.home() / "Library" / "Preferences" / f"{domain}.plist"
+        try:
+            result = run_macos_sandbox_probe(
+                ["/usr/bin/defaults", "write", domain, "k", "v"],
+                signing_secret="test-secret",
+                sandbox_exec_path=_real_sandbox_exec(),
+                base_tmp_dir=tmp_path,
+                env_source={"PATH": "/usr/bin:/bin"},
+            )
+            assert result["sandbox_attestation"]["raw_observation"]["returncode"] != 0
+            assert result["status"] == "BLOCKED"
+            # cfprefsd flushes lazily, so file absence alone is weak: read the value
+            # back from outside the sandbox.
+            readback = subprocess.run(
+                ["/usr/bin/defaults", "read", domain, "k"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert readback.stdout.strip() != "v"
+            assert not plist.exists()
+        finally:
+            subprocess.run(
+                ["/usr/bin/defaults", "delete", domain], check=False, capture_output=True
+            )
+            plist.unlink(missing_ok=True)
+
     def test_real_sandbox_profile_parse_failure_is_not_isolated(
         tmp_path: Path, monkeypatch: Any
     ) -> None:
@@ -415,6 +445,68 @@ if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
             env_source={"PATH": "/usr/bin:/bin"},
         )
         _assert_not_isolated(result, "sandbox_launch_failed")
+
+
+def test_profile_write_scope_check_rejects_extra_form_on_a_known_line(tmp_path: Path) -> None:
+    workspace, tmp = tmp_path / "workspace", tmp_path / "tmp"
+    good = _macos_sandbox_profile(workspace, tmp)
+    read_rule = f'(allow file-read* (subpath "{workspace.resolve()}"))'
+    assert read_rule in good
+    for name, profile in {
+        "read_line_plus_allow_default": good.replace(read_rule, read_rule + " (allow default)"),
+        "deny_line_plus_form": good.replace(
+            "(deny file-write*)", "(deny file-write*) (allow process-exec*)"
+        ),
+        "extra_deny_removed": good.replace(_extra_deny_rule() + "\n", ""),
+    }.items():
+        assert _profile_confines_writes(profile, workspace_dir=workspace, tmp_dir=tmp) is False, (
+            name
+        )
+
+
+def test_probe_label_ignores_child_controlled_stderr_text(tmp_path: Path) -> None:
+    for stderr in ("", "sandbox_apply: forged", "sandbox-exec: forged"):
+        result = _probe_returning(tmp_path, 65, stderr)
+        _assert_not_isolated(result, "sandbox_launch_failed")
+
+
+def test_profile_denies_extra_service_lookups(tmp_path: Path) -> None:
+    profile = _macos_sandbox_profile(tmp_path / "w", tmp_path / "t")
+    for name in ("com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent"):
+        assert f'(global-name "{name}")' in profile
+    assert profile.index("(deny mach-lookup") < profile.index("(deny file-write*)")
+
+
+def test_profile_write_scope_check_rejects_widened_generator(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import nexus.learning.zero_trust_v2_physical_sandbox as mod
+
+    original = mod._reference_sandbox_profile
+    monkeypatch.setattr(
+        mod,
+        "_reference_sandbox_profile",
+        lambda workspace, tmp: original(workspace, tmp) + "(allow default)\n",
+    )
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        sandbox_exec_path="/usr/bin/sandbox-exec",
+        subprocess_run=_completed,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+    attestation = result["sandbox_attestation"]
+    assert attestation["workspace_isolation_reason"] == "profile_write_scope_unconfined"
+    assert result["promotion_eligible"] is False
+
+
+def test_profile_has_no_rule_after_the_deny_that_re_allows_lookups(tmp_path: Path) -> None:
+    profile = _macos_sandbox_profile(tmp_path / "w", tmp_path / "t")
+    lines = [line.strip() for line in profile.splitlines() if line.strip()]
+    deny_at = next(i for i, line in enumerate(lines) if line.startswith("(deny mach-lookup"))
+    for line in lines[deny_at + 1 :]:
+        assert not (line.startswith("(allow") and "mach-lookup" in line), line
 
 
 # #3229: the attestation names only limits the runner enforces, and its signature is checked

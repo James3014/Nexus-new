@@ -8462,3 +8462,111 @@ def test_terminate_signal_then_spawn_oserror_still_terminates(
     assert caught.value.signum == signal.SIGTERM
     assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
     assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+@pytest.fixture
+def default_sigint() -> Iterator[None]:
+    """A background runner may inherit SIGINT as ignored: pin the interactive default."""
+    old = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old)
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+def test_sigint_during_spawn_is_deferred_and_child_group_stopped(
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_sigint: None
+) -> None:
+    """#3325: Ctrl-C inside Popen's constructor stops the new group afterwards."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ad.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    class SlowPopen:
+        pid = 535353
+        returncode = 0
+        stdout = None
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            signal.raise_signal(signal.SIGINT)
+
+        def wait(self, timeout: Any = None) -> int:
+            return 0
+
+        def communicate(self, timeout: Any = None) -> tuple[str, None]:
+            return "", None
+
+    monkeypatch.setattr(ad.subprocess, "Popen", SlowPopen)
+    before = signal.getsignal(signal.SIGINT)
+    host = ad.Host()
+    with pytest.raises(KeyboardInterrupt):
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    assert killed and all(pid == 535353 for pid, _ in killed)
+    assert signal.getsignal(signal.SIGINT) is before
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+def test_sigint_outside_spawn_still_raises_keyboard_interrupt(default_sigint: None) -> None:
+    """#3325: outside the spawn window Ctrl-C is the plain KeyboardInterrupt, repeatable."""
+    before = signal.getsignal(signal.SIGINT)
+    with ad.termination_raises():
+        for _ in range(2):
+            with pytest.raises(KeyboardInterrupt):
+                signal.raise_signal(signal.SIGINT)
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+@pytest.mark.parametrize(
+    ("signals", "expected"),
+    [
+        ((signal.SIGTERM, signal.SIGINT), signal.SIGTERM),
+        ((signal.SIGINT, signal.SIGINT), signal.SIGINT),
+        ((signal.SIGINT, signal.SIGTERM), signal.SIGTERM),
+    ],
+)
+def test_a_second_signal_during_spawn_still_waits_for_the_handle(
+    entry: str,
+    signals: tuple[int, int],
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    default_sigint: None,
+) -> None:
+    """#3325: two signals inside Popen's constructor raise nothing until the handle
+    exists; the group is stopped, and a stop (SIGTERM) wins over an interrupt."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ad.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    class SlowPopen:
+        pid = 535354
+        returncode = 0
+        stdout = None
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            for signum in signals:
+                signal.raise_signal(signum)
+
+        def wait(self, timeout: Any = None) -> int:
+            return 0
+
+        def communicate(self, timeout: Any = None) -> tuple[str, None]:
+            return "", None
+
+    monkeypatch.setattr(ad.subprocess, "Popen", SlowPopen)
+    raised = KeyboardInterrupt if expected == signal.SIGINT else ad.DeployerTerminated
+    host = ad.Host()
+    with pytest.raises(raised) as caught:
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    if expected != signal.SIGINT:
+        assert caught.value.signum == expected
+    assert killed and all(pid == 535354 for pid, _ in killed)
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}
