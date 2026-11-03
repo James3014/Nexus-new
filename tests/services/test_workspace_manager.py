@@ -187,7 +187,9 @@ def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
         calls.append(path)
         return real_check(self, path) if len(calls) == 1 else False
 
-    monkeypatch.setattr(SwarmBroker, "is_independently_registered_worktree", registered_only_for_acquire)
+    monkeypatch.setattr(
+        SwarmBroker, "is_independently_registered_worktree", registered_only_for_acquire
+    )
 
     with caplog.at_level("WARNING"):
         WorkspaceManager(controller).lease(task_id="T790")
