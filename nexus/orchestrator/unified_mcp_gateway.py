@@ -2738,7 +2738,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                     current["account_lease_reconciliation_result"] = lease_result.get("result")
                     if lease_result.get("result") not in {"ALREADY_ABSENT", "LEASE_RECEIPT_REMOVED"}:
                         if current.get("status") == "COMPLETED":
-                            # A completed result stays; only the lease is still to reconcile (#3290).
+                            # The completed result stays; only the lease is left to reconcile (#3290).
                             current.update({
                                 "reconciliation_required": True,
                                 "account_lease_released": False,
