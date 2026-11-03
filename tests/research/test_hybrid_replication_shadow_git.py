@@ -7,6 +7,8 @@ marker file under tmp_path.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import hashlib
 import json
 import os
@@ -886,3 +888,60 @@ def test_resume_reads_a_stored_digest_that_is_a_link_as_missing(
 
     with pytest.raises(RuntimeError, match="persistent_shadow_digest_missing"):
         _persistent_candidate(guard, repo, revision, None)
+
+
+def _sealed_diff(receipt: dict[str, Any]) -> str:
+    return gzip.decompress(base64.b64decode(receipt["diff_gzip_base64"])).decode("utf-8")
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_sealed_diff_carries_a_change_the_agent_marked_clean_in_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """The sealed diff bytes (not only the changed-file list) hold the hidden change."""
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        _git(cwd, "update-index", flag, "f.txt")
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    diff = _sealed_diff(receipt)
+    assert "+changed by agent" in diff
+    assert receipt["diff_sha256"] == hashlib.sha256(diff.encode("utf-8")).hexdigest()
+
+
+def test_sealed_diff_carries_a_change_whose_stat_the_agent_copied_into_the_index(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sealed diff bytes hold a same-size change hidden by copied index stat data."""
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        target = cwd / "f.txt"
+        target.write_text("b\n", encoding="utf-8")  # same size as the committed "a\n"
+        os.utime(target, (1_000_000_000, 1_000_000_000))
+        info = target.lstat()
+        index = live._shadow_git_dir(cwd) / "index"
+        data = bytearray(index.read_bytes())
+        fields = [
+            int(info.st_ctime),
+            info.st_ctime_ns % 1_000_000_000,
+            int(info.st_mtime),
+            info.st_mtime_ns % 1_000_000_000,
+            info.st_dev,
+            info.st_ino,
+        ]
+        for at, value in enumerate(fields):
+            data[12 + 4 * at : 16 + 4 * at] = (value & 0xFFFFFFFF).to_bytes(4, "big")
+        data[12 + 36 : 12 + 40] = (info.st_size & 0xFFFFFFFF).to_bytes(4, "big")
+        data[-20:] = hashlib.sha1(bytes(data[:-20])).digest()
+        index.write_bytes(bytes(data))
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    diff = _sealed_diff(receipt)
+    assert "-a" in diff and "+b" in diff
