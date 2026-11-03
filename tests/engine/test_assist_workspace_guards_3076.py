@@ -1753,3 +1753,63 @@ def test_cancel_on_a_restarted_gateway_without_the_claim_holds_the_job_for_recon
     assert record["reconciliation_required"] is True, record
     with pytest.raises(Exception, match="ASSIST_RETRY_REQUIRES_RECONCILIATION"):
         box.gateway._assist_retry(TASK)
+    # Reconcile settles the held lease, after which the task can be retried (#3250).
+    _fake_lease_coordinator(monkeypatch, "LEASE_RECEIPT_REMOVED")
+    box.gateway._task_reconcile({"task_id": TASK})
+    settled = box.gateway._assist_read(TASK)
+    assert settled is not None
+    assert settled["account_lease_cleanup_status"] == "RELEASED", settled
+    _assert_retry_passes_the_reconcile_gates(box)
+
+
+def _assert_retry_passes_the_reconcile_gates(box) -> None:
+    """These records carry no action envelope, so retry gets past the reconcile and lease-cleanup
+    refusals and stops at the first later check (the envelope), not at either refusal."""
+    with pytest.raises(Exception, match="ACTION_ENVELOPE_INVALID"):
+        box.gateway._assist_retry(TASK)
+
+
+def _fake_lease_coordinator(monkeypatch, result: str) -> None:
+    from nexus.orchestrator import unified_mcp_gateway as gateway_module
+
+    class _Coordinator:
+        def __init__(self, _manager=None) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **_claim) -> dict:
+            return {"result": result}
+
+    monkeypatch.setattr(gateway_module, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(gateway_module, "get_account_pool_manager", lambda: None)
+
+
+def test_reconcile_moves_a_cancelled_record_written_before_3244_so_retry_works(box, monkeypatch):
+    """The shape #3244 left on disk: CANCELLED, lease cleanup RECONCILIATION_REQUIRED, and no
+    reconciliation_required flag. Reconcile treats it as needing reconciliation (#3250)."""
+    workspace = _workspace(box.root)
+    box.gateway._assist_write(
+        _job(
+            box,
+            str(workspace),
+            job_kind="model_probe",
+            status="CANCELLED",
+            account_alias_hash="alias-old",
+            account_lease_id_hash="lease-old",
+            account_lease_owner_pid=FAKE_PID,
+            account_lease_released=False,
+            account_lease_cleanup_status="RECONCILIATION_REQUIRED",
+        )
+    )
+    group = _FakeGroup(member_alive=False)
+    monkeypatch.setattr(os, "kill", group.kill)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    _fake_lease_coordinator(monkeypatch, "ALREADY_ABSENT")
+    old = box.gateway._assist_read(TASK)
+    assert old is not None and "reconciliation_required" not in old
+    box.gateway._task_reconcile({"task_id": TASK})
+    settled = box.gateway._assist_read(TASK)
+    assert settled is not None
+    assert settled["account_lease_cleanup_status"] == "RELEASED", settled
+    assert not settled.get("reconciliation_required"), settled
+    _assert_retry_passes_the_reconcile_gates(box)

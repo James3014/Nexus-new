@@ -2711,6 +2711,12 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             needs_reconcile = (
                 current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
                 or bool(current.get("reconciliation_required"))
+                # A record written before #3244 (a cancel whose lease release found no claim)
+                # holds the lease for reconciliation without the flag; it needs this too (#3250).
+                or (
+                    current.get("account_lease_cleanup_status") == "RECONCILIATION_REQUIRED"
+                    and current.get("account_lease_released") is not True
+                )
             )
             if needs_reconcile and not _assist_workspace_removable(current):
                 # A provider group member may still run in the workspace and on the account:
