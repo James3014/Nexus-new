@@ -34,6 +34,7 @@ import errno
 import functools
 import os
 import re
+import secrets
 import shutil
 import stat
 import struct
@@ -365,32 +366,91 @@ def _make_removable_at(dir_fd: int, name: str, *, is_dir: bool) -> None:
         )
 
 
+# Most directory descriptors the removal walk holds open at once; a deeper subtree is moved up to
+# the top and walked from there, so nesting depth never costs recursion or descriptors (#3238).
+_WALK_MAX_OPEN = 128
+# A deep subtree is renamed up to the top of the private area under a name no command could
+# have planned for (a per-call token) with a few numbered retries past a taken name.
+_MOVE_NAME_TRIES = 8
+
+
+def _move_token() -> str:
+    return secrets.token_hex(4)
+
+
+def _move_name(token: str, n: int) -> str:
+    return f".up-{token}-{n}"
+
+
 def _make_tree_removable(dir_fd: int) -> None:
     """``_make_removable_at`` for every entry below the open directory ``dir_fd``, top down.
     Directories are entered only by ``O_NOFOLLOW`` opens relative to their parent's descriptor,
-    so no path through a component swapped in during the walk is ever used (#3197)."""
+    so no path through a component swapped in during the walk is ever used (#3197). The walk is
+    iterative and holds at most ``_WALK_MAX_OPEN`` descriptors: a subtree nested deeper is
+    renamed up into ``dir_fd`` and walked from there (#3238)."""
 
-    with os.scandir(dir_fd) as entries:
-        names = [entry.name for entry in entries]
-    for name in names:
-        try:
-            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-        except OSError:
-            continue
-        if stat.S_ISLNK(info.st_mode):
-            continue
-        is_dir = stat.S_ISDIR(info.st_mode)
-        _make_removable_at(dir_fd, name, is_dir=is_dir)
-        if not is_dir:
-            continue
-        try:
-            child = os.open(name, _DIR_NOFOLLOW, dir_fd=dir_fd)
-        except OSError:
-            continue  # now a link, or still unreadable: removal below reports it
-        try:
-            _make_tree_removable(child)
-        finally:
-            os.close(child)
+    # Each frame: (descriptor, names still to visit). The first frame is the caller's own.
+    stack: list[tuple[int, list[str]]] = []
+
+    def frame(fd: int) -> tuple[int, list[str]]:
+        with os.scandir(fd) as entries:
+            return fd, [entry.name for entry in entries]
+
+    stack.append(frame(dir_fd))
+    moved = 0
+    token = _move_token()
+    try:
+        while stack:
+            fd, names = stack[-1]
+            if not names:
+                stack.pop()
+                if fd != dir_fd:
+                    os.close(fd)
+                continue
+            name = names.pop()
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            is_dir = stat.S_ISDIR(info.st_mode)
+            _make_removable_at(fd, name, is_dir=is_dir)
+            if not is_dir:
+                continue
+            if len(stack) >= _WALK_MAX_OPEN and fd != dir_fd:
+                up = None
+                for _try in range(_MOVE_NAME_TRIES):
+                    moved += 1
+                    candidate = _move_name(token, moved)
+                    try:
+                        os.stat(candidate, dir_fd=dir_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        continue  # the command left something under that name: next number
+                    try:
+                        os.rename(name, candidate, src_dir_fd=fd, dst_dir_fd=dir_fd)
+                    except OSError:
+                        continue
+                    up = candidate
+                    break
+                if up is None:
+                    continue  # removal below reports it
+                stack[0][1].append(up)
+                continue
+            try:
+                child = os.open(name, _DIR_NOFOLLOW, dir_fd=fd)
+            except OSError:
+                continue  # now a link, or still unreadable: removal below reports it
+            try:
+                stack.append(frame(child))
+            except OSError:
+                os.close(child)
+    finally:
+        for fd, _ in stack:
+            if fd != dir_fd:
+                os.close(fd)
 
 
 def _remove_private_dir(private: str) -> None:
@@ -399,10 +459,12 @@ def _remove_private_dir(private: str) -> None:
     entry by entry, top down, by directory descriptor and without following any link, and
     removal is tried again. A dir that still cannot be removed raises."""
 
+    # Before 3.14 ``rmtree`` recurses once per directory level, so a very deep tree raises
+    # RecursionError here even when nothing is locked; the walk below flattens it.
     try:
         shutil.rmtree(private)
         return
-    except OSError:
+    except (OSError, RecursionError):
         pass
     parent = os.open(os.path.dirname(private), _DIR_NOFOLLOW)
     try:
@@ -414,7 +476,17 @@ def _remove_private_dir(private: str) -> None:
         _make_tree_removable(root)
     finally:
         os.close(root)
-    shutil.rmtree(private)
+    try:
+        shutil.rmtree(private)
+    except (OSError, RecursionError) as exc:
+        # Do not leave it quietly under its own name: set it aside and say so (#3238). Only
+        # the name goes into the error: it ends up in receipts.
+        aside = f"{private}.stale-{os.getpid()}"
+        try:
+            os.rename(private, aside)
+        except OSError:
+            aside = private
+        raise SandboxError(f"private_area_not_removed:{os.path.basename(aside)}") from exc
 
 
 # The device files every profile lets a command write besides its roots.
