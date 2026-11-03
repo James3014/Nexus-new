@@ -87,11 +87,12 @@ HARDENED_GIT_CONFIG = (
 )  # fmt: skip
 # Subcommands that would otherwise look into submodules (and run their filters).
 _IGNORE_SUBMODULES_COMMANDS = frozenset({"status", "diff"})
-# Caller options ahead of the subcommand, as the core runner (``nexus.core.hardened_git``)
+# The one list of caller ``-c`` keys, imported by ``nexus.core.hardened_git`` (this module
+# stays dependency-free). Caller options ahead of the subcommand, as the core runner (``nexus.core.hardened_git``)
 # allows them since #3165: ``-c`` pairs for the commit identity or for a key pinned above
 # (whose pinned value comes after the caller's and so wins); anything else is refused (#3227).
 _PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in HARDENED_GIT_CONFIG[1::2])
-_CALLER_CONFIG_KEYS = frozenset({
+CALLER_CONFIG_KEYS = frozenset({
     "user.name",
     "user.email",
     "author.name",
@@ -487,7 +488,7 @@ def hardened_git_argv(args: Sequence[str], *, attr_source: Optional[str] = None)
     leading: list[str] = []
     while len(rest) >= 2 and rest[0] == "-c":
         key = rest[1].split("=", 1)[0].lower()
-        if key not in _CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
+        if key not in CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
             raise ExternalGitRefused(CALLER_GIT_OPTION_REFUSED)
         leading.extend(rest[:2])
         rest = rest[2:]

@@ -490,6 +490,7 @@ def test_hardened_log_and_show_verify_no_signature_with_a_repository_signing_pro
         ("remote.origin.promisor", True),
         ("extensions.partialClone", True),
         ("diff.submodule", True),
+        ("status.submoduleSummary", True),
         ("diff.algorithm", False),
         ("diff.renames", False),
         ("core.autocrlf", False),
@@ -883,3 +884,9 @@ def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp
     assert plain("show", f"{base}:f") == "other"
     shown = hardened_git.run_hardened_git(repo, "show", f"{base}:f")
     assert shown.returncode == 0 and shown.stdout.strip() == "recorded"
+
+
+def test_both_git_argv_builders_share_one_caller_key_list():
+    from nexus.orchestrator import measure_external_target as external
+
+    assert hardened_git.CALLER_CONFIG_KEYS is external.CALLER_CONFIG_KEYS
