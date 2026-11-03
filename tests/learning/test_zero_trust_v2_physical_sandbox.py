@@ -89,7 +89,7 @@ def test_macos_physical_sandbox_probe_blocks_timeout(tmp_path: Path) -> None:
 
 
 def test_probe_reports_workspace_not_isolated_when_sandbox_exec_unavailable(tmp_path: Path, monkeypatch: Any) -> None:
-    monkeypatch.setattr("nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name: None)
+    monkeypatch.setattr("nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name, **_kw: None)
     seen: list[list[str]] = []
 
     def record(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
@@ -118,7 +118,7 @@ def test_probe_reports_workspace_not_isolated_when_sandbox_exec_unavailable(tmp_
 
 def test_probe_reports_workspace_isolated_when_sandbox_exec_available(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name: "/usr/bin/sandbox-exec"
+        "nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name, **_kw: "/usr/bin/sandbox-exec"
     )
     result = run_macos_sandbox_probe(
         ["/bin/echo", "ok"],
@@ -217,7 +217,7 @@ def test_probe_tmp_not_isolated_when_sandbox_exec_unavailable(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
-        "nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name: None
+        "nexus.learning.zero_trust_v2_physical_sandbox.shutil.which", lambda _name, **_kw: None
     )
     result = run_macos_sandbox_probe(
         ["/bin/echo", "ok"],
@@ -454,3 +454,50 @@ def test_attestation_signature_is_verified_when_the_secret_is_known(tmp_path: Pa
     )
     # Without the secret the field checks stand alone, as before.
     assert validate_sandbox_attestation(tampered)["reasons"] == []
+
+
+def _shadow_sandbox_exec(directory: Path) -> Path:
+    shadow = directory / "sandbox-exec"
+    shadow.write_text('#!/bin/sh\nexec "$@"\n', encoding="utf-8")
+    shadow.chmod(0o755)
+    return shadow
+
+
+def test_probe_default_lookup_ignores_observer_path_3240(tmp_path: Path, monkeypatch: Any) -> None:
+    shadow_dir = tmp_path / "shadow"
+    shadow_dir.mkdir()
+    shadow = _shadow_sandbox_exec(shadow_dir)
+    monkeypatch.setenv("PATH", f"{shadow_dir}:/usr/bin:/bin")
+    seen: list[list[str]] = []
+
+    def record(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        subprocess_run=record,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+    assert all(str(shadow) not in cmd for cmd in seen)
+    observed = result["sandbox_attestation"]["raw_observation"]["sandbox_exec_path"]
+    assert observed in (None, "/usr/bin/sandbox-exec")
+
+
+def test_probe_shadowed_sandbox_exec_path_is_not_isolated_3240(tmp_path: Path) -> None:
+    shadow = _shadow_sandbox_exec(tmp_path)
+    result = run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        sandbox_exec_path=str(shadow),
+        subprocess_run=_completed,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )
+    attestation = result["sandbox_attestation"]
+    assert attestation["workspace_isolated"] is False
+    assert attestation["workspace_isolation_reason"] == "sandbox_exec_path_unexpected"
+    assert attestation["raw_observation"]["sandbox_exec_path"] == str(shadow)
+    assert result["promotion_eligible"] is False
