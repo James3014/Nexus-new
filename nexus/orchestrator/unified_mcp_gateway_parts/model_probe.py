@@ -337,10 +337,15 @@ class _ModelProbeMixin(_ModelProbeBase):
 
     def _model_probe_submit_guarded(self, arguments: Mapping[str, Any], registered: list[tuple[str, str]]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
-        # #3164: decided before the provider lookup, so the default lane reports its own
-        # reason; the refusal itself is raised after the replay of an existing job below.
-        default_lane_refused = assist_default_lane_refused(arguments.get("provider"), arguments.get("model"))
         metadata, executable = self._provider_executable(provider)
+        # #3164: decided before the provider errors, so the default lane reports its own
+        # reason; the refusal itself is raised after the replay of an existing job below.
+        # #3195: on the resolved pair (the launch path's model default applied).
+        default_lane_refused = assist_default_lane_refused(
+            arguments.get("provider"), arguments.get("model")
+        ) or assist_default_lane_refused(
+            provider, arguments.get("model") or (metadata or {}).get("default_model")
+        )
         if not metadata and not default_lane_refused:
             raise _gateway().GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
         if not executable and not default_lane_refused:
