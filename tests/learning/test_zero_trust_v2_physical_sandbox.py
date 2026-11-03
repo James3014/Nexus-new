@@ -416,7 +416,9 @@ if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
             assert result["sandbox_attestation"]["raw_observation"]["returncode"] != 0
             assert result["status"] == "BLOCKED"
         finally:
-            subprocess.run(["/usr/bin/defaults", "delete", domain], check=False, capture_output=True)
+            subprocess.run(
+                ["/usr/bin/defaults", "delete", domain], check=False, capture_output=True
+            )
             plist.unlink(missing_ok=True)
 
     def test_real_sandbox_profile_parse_failure_is_not_isolated(
