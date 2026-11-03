@@ -400,6 +400,7 @@ class PatchExecutionVerifier:
             except subprocess.TimeoutExpired:
                 record["exit_codes"].append(None)
                 failure_tail = failure_tail or f"timeout after {self.timeout_sec}s"
+        record["isolation"] = confined.describe()  # now with any root restorations (#3266)
         passed = all(code == 0 for code in record["exit_codes"])
         record["verify_result"] = "pass" if passed else "fail"
         if not passed:

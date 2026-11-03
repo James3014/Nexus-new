@@ -212,6 +212,7 @@ def run_confined_test(
         try:
             proc = bound.run(argv, cwd=workspace, timeout=max(1.0, float(timeout_sec)))
         except subprocess.TimeoutExpired as exc:
+            result["confinement"] = bound.describe()  # root restorations (#3266)
             out = (
                 exc.stdout
                 if isinstance(exc.stdout, str)
@@ -226,6 +227,7 @@ def run_confined_test(
                 error="timeout",
             )
             return result
+        result["confinement"] = bound.describe()  # root restorations (#3266)
         stdout = proc.stdout or ""
         result.update(
             executed=True,

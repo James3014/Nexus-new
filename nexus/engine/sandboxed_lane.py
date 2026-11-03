@@ -391,6 +391,9 @@ def build_sandbox_profile(
             f'(deny file-write-unlink file-write-create (literal "{sbpl_path(path)}"))'
             for path in pinned_entries
         ),
+        # One more class of root attribute stays unchangeable (#3265), as in the model output
+        # sandbox; ``cp -p`` and archives extracting ``./`` into the root still work.
+        *(f'(deny file-write-acl (literal "{sbpl_path(path)}"))' for path in pinned_entries),
         f"(deny file-read* {denied})",
         # Last rule wins: forbidden subtrees stay unreadable even under an allowed root.
         *(
@@ -733,6 +736,10 @@ class Confinement:
             "writes_confined_to": [str(root) for root in self.roots],
             "env": "allowlist:" + ",".join(SANDBOX_ENV_ALLOWLIST) + "+HOME/TMPDIR in sandbox",
             "credential_paths_read_denied": list(SANDBOX_DENIED_HOME_PATHS),
+            # Roots whose mode or flags a command changed and the host put back, and restores
+            # that failed (#3266). A snapshot: callers re-read it after the command ran.
+            "root_restorations": list(self.root_restorations),
+            "root_restore_failures": list(self.root_restore_failures),
         }
 
     def run(self, argv: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
