@@ -18,8 +18,8 @@ DEFAULT_TIMEOUT_SEC = 3
 DEFAULT_MEMORY_MB = 512
 # Writes the child may need to start or run ordinary shell commands, beyond its own dirs.
 SANDBOX_DEVICE_WRITE_ALLOWLIST = ("/dev/null",)
-# Mach services that write preference files on a caller's behalf, outside its own file rules.
-SANDBOX_DENIED_MACH_SERVICES = ("com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent")
+# Extra system services denied, closing an indirect write path outside the workspace.
+SANDBOX_EXTRA_DENIED_SERVICES = ("com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent")
 # sandbox-exec's own exit codes: EX_USAGE, EX_DATAERR (profile parse), EX_OSERR (apply/exec).
 SANDBOX_EXEC_FAILURE_RETURNCODES = frozenset({64, 65, 71})
 
@@ -65,8 +65,8 @@ def _write_allow_rule(workspace_dir: Path, tmp_dir: Path) -> str:
     return f"(allow file-write* {' '.join(filters)})"
 
 
-def _mach_deny_rule() -> str:
-    names = " ".join(f'(global-name "{name}")' for name in SANDBOX_DENIED_MACH_SERVICES)
+def _extra_deny_rule() -> str:
+    names = " ".join(f'(global-name "{name}")' for name in SANDBOX_EXTRA_DENIED_SERVICES)
     return f"(deny mach-lookup {names})"
 
 
@@ -83,7 +83,7 @@ def _reference_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
 (version 1)
 (allow default)
 (deny network*)
-{_mach_deny_rule()}
+{_extra_deny_rule()}
 (deny file-write*)
 (allow file-read* (subpath "{workspace}"))
 (allow file-read* (subpath "{tmp}"))

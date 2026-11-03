@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from nexus.learning.zero_trust_v2_physical_sandbox import (
-    _mach_deny_rule,
+    _extra_deny_rule,
     _macos_sandbox_profile,
     _profile_confines_writes,
     run_macos_sandbox_probe,
@@ -401,7 +401,7 @@ if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
         assert result["promotion_eligible"] is True
         assert validate_sandbox_attestation(attestation)["status"] == "PASS"
 
-    def test_real_sandbox_profile_refuses_preference_service_write(tmp_path: Path) -> None:
+    def test_real_sandbox_profile_refuses_indirect_write(tmp_path: Path) -> None:
         domain = f"com.nexus.test3216.{os.getpid()}"
         plist = Path.home() / "Library" / "Preferences" / f"{domain}.plist"
         try:
@@ -446,7 +446,7 @@ def test_profile_write_scope_check_rejects_extra_form_on_a_known_line(tmp_path: 
         "deny_line_plus_form": good.replace(
             "(deny file-write*)", "(deny file-write*) (allow process-exec*)"
         ),
-        "mach_deny_removed": good.replace(_mach_deny_rule() + "\n", ""),
+        "extra_deny_removed": good.replace(_extra_deny_rule() + "\n", ""),
     }.items():
         assert _profile_confines_writes(profile, workspace_dir=workspace, tmp_dir=tmp) is False, (
             name
@@ -459,7 +459,7 @@ def test_probe_label_ignores_child_controlled_stderr_text(tmp_path: Path) -> Non
         _assert_not_isolated(result, "sandbox_launch_failed")
 
 
-def test_profile_denies_preference_service_lookups(tmp_path: Path) -> None:
+def test_profile_denies_extra_service_lookups(tmp_path: Path) -> None:
     profile = _macos_sandbox_profile(tmp_path / "w", tmp_path / "t")
     for name in ("com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent"):
         assert f'(global-name "{name}")' in profile
