@@ -713,8 +713,9 @@ class Confinement:
                 info = os.lstat(root)
                 if stat.S_IMODE(info.st_mode) == mode and getattr(info, "st_flags", 0) == flags:
                     continue
-                if hasattr(os, "chflags"):
-                    os.chflags(root, flags)
+                chflags = getattr(os, "chflags", None)  # BSD/macOS only
+                if chflags is not None:
+                    chflags(root, flags)
                 os.chmod(root, mode)
             except OSError:
                 continue
