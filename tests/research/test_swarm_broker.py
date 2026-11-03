@@ -2740,3 +2740,21 @@ def test_git_output_returns_none_when_git_hangs(tmp_path: Path, monkeypatch):
 
     assert SwarmBroker(tmp_path)._git_output(["rev-parse", "--show-toplevel"], repo) is None
     assert seen["timeout"] is not None and seen["timeout"] > 0
+
+
+def test_git_output_returns_none_when_git_fails_with_stdout(tmp_path: Path, monkeypatch):
+    def failing_git(cwd, *args, **kwargs):
+        return subprocess.CompletedProcess(["git", *args], 1, stdout="x", stderr="")
+
+    monkeypatch.setattr("nexus.research.swarm_broker.run_hardened_git", failing_git)
+
+    assert SwarmBroker(tmp_path)._git_output(["rev-parse", "--show-toplevel"], tmp_path) is None
+
+
+def test_git_output_returns_none_when_output_cannot_be_decoded(tmp_path: Path, monkeypatch):
+    def undecodable_git(cwd, *args, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr("nexus.research.swarm_broker.run_hardened_git", undecodable_git)
+
+    assert SwarmBroker(tmp_path)._git_output(["rev-parse", "--show-toplevel"], tmp_path) is None
