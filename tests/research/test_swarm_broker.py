@@ -2058,3 +2058,88 @@ def test_release_removes_a_nested_repository_left_by_the_lease(tmp_path: Path, m
     assert not nest.exists()
     assert not (swarm / "candidate.txt").exists()
     assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_resets_a_tracked_file_carrying_both_index_flags(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    _git(swarm, "update-index", "--skip-worktree", "tracked.txt")
+    _git(swarm, "update-index", "--assume-unchanged", "tracked.txt")
+    assert _git(swarm, "ls-files", "-v", "tracked.txt").startswith("s ")
+    (swarm / "tracked.txt").write_text("lease edit\n", encoding="utf-8")
+
+    SwarmBroker(controller).release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
+    assert _git(swarm, "ls-files", "-v", "tracked.txt").startswith("H ")
+    assert (sandbox / "SENTINEL").exists()
+
+
+EMPTY_BLOB = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+
+
+def _index_add(swarm: Path, paths: list[bytes], flag: str) -> None:
+    """Put `paths` (any bytes) in the index as empty blobs and set `flag` on them."""
+    info = b"".join(b"100644 " + EMPTY_BLOB.encode() + b" 0\t" + p + b"\0" for p in paths)
+    subprocess.run(["git", "update-index", "-z", "--index-info"], cwd=swarm, input=info, check=True)
+    subprocess.run(
+        ["git", "update-index", flag, "-z", "--stdin"],
+        cwd=swarm,
+        input=b"".join(p + b"\0" for p in paths),
+        check=True,
+    )
+
+
+def test_release_clears_a_flag_on_a_path_that_is_not_utf8(tmp_path: Path, monkeypatch):
+    """A lease can put any bytes in the index; decoding them must not leave the swarm locked."""
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    odd = b"odd-\xff\xfe.txt"
+    _index_add(swarm, [odd], "--skip-worktree")
+    listed = subprocess.run(
+        ["git", "ls-files", "-v", "-z"], cwd=swarm, capture_output=True, check=True
+    ).stdout
+    assert b"S " + odd in listed
+
+    SwarmBroker(controller).release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    listed = subprocess.run(
+        ["git", "ls-files", "-v", "-z"], cwd=swarm, capture_output=True, check=True
+    ).stdout
+    assert b"S " not in listed and b"s " not in listed
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_clears_flags_on_an_index_longer_than_one_argument_list(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    many = [f"deep/{i:05d}/".encode() + b"x" * 180 + b".txt" for i in range(1500)]
+    assert sum(len(p) + 1 for p in many) > 2 * 64 * 1024  # several batches
+    _index_add(swarm, many, "--assume-unchanged")
+
+    SwarmBroker(controller).release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    listed = subprocess.run(
+        ["git", "ls-files", "-v", "-z"], cwd=swarm, capture_output=True, check=True
+    ).stdout
+    assert not [e for e in listed.split(b"\0") if e[:1].islower()]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_argv_batches_stay_under_the_budget_and_keep_order():
+    from nexus.research.swarm_broker import _argv_batches
+
+    paths = [f"p{i}" for i in range(10)]
+    assert _argv_batches(paths, budget=10) == [
+        ["p0", "p1", "p2"],
+        ["p3", "p4", "p5"],
+        ["p6", "p7", "p8"],
+        ["p9"],
+    ]
+    assert _argv_batches([], budget=10) == []
+    assert _argv_batches(["x" * 50], budget=10) == [["x" * 50]]  # one oversized path still goes
