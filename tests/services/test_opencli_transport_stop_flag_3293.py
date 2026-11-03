@@ -99,3 +99,70 @@ def test_normal_exit_returns_decoded_output(tmp_path):
     transport = OpenCLIExternalIntelligenceTransport(executable=executable)
     code, stdout, stderr, timed_out = transport._run([executable], os.environ)
     assert (code, stdout, stderr, timed_out) == (0, "late", "", False)
+
+
+LEADER_STUB = """#!{python}
+import os, signal, subprocess, sys, time
+member = subprocess.Popen([sys.executable, "-c",
+    "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)"])
+open({pidfile!r}, "w").write(str(member.pid))
+sys.stdout.write("before-out"); sys.stdout.flush()
+sys.stderr.write("before-err"); sys.stderr.flush()
+time.sleep(120)
+"""
+
+
+def _leader_stub(tmp_path: Path) -> tuple[str, Path]:
+    pidfile = tmp_path / "member-pid"
+    path = tmp_path / "opencli-leader"
+    path.write_text(LEADER_STUB.format(python=sys.executable, pidfile=str(pidfile)))
+    path.chmod(0o755)
+    return str(path), pidfile
+
+
+def _pid_gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def _run_timed_out_leader(tmp_path: Path):
+    executable, pidfile = _leader_stub(tmp_path)
+    transport = OpenCLIExternalIntelligenceTransport(executable=executable, timeout=1)
+    try:
+        return transport._run([executable], os.environ), pidfile
+    except BaseException:
+        if pidfile.exists():
+            try:
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        raise
+
+
+def test_timeout_kills_a_sigterm_ignoring_group_member_before_returning(tmp_path):
+    (_code, _stdout, _stderr, timed_out), pidfile = _run_timed_out_leader(tmp_path)
+    member = int(pidfile.read_text())
+    try:
+        assert timed_out is True
+        assert _pid_gone(member)
+    finally:
+        try:
+            os.kill(member, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def test_timeout_returns_output_written_before_the_timeout(tmp_path):
+    (_code, stdout, stderr, timed_out), pidfile = _run_timed_out_leader(tmp_path)
+    try:
+        assert timed_out is True
+        assert stdout.startswith("before-out")
+        assert stderr.startswith("before-err")
+    finally:
+        try:
+            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
