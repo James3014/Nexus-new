@@ -2067,6 +2067,13 @@ def test_cline_successful_run_on_isolated_target_is_delivery(monkeypatch, tmp_pa
     assert receipt.failure_reason is None
 
 
+def test_cline_seatbelt_pins_the_run_home_directory(monkeypatch, tmp_path):
+    _receipt, calls, _ = _cline_run(monkeypatch, tmp_path, stdout=_CLINE_OK)
+
+    run_home = calls[0].env["HOME"]
+    assert f'(literal "{run_home}")' in calls[0].seatbelt_profile
+
+
 def test_cline_denied_action_is_non_delivery(monkeypatch, tmp_path):
     stdout = (
         _CLINE_OK

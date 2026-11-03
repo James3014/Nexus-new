@@ -797,6 +797,7 @@ class ClineWorkerAdapter(DirectCliWorkerAdapter):
                     # even if the run settings failed to load (cline's file
                     # tools run in-process; probed with 3.0.69).
                     deny_process_fork=True,
+                    extra_pinned_directories=(run_home,),
                 )
             except CredentialPathOverlapError:
                 return failed("cline_target_inside_credential_path")

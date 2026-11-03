@@ -346,8 +346,27 @@ def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
     return None
 
 
-def _git_identity(cwd: str) -> tuple[str | None, str | None]:
-    repository = _enclosing_repository(cwd)
+def _bound_repository(cwd: str, repo_root: str | None) -> tuple[Path, Path] | None:
+    """The repository recorded when the operation started, checked the same way, never
+    searched for again; without a recorded root, the enclosing repository of ``cwd``."""
+    if repo_root is None:
+        return _enclosing_repository(cwd)
+    candidate = Path(repo_root)
+    try:
+        if not os.path.lexists(candidate / ".git"):
+            return None
+        git_dir = _checked_git_dir(candidate)
+        if git_dir is None:
+            return None
+        if repository_config_can_start_a_program(candidate, git_dir=git_dir):
+            return None
+    except OSError:
+        return None
+    return candidate, git_dir
+
+
+def _git_identity(cwd: str, repo_root: str | None = None) -> tuple[str | None, str | None]:
+    repository = _bound_repository(cwd, repo_root)
     return (None, None) if repository is None else _git_identity_in(*repository)
 
 
@@ -400,8 +419,10 @@ def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
     return None
 
 
-def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
-    bound = _enclosing_repository(cwd)
+def _status_entries(
+    cwd: str, repo_root: str | None = None
+) -> dict[str, dict[str, str]] | None:
+    bound = _bound_repository(cwd, repo_root)
     if bound is None:
         return None
     repository, git_dir = bound
@@ -467,8 +488,8 @@ def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
     return dict(sorted(entries.items()))
 
 
-def capture_source_baseline(cwd: str) -> dict[str, Any] | None:
-    entries = _status_entries(cwd)
+def capture_source_baseline(cwd: str, repo_root: str | None = None) -> dict[str, Any] | None:
+    entries = _status_entries(cwd, repo_root)
     if entries is None:
         return None
     return {"schema": SOURCE_BASELINE_SCHEMA, "entries": entries}
@@ -518,14 +539,16 @@ def source_baseline_sha256(baseline: object) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def observed_changed_paths_since(cwd: str, baseline: object) -> list[str] | None:
+def observed_changed_paths_since(
+    cwd: str, baseline: object, repo_root: str | None = None
+) -> list[str] | None:
     if source_baseline_sha256(baseline) is None:
         return None
     assert isinstance(baseline, dict)
     baseline_entries = baseline.get("entries")
     if not isinstance(baseline_entries, dict):
         return None
-    current = capture_source_baseline(cwd)
+    current = capture_source_baseline(cwd, repo_root)
     if current is None:
         return None
     current_entries = current["entries"]
@@ -945,7 +968,9 @@ class DirectOperationJournal:
             baseline_hash = record.get("source_baseline_sha256")
             valid_baseline_hash = source_baseline_sha256(baseline)
             record_root = record.get("repo_root")
-            current_root, _current_head = _git_identity(cwd)
+            current_root, _current_head = _git_identity(
+                cwd, record_root if isinstance(record_root, str) else None
+            )
             try:
                 same_root = bool(
                     isinstance(record_root, str)
@@ -959,7 +984,7 @@ class DirectOperationJournal:
                 and isinstance(baseline_hash, str)
                 and valid_baseline_hash == baseline_hash
             ):
-                delta = observed_changed_paths_since(cwd, baseline)
+                delta = observed_changed_paths_since(cwd, baseline, record_root)
             else:
                 delta = None
             if delta is None:
@@ -1024,7 +1049,7 @@ class DirectOperationJournal:
         ):
             raise DirectOperationJournalError("SOURCE_IDENTITY_UNAVAILABLE")
 
-        current_root, current_head = _git_identity(cwd)
+        current_root, current_head = _git_identity(cwd, record_root)
         try:
             same_root = bool(
                 isinstance(current_root, str) and os.path.samefile(record_root, current_root)
@@ -1034,7 +1059,7 @@ class DirectOperationJournal:
         if not same_root or current_head != base_head:
             raise DirectOperationJournalError("SOURCE_IDENTITY_CHANGED")
 
-        delta = observed_changed_paths_since(cwd, baseline)
+        delta = observed_changed_paths_since(cwd, baseline, record_root)
         if delta is None:
             raise DirectOperationJournalError("SOURCE_STATE_UNAVAILABLE")
         if delta:
