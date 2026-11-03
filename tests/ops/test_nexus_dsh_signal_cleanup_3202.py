@@ -358,3 +358,98 @@ def test_interrupted_chained_turn_exits_128_plus_signal(
     assert out["stop_reason"] == guard.DSH_TURN_INTERRUPTED, out
     assert turns == ["green"]  # no gate, no repair turn after the interruption
     assert code == 130
+
+
+# Runs ``resume`` the way the command does, with the binding, preflight and receipt stubbed
+# (#3235). The DSH stand-in is FAKE_DSH: its group keeps writing to the repository.
+RESUME_DRIVER = r"""
+import signal, sys
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+for sig in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(sig, signal.SIG_DFL)
+signal.signal(signal.SIGINT, signal.default_int_handler)
+dsh = SourceFileLoader("nexus_dsh_workflow_3235_driver", {script!r}).load_module()
+binding = {{
+    "session_id": "sess-3235", "repository": "James3014/Nexus-new", "issue_number": 3235,
+    "repo_root": {repo!r}, "dsh_home": {home!r}, "goal_id": None, "binding_hash": None,
+}}
+dsh.load_binding = lambda root, session_id: binding
+dsh.git_metadata_contract = lambda repo: {{"ok": True}}
+dsh.run_preflight = lambda binding, doctor_bin: {{"decision": "ALLOW_RESUME"}}
+dsh.persist_preflight = lambda root, receipt: Path({state!r}) / "receipt.json"
+sys.exit(dsh.main([
+    "resume", "--session-id", "sess-3235", "--state-root", {state!r},
+    "--dsh-bin", {dsh_bin!r}, "--task", "continue",
+]))
+"""
+
+
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP", "SIGINT"])
+def test_stop_signal_during_a_resumed_turn_kills_the_dsh_group_and_records_it(
+    tmp_path: Path, driver_cleanup, signame: str
+) -> None:
+    """#3235: ``resume`` ran DSH through plain ``subprocess.run`` with no handler, so a stop
+    signal ended the workflow and left DSH's group writing; it now runs supervised."""
+    signum = int(getattr(signal, signame))
+    repo = _git_repo(tmp_path)
+    dsh_bin = tmp_path / "dshfake3235"
+    dsh_bin.write_text(FAKE_DSH.format(python=sys.executable, tmp=str(tmp_path)), "utf-8")
+    dsh_bin.chmod(0o755)
+    state = tmp_path / "state"
+    driver = tmp_path / "driver3235.py"
+    driver.write_text(
+        RESUME_DRIVER.format(
+            script=str(SCRIPT),
+            dsh_bin=str(dsh_bin),
+            state=str(state),
+            repo=str(repo),
+            home=str(tmp_path / "home"),
+        ),
+        "utf-8",
+    )
+    env = {**os.environ, "NEXUS_DSH_SKIP_MODEL_CATALOG_CHECK": "1"}
+    proc = subprocess.Popen(
+        [sys.executable, str(driver)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+    )
+    driver_cleanup.append(proc)
+
+    def ready() -> bool:
+        logs = list((state / "resumes" / "sess-3235").glob("*.log"))
+        return bool(logs) and "ready" in logs[0].read_text("utf-8", "replace")
+
+    assert _wait_for(ready, 20), "fake DSH never reported ready"
+    leader = int((tmp_path / "leader.pid").read_text())
+    grandchild = int((tmp_path / "gc.pid").read_text())
+    assert _ours_alive(grandchild, tmp_path), (
+        grandchild,
+        _command(grandchild),
+        _ps(grandchild, "stat"),
+    )
+
+    proc.send_signal(signum)
+    stdout, stderr = proc.communicate(timeout=30)
+
+    # The whole DSH group is gone: nothing keeps writing to the repository.
+    assert _wait_for(lambda: not _ours_alive(grandchild, tmp_path), 3)
+    assert not _ours_alive(leader, tmp_path)
+    size = (repo / "mod.py").stat().st_size
+    time.sleep(0.3)
+    assert (repo / "mod.py").stat().st_size == size
+
+    # The workflow ended on its own, with 128 + signal and an interrupted turn recorded.
+    assert proc.returncode == 128 + signum, (proc.returncode, stdout, stderr)
+    turn = guard.load_turn_state(state, "sess-3235")
+    assert turn is not None
+    assert turn["state"] in (guard.TURN_FAILED_DIRTY, guard.TURN_FAILED_CLEAN)
+    assert turn["dsh_exit_code"] == 128 + signum
+    assert turn["interrupted_by_signal"] == signame
+    receipt = json.loads(Path(turn["quarantine_receipt"]).read_text("utf-8"))
+    assert receipt["interrupted_by_signal"] == signame
+    record = json.loads(stderr.strip().splitlines()[-1])
+    assert record["log_path"].endswith(".log")
+    assert "ready" in stdout  # DSH's output, echoed from the log once the turn is over

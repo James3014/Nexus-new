@@ -790,3 +790,40 @@ def test_ack_without_pending_failure_or_reason_is_rejected(tmp_path: Path) -> No
     assert blank.returncode == guard.EXIT_BLOCKED
     assert json.loads(blank.stdout)["reason_code"] == "TURN_ACK_REASON_REQUIRED"
     assert _turn_state(ctx)["state"] == "TURN_FAILED_DIRTY"
+
+
+def _write_talking_fake_dsh(path: Path) -> None:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "print('hello from dsh', "
+        "'own-session' if os.getsid(0) == os.getpid() else 'shared-session')\n"
+        "sys.exit(int(os.environ.get('FAKE_DSH_EXIT', '0')))\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_resume_turn_runs_in_its_own_session_and_its_output_is_logged_and_echoed(
+    tmp_path: Path,
+) -> None:
+    """#3235: the resumed turn goes through the supervised runner, as start-phase turns do:
+    DSH leads its own session, its output is kept in a log under the state root and echoed,
+    and a failed turn's record names that log."""
+    ctx = _quarantine_setup(tmp_path)
+    _write_talking_fake_dsh(ctx["dsh"])
+
+    done = _resume(ctx, exit_code=0, edit=False)
+    assert done.returncode == 0, done.stderr
+    assert "hello from dsh own-session" in done.stdout
+    logs = list((ctx["state_root"] / "resumes" / ctx["binding"]["session_id"]).glob("*.log"))
+    assert len(logs) == 1
+    assert "hello from dsh own-session" in logs[0].read_text(encoding="utf-8")
+    assert _turn_state(ctx)["state"] == "TURN_OK"
+
+    failed = _resume(ctx, exit_code=3, edit=False)
+    assert failed.returncode == 3  # DSH's own exit code is still preserved
+    record = json.loads(failed.stderr.strip().splitlines()[-1])
+    assert record["state"] == "TURN_FAILED_CLEAN"
+    assert Path(record["log_path"]).is_file()
+    assert _turn_state(ctx)["state"] == "TURN_FAILED_CLEAN"

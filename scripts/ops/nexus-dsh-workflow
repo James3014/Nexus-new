@@ -5171,6 +5171,83 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     return EXIT_BLOCKED
 
 
+def _resume_log_path(root: Path, session_id: str) -> Path:
+    stamp = _utc_now().replace(":", "").replace("-", "")
+    return root / "resumes" / session_id / f"{stamp}.log"
+
+
+def _echo_file(path: Path) -> None:
+    """Copy ``path`` to stdout: DSH's output, where ``subprocess.run`` used to show it."""
+    out = getattr(sys.stdout, "buffer", None)
+    try:
+        with path.open("rb") as fh:
+            if out is None:
+                sys.stdout.write(fh.read().decode("utf-8", "replace"))
+            else:
+                shutil.copyfileobj(fh, out)
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass  # stdout closed or unusable: the log keeps the output
+
+
+def _run_resume_turn(
+    root: Path,
+    binding: dict[str, Any],
+    dsh_argv: Sequence[str],
+    *,
+    env: dict[str, str],
+    pre_turn: dict[str, Any] | None,
+) -> int:
+    """Run a resumed DSH turn the way ``start-phase`` runs its turns (#3235).
+
+    DSH runs under ``_run_dsh_supervised``: in its own session, within the turn wall clock, its
+    whole group killed and confirmed empty before it is reaped, its merged output written to a
+    log under the state root and echoed to stdout once the turn is over. A SIGTERM, SIGHUP or
+    SIGINT while DSH runs kills the group, records the turn as interrupted and returns
+    ``128 + signal`` (#3202); before, the workflow ended on the default action with DSH still
+    running and the turn unrecorded. A non-zero exit or a failed cleanup records a failed turn,
+    as before; a clean exit records ``TURN_OK``."""
+    session_id = str(binding["session_id"])
+    log_path = _resume_log_path(root, session_id)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"resume: DSH output is written to {log_path}", file=sys.stderr, flush=True)
+    cleanup_failures: list[str] = []
+    # Held until the turn is recorded: a stop signal kills DSH's group, is recorded as an
+    # interrupted turn and cannot cut the recording short (#3202).
+    with _TurnSignals() as signals:
+        interrupted: int | None = None
+        try:
+            dsh_exit, _no_progress = _run_dsh_supervised(
+                dsh_argv,
+                cwd=str(binding["repo_root"]),
+                env=env,
+                log_path=log_path,
+                watchdog=None,
+                cleanup_failures=cleanup_failures,
+                signals=signals,
+            )
+        except DshTurnInterrupted as exc:
+            interrupted = exc.signum
+            dsh_exit = 128 + exc.signum
+        _echo_file(log_path)
+        if dsh_exit != 0 or cleanup_failures:
+            failed = record_failed_turn(
+                root,
+                binding,
+                pre=pre_turn,
+                exit_code=dsh_exit,
+                force_dirty_reason=cleanup_failures[0] if cleanup_failures else None,
+                interrupted_by=_signal_name(interrupted) if interrupted is not None else None,
+            )
+            record = {**failed, "log_path": str(log_path)}
+            print(json.dumps(record, sort_keys=True), file=sys.stderr)
+        else:
+            _write_turn_state(root, session_id, TURN_OK)
+        if signals.received is not None:
+            return 128 + signals.received
+    return dsh_exit
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -5350,18 +5427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         env["DSH_HOME"] = str(binding["dsh_home"])
         env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
         pre_turn = _worktree_snapshot(Path(str(binding["repo_root"])))
-        proc = subprocess.run(
-            dsh_argv,
-            cwd=str(binding["repo_root"]),
-            env=env,
-            check=False,
-        )
-        if proc.returncode != 0:
-            failed = record_failed_turn(root, binding, pre=pre_turn, exit_code=proc.returncode)
-            print(json.dumps(failed, sort_keys=True), file=sys.stderr)
-        else:
-            _write_turn_state(root, str(binding["session_id"]), TURN_OK)
-        return proc.returncode
+        return _run_resume_turn(root, binding, dsh_argv, env=env, pre_turn=pre_turn)
     except DshWorkflowError as exc:
         payload = {
             "schema": PREFLIGHT_SCHEMA,
