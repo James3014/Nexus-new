@@ -233,3 +233,46 @@ def test_sync_staged_to_sandbox_fails_closed_when_git_hangs(tmp_path, monkeypatc
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
     assert _sync_manager(tmp_path, tmp_path).sync_staged_to_sandbox(sandbox) is False
+
+
+def test_sync_staged_to_sandbox_relative_patch_path_is_applied(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    (cwd / "rel.patch").write_text("", encoding="utf-8")  # same name, empty, in Python cwd
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", "rel.patch")
+    monkeypatch.chdir(cwd)
+
+    result = _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox)
+
+    assert result is True
+    assert "staged change" in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_refuses_sandbox_config_naming_a_program(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    marker = tmp_path / "filter-ran"
+    script = tmp_path / "filter.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    script.chmod(0o755)
+    _git(sandbox, "config", "filter.x.clean", str(script))
+    _git(sandbox, "config", "filter.x.smudge", str(script))
+    (sandbox / ".git" / "info").mkdir(exist_ok=True)
+    (sandbox / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    marker.unlink(missing_ok=True)
+
+    assert _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox) is False
+
+    assert not marker.exists()
+    assert "staged change" not in (sandbox / "tracked.txt").read_text(encoding="utf-8")

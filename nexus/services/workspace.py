@@ -215,9 +215,14 @@ class WorkspaceManager:
 
     def sync_staged_to_sandbox(self, sandbox_path):
         """將主工作區的 Staged 內容同步至沙盒。"""
-        patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch"))
+        # One absolute path: git diff, Path.stat and git apply run in different cwds.
+        patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch")).absolute()
         try:
-            from nexus.core.hardened_git import run_hardened_git
+            from nexus.core.hardened_git import (
+                repository_config_can_start_a_program,
+                repository_git_dir,
+                run_hardened_git,
+            )
 
             # 1. 在主工作區產出 Patch（git 自己寫檔，內容原樣；逾時丟 TimeoutExpired）
             diff = run_hardened_git(
@@ -228,10 +233,18 @@ class WorkspaceManager:
 
             # 2. 在沙盒套用 Patch
             if patch_file.stat().st_size > 0:
-                applied = run_hardened_git(Path(sandbox_path), "apply", str(patch_file))
+                sandbox = Path(sandbox_path)
+                sandbox_git_dir = repository_git_dir(sandbox)
+                if sandbox_git_dir is None or repository_config_can_start_a_program(
+                    sandbox, git_dir=sandbox_git_dir
+                ):
+                    raise RuntimeError("sandbox git dir unusable or its config names a program")
+                applied = run_hardened_git(
+                    sandbox, "apply", str(patch_file), git_dir=sandbox_git_dir
+                )
                 if applied.returncode != 0:
                     raise RuntimeError(f"git apply failed: {applied.stderr}")
-                added = run_hardened_git(Path(sandbox_path), "add", ".")
+                added = run_hardened_git(sandbox, "add", ".", git_dir=sandbox_git_dir)
                 if added.returncode != 0:
                     raise RuntimeError(f"git add failed: {added.stderr}")
                 print("🔄 [Sync] Staged changes migrated to sandbox.")
