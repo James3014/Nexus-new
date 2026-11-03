@@ -1601,63 +1601,30 @@ def test_second_cancel_of_a_finished_job_keeps_the_lease_release_of_the_first(bo
 def test_query_outcome_written_after_a_cancel_released_the_lease_records_the_release(
     box, monkeypatch
 ):
-    """A query finishing the job and a cancel of it run together: the cancel releases the
-    claim, the query (finding no claim) records FAILED first, then the cancel's CANCELLED write
-    is refused. The query's outcome is kept and the cancel's lease release is recorded."""
+    """A query of a job whose cancel is terminating the provider sees the job still live (#3187):
+    it does not settle it FAILED and does not take the lease; the cancel then writes CANCELLED
+    with its lease release recorded."""
     old_job_id, old_provider, _, terminated, _ = _launch_old_job(box, monkeypatch)
     claim = _Claim()
     _hold_a_lease(box, claim)
-    # The query (this thread) sees the provider exit; the cancel's own query does not.
-    monkeypatch.setattr(
-        assist_response,
-        "kill_group_if_exited",
-        lambda process: threading.current_thread() is threading.main_thread(),
-    )
-    cancel_terminating = threading.Event()
-    query_settled = threading.Event()
-    cancel_writing = threading.Event()
-    query_done = threading.Event()
+    monkeypatch.setattr(assist_response, "kill_group_if_exited", lambda process: True)
+    seen: dict = {}
 
     def terminate(process) -> bool:
         terminated.append(process)
-        cancel_terminating.set()
-        assert query_settled.wait(10), "the query never reached its lease release"
+        process.returncode = 1
+        seen["query"] = box.gateway._assist_refresh(TASK)
         return True
 
     monkeypatch.setattr(assist_jobs, "_terminate_provider_group", terminate)
-
-    def hook(caller: str) -> None:
-        on_main = threading.current_thread() is threading.main_thread()
-        if on_main and caller == "_release_assist_account_claim":
-            query_settled.set()
-            assert cancel_writing.wait(10), "the cancel never reached its record write"
-        elif not on_main and caller == "_assist_write_current":
-            if sys._getframe(3).f_code.co_name == "_assist_cancel":
-                cancel_writing.set()
-                assert query_done.wait(10), "the query never finished"
-
-    monkeypatch.setattr(
-        box.gateway, "_assist_lock", _LockWithEntryHook(box.gateway._assist_lock, hook)
-    )
-    results: dict = {}
-
-    def cancel_job() -> None:
-        results["cancel"] = box.gateway._assist_cancel(TASK)
-
-    cancel = threading.Thread(target=cancel_job)
-    cancel.start()
-    assert cancel_terminating.wait(10), "the cancel never reached the provider termination"
-    old_provider.returncode = 1
-    query = box.gateway._assist_refresh(TASK)
-    query_done.set()
-    cancel.join(20)
-    assert not cancel.is_alive()
-    assert query is not None and query["status"] == "FAILED", query
+    result = box.gateway._assist_cancel(TASK)
+    query = seen["query"]
+    assert query is not None and query["status"] == "RUNNING", query
     assert terminated == [old_provider]
-    assert (results["cancel"]["job_id"], results["cancel"]["status"]) == (old_job_id, "FAILED")
-    assert results["cancel"]["account_lease_released"] is True, results["cancel"]
+    assert (result["job_id"], result["status"]) == (old_job_id, "CANCELLED")
+    assert result["account_lease_released"] is True, result
     record = box.gateway._assist_read(TASK)
-    assert record is not None and record["status"] == "FAILED", record
+    assert record is not None and record["status"] == "CANCELLED", record
     _assert_lease_recorded_released_and_retry_allowed(box, claim, old_job_id)
 
 
