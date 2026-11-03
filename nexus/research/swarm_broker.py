@@ -484,8 +484,8 @@ def _process_exists(pid: int) -> bool:
 
 def _holder_is_running(holder: tuple[int, Optional[str]]) -> bool:
     """The recorded holder may still run: its pid exists, and its start identity, when both
-    the recorded and the current one are known, is the recorded one. Only a missing pid or two
-    known identities that differ count as stopped; anything unknown keeps the lock, because
+    the recorded and the current one are known and of the same kind, is the recorded one. Only a
+    missing pid or two known same-kind identities that differ count as stopped; anything unknown keeps the lock, because
     resetting a lease that still runs is worse than keeping one swarm out of the pool."""
     pid, recorded = holder
     if not _process_exists(pid):
@@ -493,7 +493,11 @@ def _holder_is_running(holder: tuple[int, Optional[str]]) -> bool:
     if recorded is None:
         return True
     current = _process_start_identity(pid)
-    return current is None or current == recorded
+    if current is None or current == recorded:
+        return True
+    # Two sources write different kinds (`ps:` start time vs /proc boot id and ticks); one
+    # unreadable at acquire and readable now says nothing about the holder: keep the lock.
+    return current.startswith("ps:") != recorded.startswith("ps:")
 
 
 def _write_release_failed_mark(lock_fd: int) -> None:

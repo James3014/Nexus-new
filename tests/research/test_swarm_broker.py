@@ -2284,12 +2284,38 @@ def test_an_aged_lock_naming_a_live_pid_with_another_start_time_is_marked(
     lock = swarm / ".swarm_lock"
     text = lock.read_text(encoding="utf-8")
     pid_part, _, _ = text.partition(" id=")
-    lock.write_text(f"{pid_part} id=other-boot:1\n", encoding="utf-8")
+    from nexus.research.swarm_broker import _process_start_identity
+
+    same_kind_other = (
+        "ps:other"
+        if (_process_start_identity(os.getpid()) or "").startswith("ps:")
+        else "other-boot:1"
+    )
+    lock.write_text(f"{pid_part} id={same_kind_other}\n", encoding="utf-8")
     _age(lock, 3 * 3600)
 
     assert broker.mark_stale_lease(swarm, 2 * 3600) is True
 
     assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_an_aged_lock_recording_the_other_identity_kind_for_a_live_pid_is_kept(
+    tmp_path: Path, monkeypatch
+):
+    # /proc (boot:ticks) and ps (ps:...) strings never compare; a differing kind is unknown (#3284).
+    from nexus.research.swarm_broker import _process_start_identity
+
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    lock = swarm / ".swarm_lock"
+    pid_part, _, _ = lock.read_text(encoding="utf-8").partition(" id=")
+    now_is_ps = (_process_start_identity(os.getpid()) or "").startswith("ps:")
+    other_kind = "boot-x:12345" if now_is_ps else "ps:Tue_Nov_3_06:37:00_2026"
+    lock.write_text(f"{pid_part} id={other_kind}\n", encoding="utf-8")
+    _age(lock, 3 * 3600)
+
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is False
     assert (sandbox / "SENTINEL").exists()
 
 
@@ -2420,3 +2446,27 @@ def test_release_restores_the_full_tree_after_a_lease_enabled_sparse_checkout(
     assert _git(swarm, "config", "--bool", "--get-all", "core.sparseCheckout") != "true"
     assert _git(swarm, "status", "--porcelain") == ""
     assert (sandbox / "SENTINEL").exists()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#3284 candidate reproduced: swarm git dir modules/ survives release; fix is a follow-up",
+)
+def test_release_leaves_nothing_of_a_lease_in_the_swarm_git_dir_modules(
+    tmp_path: Path, monkeypatch
+):
+    # Candidate from #3284: deinit empties the submodule path but the swarm git dir's modules/
+    # keeps the submodule repository, which the next lease's `submodule update --init` reuses.
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _swarm_with_submodule(tmp_path)
+    _git(swarm, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
+    git_dir = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    marker = git_dir / "modules" / "vendor" / "lease_marker"
+    marker.write_text("lease output\n", encoding="utf-8")
+    _git(swarm, "submodule", "deinit", "-f", "--all")
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()  # the release itself succeeded
+    assert not marker.exists()
