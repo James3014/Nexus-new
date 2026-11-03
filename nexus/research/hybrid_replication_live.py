@@ -12,6 +12,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess  # nosec B404
 import sys
 import tarfile
