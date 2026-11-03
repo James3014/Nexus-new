@@ -1585,6 +1585,10 @@ class OpenCLIExternalIntelligenceTransport:
                         out_parts.append(again.output or b"")
                         err_parts.append(again.stderr or b"")
                         continue
+                    except (ChildProcessError, PermissionError):
+                        # A member survived SIGKILL or the group could not be listed: still an
+                        # unknown outcome, returned with the output read so far (not raised).
+                        break
                     out_parts.append(drained_out or b"")
                     err_parts.append(drained_err or b"")
                     break

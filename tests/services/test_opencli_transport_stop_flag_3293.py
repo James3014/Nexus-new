@@ -166,3 +166,41 @@ def test_timeout_returns_output_written_before_the_timeout(tmp_path):
             os.kill(int(pidfile.read_text()), signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
+
+
+def test_timeout_drain_that_finds_a_surviving_member_returns_unknown_outcome(monkeypatch):
+    # All stubs: no real process is started or signalled.
+    import subprocess
+
+    from nexus.services import external_intelligence as module
+
+    class _FakeProcess:
+        pid = 999_999_999
+        returncode = None
+        stdout = None
+        stderr = None
+        args = ["opencli"]
+
+        def wait(self, timeout=None):
+            self.returncode = -9
+            return self.returncode
+
+    calls: list[float] = []
+
+    def fake_wait(process, timeout, before_kill=None):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(process.args, timeout, output=b"early", stderr=b"")
+        raise PermissionError("a group member survived SIGKILL")
+
+    monkeypatch.setattr(module, "require_child_stays_unreaped", lambda: None)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *a, **k: _FakeProcess())
+    monkeypatch.setattr(module, "communicate_then_kill_group", fake_wait)
+    monkeypatch.setattr(module.os, "killpg", lambda *a: None)
+    transport = OpenCLIExternalIntelligenceTransport(executable="opencli", timeout=1)
+
+    code, stdout, _stderr, timed_out = transport._run(["opencli"], os.environ)
+
+    assert timed_out is True
+    assert stdout == "early"
+    assert len(calls) == 2
