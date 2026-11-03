@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
-import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerResult,
@@ -27,6 +28,8 @@ from nexus.executors.codex_run_boundary import (
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -185,7 +188,9 @@ class CodexCliExecutor:
                 )
             return receipt
         finally:
-            shutil.rmtree(run_home, ignore_errors=True)
+            cleanup_error = remove_untrusted_tree_quietly(run_home)
+            if cleanup_error is not None:
+                _LOG.warning("codex run home cleanup failed: %s", cleanup_error)
 
     def _boundary_failure(
         self,

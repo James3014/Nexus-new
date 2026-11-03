@@ -1310,23 +1310,6 @@ def clean_scratch_tmp(tmp: Path, keep: Iterable[str] = ()) -> list[str]:
     return errors
 
 
-def _chmod_dir_no_follow(path: str) -> None:
-    """chmod 0o700 on ``path`` only if it is a real directory (never through a link)."""
-    try:
-        st = os.lstat(path)
-    except OSError:
-        return
-    if not stat.S_ISDIR(st.st_mode):
-        return
-    try:
-        if os.chmod in os.supports_follow_symlinks:
-            os.chmod(path, 0o700, follow_symlinks=False)
-        else:  # Linux: no lchmod; the lstat above already refused a link
-            os.chmod(path, 0o700)
-    except (OSError, NotImplementedError):
-        pass
-
-
 def _remove_untrusted_tree_quietly(path: Path) -> str | None:
     """Remove a tree a scored test wrote to (iterative, locked entries made removable); the
     error text when it could not be removed, else None (#3281). Imported late like the other
@@ -1334,16 +1317,6 @@ def _remove_untrusted_tree_quietly(path: Path) -> str | None:
     from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
     return remove_untrusted_tree_quietly(path)
-
-
-def _make_tree_writable(root: Path) -> None:
-    """A test may leave read-only directories behind, which rmtree cannot empty."""
-    if root.is_symlink():
-        return
-    _chmod_dir_no_follow(str(root))
-    for dirpath, dirs, _files in os.walk(root, followlinks=False):
-        for name in dirs:
-            _chmod_dir_no_follow(os.path.join(dirpath, name))
 
 
 def parse_junit(path: Path) -> dict[str, str]:
@@ -2969,7 +2942,7 @@ def _retire_os_scoring(
     if trees_trash is not None:
         leftover = _remove_untrusted_tree_quietly(trees_trash)
         if leftover:
-            timing["trees_cleanup_error"] = leftover
+            timing["trees_retire_cleanup_error"] = leftover
         repo.git("worktree", "prune", check=False)
 
 

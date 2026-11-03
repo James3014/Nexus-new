@@ -36,6 +36,7 @@ boundary cannot be prepared and the dispatcher refuses the run.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -46,6 +47,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 from nexus.core.contained_write import PathContainmentError, root_identity
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.executors import cli_worker
 from nexus.executors.agy_write_admission import (
     KEYCHAIN_ISOLATED,
@@ -62,6 +64,8 @@ from nexus.executors.agy_write_admission import (
     seatbelt_available,
     worker_home,
 )
+
+_LOG = logging.getLogger(__name__)
 
 AGY_WRITE_BOUNDARY_UNAVAILABLE = "AGY_WRITE_BOUNDARY_UNAVAILABLE"
 KEEP_RUN_ROOT_ENV = "NEXUS_AGY_KEEP_RUN_ROOT"
@@ -270,7 +274,9 @@ class AgyDispatchBoundary:
         # Diagnostics only: keep the run root (disposable HOME, keychain) for
         # inspection; the operator deletes it afterwards.
         if os.environ.get(KEEP_RUN_ROOT_ENV) != "1":
-            shutil.rmtree(self.run_root, ignore_errors=True)
+            cleanup_error = remove_untrusted_tree_quietly(self.run_root)
+            if cleanup_error is not None:
+                _LOG.warning("agy dispatch run root cleanup failed: %s", cleanup_error)
         shutil.rmtree(self.profile_path.parent, ignore_errors=True)
 
 
