@@ -77,11 +77,15 @@ def test_sync_staged_to_sandbox(workspace_mgr, tmp_path):
     sandbox_path = tmp_path / "sandbox"
     sandbox_path.mkdir()
     
+    # The sandbox side now resolves its git dir and probes its config first (#3339).
     with patch("subprocess.run") as mock_run, \
-         patch("pathlib.Path.stat") as mock_stat:
+         patch("pathlib.Path.stat") as mock_stat, \
+         patch("nexus.core.hardened_git.repository_git_dir", return_value=sandbox_path / ".git"), \
+         patch("nexus.core.hardened_git.repository_config_can_start_a_program", return_value=False):
         
         mock_run.return_value = MagicMock(returncode=0)
-        mock_stat.return_value = MagicMock(st_size=100) # 模擬 patch 大小 > 0
+        # st_mode: the pinned git dir is checked as a directory (0o040755 = S_IFDIR | 0o755).
+        mock_stat.return_value = MagicMock(st_size=100, st_mode=0o040755) # 模擬 patch 大小 > 0
         
         success = workspace_mgr.sync_staged_to_sandbox(sandbox_path)
         assert success is True
