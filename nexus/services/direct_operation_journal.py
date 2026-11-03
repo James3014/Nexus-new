@@ -317,8 +317,15 @@ def _is_repository_dir(git_dir: Path) -> bool:
     line or an object id) plus ``objects`` and ``refs`` directories, unless a ``commondir``
     names them elsewhere. An empty or partial ``.git`` directory is skipped by git itself, so
     it is not trusted here either."""
+    head_path = git_dir / "HEAD"
     try:
-        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if not stat.S_ISREG(os.lstat(head_path).st_mode):
+            return False
+        fd = os.open(head_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            head = os.read(fd, 4096).decode("utf-8").strip()
+        finally:
+            os.close(fd)
     except (OSError, ValueError):
         return False
     if head.startswith("ref:"):
@@ -379,7 +386,7 @@ def _bound_repository(cwd: str, repo_root: str | None) -> tuple[Path, Path] | No
             return None
         if repository_config_can_start_a_program(candidate, git_dir=git_dir):
             return None
-    except OSError:
+    except (OSError, ValueError):
         return None
     return candidate, git_dir
 
