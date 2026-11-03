@@ -77,11 +77,15 @@ def test_sync_staged_to_sandbox(workspace_mgr, tmp_path):
     sandbox_path = tmp_path / "sandbox"
     sandbox_path.mkdir()
     
+    # The sandbox side now resolves its git dir and probes its config first (#3339).
     with patch("subprocess.run") as mock_run, \
-         patch("pathlib.Path.stat") as mock_stat:
+         patch("pathlib.Path.stat") as mock_stat, \
+         patch("nexus.core.hardened_git.repository_git_dir", return_value=sandbox_path / ".git"), \
+         patch("nexus.core.hardened_git.repository_config_can_start_a_program", return_value=False):
         
         mock_run.return_value = MagicMock(returncode=0)
-        mock_stat.return_value = MagicMock(st_size=100) # 模擬 patch 大小 > 0
+        # st_mode: the pinned git dir is checked as a directory (0o040755 = S_IFDIR | 0o755).
+        mock_stat.return_value = MagicMock(st_size=100, st_mode=0o040755) # 模擬 patch 大小 > 0
         
         success = workspace_mgr.sync_staged_to_sandbox(sandbox_path)
         assert success is True
@@ -195,3 +199,103 @@ def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
         WorkspaceManager(controller).lease(task_id="T790")
 
     assert f"not an independently registered worktree: {swarm}" in caplog.text
+
+
+def _sync_manager(project_root: Path, tmp_path: Path) -> WorkspaceManager:
+    return WorkspaceManager(project_root)
+
+
+def test_sync_staged_to_sandbox_runs_git_hardened(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmon.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(main, "config", "core.fsmonitor", str(hook))
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    marker.unlink(missing_ok=True)  # the plain git calls above already ran the hook
+
+    assert _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox) is True
+
+    assert not marker.exists()
+    assert "staged change" in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_fails_closed_when_git_hangs(tmp_path, monkeypatch):
+    import nexus.core.hardened_git as hardened_git
+
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=1)
+
+    monkeypatch.setattr(hardened_git, "run_hardened_git", hang)
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    assert _sync_manager(tmp_path, tmp_path).sync_staged_to_sandbox(sandbox) is False
+
+
+def test_sync_staged_to_sandbox_relative_patch_path_is_applied(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    (cwd / "rel.patch").write_text("", encoding="utf-8")  # same name, empty, in Python cwd
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", "rel.patch")
+    monkeypatch.chdir(cwd)
+
+    result = _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox)
+
+    assert result is True
+    assert "staged change" in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_refuses_sandbox_config_naming_a_program(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    marker = tmp_path / "filter-ran"
+    script = tmp_path / "filter.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    script.chmod(0o755)
+    _git(sandbox, "config", "filter.x.clean", str(script))
+    _git(sandbox, "config", "filter.x.smudge", str(script))
+    (sandbox / ".git" / "info").mkdir(exist_ok=True)
+    (sandbox / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    marker.unlink(missing_ok=True)
+
+    assert _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox) is False
+
+    assert not marker.exists()
+    assert "staged change" not in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_refuses_a_patch_path_that_is_a_link(tmp_path, monkeypatch):
+    """A configured patch path that is a link is refused; the link target is not written."""
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    (controller / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    _git(controller, "add", "tracked.txt")
+    target = tmp_path / "victim.txt"
+    target.write_text("keep me\n", encoding="utf-8")
+    link = tmp_path / "sync.patch"
+    link.symlink_to(target)
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(link))
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    mgr = WorkspaceManager(controller)
+
+    assert mgr.sync_staged_to_sandbox(tmp_path / "sandbox") is False
+    assert target.read_text(encoding="utf-8") == "keep me\n"
+
