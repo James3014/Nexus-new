@@ -18,6 +18,8 @@ DEFAULT_TIMEOUT_SEC = 3
 DEFAULT_MEMORY_MB = 512
 # Writes the child may need to start or run ordinary shell commands, beyond its own dirs.
 SANDBOX_DEVICE_WRITE_ALLOWLIST = ("/dev/null",)
+# Extra system services denied, closing an indirect write path outside the workspace.
+SANDBOX_EXTRA_DENIED_SERVICES = ("com.apple.cfprefsd.daemon", "com.apple.cfprefsd.agent")
 # sandbox-exec's own exit codes: EX_USAGE, EX_DATAERR (profile parse), EX_OSERR (apply/exec).
 SANDBOX_EXEC_FAILURE_RETURNCODES = frozenset({64, 65, 71})
 
@@ -63,7 +65,16 @@ def _write_allow_rule(workspace_dir: Path, tmp_dir: Path) -> str:
     return f"(allow file-write* {' '.join(filters)})"
 
 
+def _extra_deny_rule() -> str:
+    names = " ".join(f'(global-name "{name}")' for name in SANDBOX_EXTRA_DENIED_SERVICES)
+    return f"(deny mach-lookup {names})"
+
+
 def _macos_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
+    return _reference_sandbox_profile(workspace_dir, tmp_dir)
+
+
+def _reference_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
     workspace = _sbpl_string(str(workspace_dir.resolve()))
     tmp = _sbpl_string(str(tmp_dir.resolve()))
     # Reads stay allowed (the attestation claims no read isolation); writes are
@@ -72,6 +83,7 @@ def _macos_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
 (version 1)
 (allow default)
 (deny network*)
+{_extra_deny_rule()}
 (deny file-write*)
 (allow file-read* (subpath "{workspace}"))
 (allow file-read* (subpath "{tmp}"))
@@ -82,14 +94,22 @@ def _macos_sandbox_profile(workspace_dir: Path, tmp_dir: Path) -> str:
 def _profile_confines_writes(profile: str, *, workspace_dir: Path, tmp_dir: Path) -> bool:
     """True when the profile denies writes and re-allows only workspace, tmp and devices."""
 
+    # Whole-profile comparison: each line must be exactly one known rule, so an extra
+    # form sharing a line with a known rule is rejected too.
     rules = [line.strip() for line in profile.splitlines() if line.strip()]
-    if "(deny file-write*)" not in rules:
-        return False
-    expected = _write_allow_rule(workspace_dir, tmp_dir)
-    after_deny = rules[rules.index("(deny file-write*)") + 1 :]
-    if not all(rule == expected or rule.startswith("(allow file-read* ") for rule in after_deny):
-        return False
-    return all(rule in ("(deny file-write*)", expected) for rule in rules if "file-write" in rule)
+    # Written out here, independent of the profile generator, so a widened generator
+    # cannot make its own output match.
+    expected = [
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        _extra_deny_rule(),
+        "(deny file-write*)",
+        f'(allow file-read* (subpath "{_sbpl_string(str(workspace_dir.resolve()))}"))',
+        f'(allow file-read* (subpath "{_sbpl_string(str(tmp_dir.resolve()))}"))',
+        _write_allow_rule(workspace_dir, tmp_dir),
+    ]
+    return rules == expected
 
 
 def _sandbox_launch_failed(*, returncode: int, stderr: str) -> bool:
@@ -210,9 +230,8 @@ def run_macos_sandbox_probe(
     elif timed_out:
         isolation_reason = "sandbox_outcome_unknown_timeout"
     elif sandbox_apply_failed:
-        isolation_reason = (
-            "sandbox_apply_failed" if "sandbox_apply" in str(stderr) else "sandbox_launch_failed"
-        )
+        # The label comes from the exit status only; the child controls its stderr text.
+        isolation_reason = "sandbox_apply_failed" if returncode == 71 else "sandbox_launch_failed"
     elif not writes_confined:
         isolation_reason = "profile_write_scope_unconfined"
     else:
