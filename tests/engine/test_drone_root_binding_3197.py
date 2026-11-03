@@ -539,15 +539,13 @@ def test_the_write_grant_check_accepts_only_bound_paths(tmp_path):
     assert not mos._writes_stay_bound(odd, bound)
 
 
-def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path):
-    # A confined command may nest directories far past the recursion limit and lock the
-    # innermost one; the private area must still be gone (or the failure reported), never
-    # left behind quietly (#3238). Host-side only.
-    private = tmp_path / "private"
+def _deep_locked_tree(private: Path, depth: int) -> None:
+    """``depth`` nested directories under ``private`` with the innermost one set to mode 0,
+    built by descriptor so the path length never matters."""
     private.mkdir()
     fd = os.open(private, os.O_RDONLY)
     try:
-        for _ in range(1500):
+        for _ in range(depth):
             os.mkdir("d", dir_fd=fd)
             nxt = os.open("d", os.O_RDONLY, dir_fd=fd)
             os.close(fd)
@@ -556,8 +554,56 @@ def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path):
     finally:
         os.close(fd)
 
-    try:
-        mos._remove_private_dir(str(private))
-    except mos.SandboxError:
-        pass
+
+def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path, monkeypatch):
+    # A confined command may nest directories far past the recursion limit and lock the
+    # innermost one; the private area must be gone, removed outright, not set aside (#3238).
+    # Host-side only. A small open-descriptor budget makes the move-up branch run for real.
+    monkeypatch.setattr(mos, "_WALK_MAX_OPEN", 4)
+    private = tmp_path / "private"
+    _deep_locked_tree(private, 1500)
+
+    mos._remove_private_dir(str(private))  # returns: nothing was set aside
+
     assert not private.exists()
+    assert list(tmp_path.glob("private.stale-*")) == []
+
+
+def test_deep_tree_cleanup_moves_past_a_taken_move_name_3238(tmp_path, monkeypatch):
+    # The command can leave entries under any name, including the one the walk would use to
+    # move a deep subtree up; the walk takes the next number instead of giving up (#3238).
+    monkeypatch.setattr(mos, "_WALK_MAX_OPEN", 4)
+    monkeypatch.setattr(mos, "_move_token", lambda: "fixed")
+    private = tmp_path / "private"
+    _deep_locked_tree(private, 40)
+    (private / mos._move_name("fixed", 1)).write_text("taken by the command")
+    (private / mos._move_name("fixed", 2)).mkdir()
+    (private / mos._move_name("fixed", 2) / "keep").write_text("also taken")
+
+    mos._remove_private_dir(str(private))
+
+    assert not private.exists()
+    assert list(tmp_path.glob("private.stale-*")) == []
+
+
+def test_private_area_that_still_cannot_be_removed_is_set_aside_and_reported_3238(
+    tmp_path, monkeypatch
+):
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "leftover").write_text("x")
+    real_rmtree = mos.shutil.rmtree
+
+    def rmtree_refused(path, *a, **k):
+        raise OSError(1, "Operation not permitted", str(path))
+
+    monkeypatch.setattr(mos.shutil, "rmtree", rmtree_refused)
+    aside = tmp_path / f"private.stale-{os.getpid()}"
+    try:
+        with pytest.raises(mos.SandboxError, match=f"^private_area_not_removed:{aside.name}$"):
+            mos._remove_private_dir(str(private))
+        assert not private.exists() and aside.is_dir()
+    finally:
+        monkeypatch.undo()
+        if aside.exists():
+            real_rmtree(aside)
