@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -1569,20 +1570,37 @@ class OpenCLIExternalIntelligenceTransport:
                 # (#3200/#3206) kills this group and reaps it before it propagates (#3293).
                 stdout, stderr = communicate_then_kill_group(process, self.timeout + 5)
                 return process.returncode, _decode_output(stdout), _decode_output(stderr), False
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass
-                try:
-                    stdout, stderr = process.communicate(timeout=1)
-                except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as timed_out:
+                # The leader stays unreaped (its pid, the group id, stays reserved) until the
+                # group is killed: SIGTERM, then SIGKILL, each wait bounded (#3313). Output the
+                # wait already read rides on the exception, so it leads what the drains return.
+                out_parts = [timed_out.output or b""]
+                err_parts = [timed_out.stderr or b""]
+                for sig, grace in ((signal.SIGTERM, 1), (signal.SIGKILL, 5)):
+                    with contextlib.suppress(OSError):
+                        os.killpg(process.pid, sig)
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except (OSError, ProcessLookupError):
-                        pass
-                    stdout, stderr = process.communicate()
-                return process.returncode, _decode_output(stdout), _decode_output(stderr), True
+                        drained_out, drained_err = communicate_then_kill_group(process, grace)
+                    except subprocess.TimeoutExpired as again:
+                        out_parts.append(again.output or b"")
+                        err_parts.append(again.stderr or b"")
+                        continue
+                    except (ChildProcessError, PermissionError):
+                        # A member survived SIGKILL or the group could not be listed: still an
+                        # unknown outcome, returned with the output read so far (not raised).
+                        break
+                    out_parts.append(drained_out or b"")
+                    err_parts.append(drained_err or b"")
+                    break
+                if process.returncode is None:
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        process.wait(timeout=1)
+                return (
+                    process.returncode,
+                    _decode_output(b"".join(out_parts)),
+                    _decode_output(b"".join(err_parts)),
+                    True,
+                )
             except (ChildProcessError, PermissionError):
                 # A group member survived SIGKILL or the group could not be listed: treat as
                 # an unknown outcome, reconciled read-only like a timeout.
