@@ -19,6 +19,29 @@ def _get_path(row: Mapping[str, Any], *path: str) -> Any:
     return value
 
 
+def zero_trust_v2_signature_reasons(
+    row: Mapping[str, Any], *, signing_secret: str | None
+) -> list[str]:
+    """Non-production marker and attestation-signature re-check, shared with the evidence
+    accumulation report (#3303). An empty list means the row's signature earns credit."""
+    if not signing_secret:
+        return ["sandbox_signature_not_verified"]
+    if signing_secret in NONPRODUCTION_DEFAULT_SECRETS or row.get("nonproduction_secret") is True:
+        return ["nonproduction_signing_secret"]
+    attestation = row.get("sandbox_attestation")
+    try:
+        verdict = validate_sandbox_attestation(
+            attestation if isinstance(attestation, Mapping) else {},
+            signing_secret=signing_secret,
+        )
+    except (TypeError, ValueError):
+        # A malformed signature (non-ASCII text, say) is one bad row, not a failed report.
+        verdict = {"status": "INVALID", "sandbox_mode": None}
+    if verdict["status"] != "PASS" or verdict["sandbox_mode"] == "mocked_non_promotion":
+        return ["sandbox_signature_invalid"]
+    return []
+
+
 def evaluate_zero_trust_v2_promotion_candidate(
     row: Mapping[str, Any], *, min_v2_evidence_count: int = 3, signing_secret: str | None = None
 ) -> dict[str, Any]:
@@ -59,22 +82,7 @@ def evaluate_zero_trust_v2_promotion_candidate(
         reasons.append("missing_receipt_signature")
     if _get_path(row, "sandbox_attestation", "status") != "PASS":
         reasons.append("sandbox_attestation_not_pass")
-    if not signing_secret:
-        reasons.append("sandbox_signature_not_verified")
-    elif signing_secret in NONPRODUCTION_DEFAULT_SECRETS or row.get("nonproduction_secret") is True:
-        reasons.append("nonproduction_signing_secret")
-    else:
-        attestation = row.get("sandbox_attestation")
-        try:
-            verdict = validate_sandbox_attestation(
-                attestation if isinstance(attestation, Mapping) else {},
-                signing_secret=signing_secret,
-            )
-        except (TypeError, ValueError):
-            # A malformed signature (non-ASCII text, say) is one bad row, not a failed report.
-            verdict = {"status": "INVALID", "sandbox_mode": None}
-        if verdict["status"] != "PASS" or verdict["sandbox_mode"] == "mocked_non_promotion":
-            reasons.append("sandbox_signature_invalid")
+    reasons.extend(zero_trust_v2_signature_reasons(row, signing_secret=signing_secret))
     if _get_path(row, "baseline_sandwich", "baseline_delta_status") != "CLEAN":
         reasons.append("baseline_not_clean")
     if _get_path(row, "cleanup_attestation", "teardown_status") != "PASS":
