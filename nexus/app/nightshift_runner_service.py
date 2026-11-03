@@ -26,6 +26,12 @@ from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
 from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.context_hub import ContextHub
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.services.workspace import WorkspaceManager
 from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
 
@@ -1204,6 +1210,9 @@ class AutoResearchNightShift:
             lease_task_id = f"{self.task}-{int(time.time())}"
             lease_branch = f"nightshift-{int(time.time())}"
             task_id, branch_name, workpath = self.worktree_mgr.lease(lease_task_id, lease_branch)
+            # Resolved once, before any worker output lands in the work path; every later
+            # git call there is pinned to this git dir.
+            self._workpath_git_dir = self._resolve_workpath_git_dir(workpath)
             if not workpath:
                 print("❌ [AutoResearch] Failed to lease workspace.")
                 return {
@@ -1241,24 +1250,16 @@ class AutoResearchNightShift:
                     print(
                         f"⭐ [AutoResearch] New best score: {outcome.score:.2f} (Round {round_id})"
                     )
+                    previous_best = self.best_score
                     self.best_score = outcome.score
                     self.no_improve_streak = 0
 
-                    if self.git_enabled:
-                        subprocess.run(["git", "add", "."], cwd=workpath, capture_output=True)
-                        subprocess.run(
-                            [
-                                "git",
-                                "commit",
-                                "-m",
-                                f"opt(nightshift): optimize {self.task} (score: {outcome.score:.2f})",
-                            ],
-                            cwd=workpath,
-                            capture_output=True,
-                        )
-                        self.base_commit = subprocess.check_output(
-                            ["git", "rev-parse", "HEAD"], cwd=workpath, text=True
-                        ).strip()
+                    if self.git_enabled and not self._commit_improvement(workpath, outcome.score):
+                        # Nothing was committed, so this round is not a winner to promote.
+                        self.best_score = previous_best
+                        self.no_improve_streak += 1
+                        self._log_trace(round_id, "GIT_UNTRUSTED", outcome.score, outcome.summary)
+                        continue
 
                     self._log_trace(
                         round_id,
@@ -1268,9 +1269,7 @@ class AutoResearchNightShift:
                     )
                 else:
                     if self.git_enabled:
-                        subprocess.run(
-                            ["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True
-                        )
+                        self._workpath_git(workpath, "reset", "--hard", "HEAD")
                     self.no_improve_streak += 1
                     self._log_trace(round_id, outcome.status, outcome.score, outcome.summary)
                     if outcome.status == "GENERATION_FAILED" and self._is_quota_or_capacity_error(
@@ -1404,6 +1403,51 @@ class AutoResearchNightShift:
         with open(report_path, "w") as f:
             json.dump(payload, f, indent=2)
         print(f"📊 [Orchestrator] Machine-readable report saved to: {report_path}")
+
+    def _resolve_workpath_git_dir(self, workpath: Any) -> Optional[Path]:
+        """The verified git dir of a leased work path: its linked-worktree registration under
+        this project, or the project's own git dir when the work path is the project root."""
+        if not workpath:
+            return None
+        path = Path(workpath).resolve()
+        if path == self.project_root.resolve():
+            return repository_git_dir(path)
+        return linked_worktree_git_dir(path, self.project_root)
+
+    def _workpath_git(self, workpath: Path, *args: str):
+        """Run git in the work path a worker has written, hardened and pinned to the git dir
+        resolved at lease time; None (nothing run) when that git dir is not trusted or its
+        config names a program."""
+        git_dir = getattr(self, "_workpath_git_dir", None)
+        root = Path(workpath)
+        if git_dir is None or repository_config_can_start_a_program(root, git_dir=git_dir):
+            print("🛑 [AutoResearch] Work path git is not trusted; git step skipped.")
+            return None
+        try:
+            return run_hardened_git(root, *args, git_dir=git_dir)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def _commit_improvement(self, workpath: Path, score: float) -> bool:
+        """Commit the winning round in the work path and move base_commit to it; False when
+        git there is not trusted or the commit did not land."""
+        if self._workpath_git(workpath, "add", ".") is None:
+            return False
+        self._workpath_git(
+            workpath,
+            "-c",
+            "user.name=Nexus NightShift",
+            "-c",
+            "user.email=nightshift@nexus.invalid",
+            "commit",
+            "-m",
+            f"opt(nightshift): optimize {self.task} (score: {score:.2f})",
+        )
+        head = self._workpath_git(workpath, "rev-parse", "HEAD")
+        if head is None or head.returncode != 0 or not head.stdout.strip():
+            return False
+        self.base_commit = head.stdout.strip()
+        return True
 
     def _cleanup_worktree(self, workpath: Path) -> None:
         resolved_workpath = Path(workpath).resolve()
