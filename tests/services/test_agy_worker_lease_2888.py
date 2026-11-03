@@ -1374,7 +1374,7 @@ def test_missing_root_is_proven_only_when_the_worker_account_owns_no_process(run
     ((argv, kwargs),) = commands.pses
     assert argv == ["/bin/ps", "-U", worker_mod.WORKER_USER, "-o", "pid="]
     assert kwargs["timeout"] == 10 and kwargs["capture_output"] is True
-    assert kwargs["env"] == {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+    assert kwargs["env"] == {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "TZ": "UTC"}
 
 
 @pytest.mark.parametrize(

@@ -65,6 +65,7 @@ Trust and limits (#2885 review r1):
 
 from __future__ import annotations
 
+import calendar
 import errno
 import grp
 import hashlib
@@ -314,7 +315,8 @@ def sweep_run_root_report(
     return "UNCLEAN", last
 
 
-_PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+# TZ is pinned because ps lstart text must match the one agy-worker-exec --sweep produces.
+_PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "TZ": "UTC"}
 
 PS_PATH = "/bin/ps"
 PS_TIMEOUT_SECONDS = 10.0
@@ -615,7 +617,8 @@ def pid_start_tokens(
                 raise ValueError("AGY_WORKER_PID_PROBE_UNPROVEN")
             continue
         try:
-            started = time.mktime(time.strptime(" ".join(parts[1:]), "%a %b %d %H:%M:%S %Y"))
+            # _PS_ENV pins TZ=UTC, so the lstart text is UTC, not local time.
+            started = calendar.timegm(time.strptime(" ".join(parts[1:]), "%a %b %d %H:%M:%S %Y"))
         except ValueError:
             if strict:
                 raise

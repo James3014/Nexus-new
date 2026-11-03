@@ -90,7 +90,9 @@ if [ "$1" = "--sweep" ]; then
   shift 2
   require_run_root "$RUN_ROOT"
   LC_ALL=C
-  export LC_ALL
+  # ps prints lstart in the local zone; the Owner side pins UTC, so pin it here too.
+  TZ=UTC
+  export LC_ALL TZ
   for arg in "$@"; do
     case "$arg" in
       [0-9]*:?*) ;;
