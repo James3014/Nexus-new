@@ -269,7 +269,14 @@ for path in sorted(jobs.glob("*.json")) if jobs.exists() else []:
         continue
     job = job if isinstance(job, dict) else {}
     status = job.get("status")
-    if status == "UNKNOWN_REQUIRES_RECONCILE" or job.get("reconciliation_required"):
+    # Same test as the Gateway's _assist_flagged_for_reconcile (copied: this script cannot
+    # import it; tests pin the two together): a record written before #3244 holds its
+    # lease for reconciliation without the flag (#3289).
+    flagged = bool(job.get("reconciliation_required")) or (
+        job.get("account_lease_cleanup_status") == "RECONCILIATION_REQUIRED"
+        and job.get("account_lease_released") is not True
+    )
+    if status == "UNKNOWN_REQUIRES_RECONCILE" or flagged:
         tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RECONCILE"})
     elif status not in ("COMPLETED", "FAILED", "CANCELLED"):
         tasks.append({"task_id": "assist." + path.stem, "action_state": "ASSIST_RUNNING"})

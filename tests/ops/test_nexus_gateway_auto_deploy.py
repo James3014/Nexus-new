@@ -5260,6 +5260,63 @@ def test_quiescence_unsettled_assisted_jobs_fail_closed(
     assert result["quiescence"]["blocking"] == [f"assist.assist-9:{label}"]
 
 
+_OLD_SHAPE_3289 = {
+    "status": "CANCELLED",
+    "process_killed": True,
+    "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+}
+_PARITY_RECORDS_3289: list[dict[str, Any]] = [
+    {"status": "FAILED", "reconciliation_required": True},
+    dict(_OLD_SHAPE_3289),
+    {**_OLD_SHAPE_3289, "account_lease_released": False},
+    {**_OLD_SHAPE_3289, "account_lease_released": True},
+    {**_OLD_SHAPE_3289, "status": "COMPLETED"},
+    {**_OLD_SHAPE_3289, "status": "FAILED"},
+    {"status": "COMPLETED"},
+    {"status": "CANCELLED", "process_killed": True},
+    {"status": "FAILED"},
+    {"status": "COMPLETED", "account_lease_cleanup_status": "RELEASED"},
+    {"status": "CANCELLED", "process_killed": True, "account_lease_released": False},
+    {"status": "COMPLETED", "account_lease_cleanup_status": "", "account_lease_released": None},
+]
+
+
+def test_quiescence_holds_an_old_shape_assist_record_with_its_lease_3289(
+    cfg: ad.Config,
+) -> None:
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    (jobs / "assist-old.json").write_text(json.dumps(_OLD_SHAPE_3289))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    assert result["status"] == ad.DEFERRED_OUTCOME
+    assert result["quiescence"]["blocking"] == ["assist.assist-old:ASSIST_RECONCILE"]
+
+
+def test_quiescence_probe_matches_the_gateway_reconcile_predicate_3289(
+    cfg: ad.Config,
+) -> None:
+    from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+        _assist_flagged_for_reconcile,
+    )
+
+    jobs = cfg.canonical_state_dir / "assisted_provider_jobs"
+    jobs.mkdir(parents=True)
+    for index, record in enumerate(_PARITY_RECORDS_3289):
+        (jobs / f"assist-{index:02d}.json").write_text(json.dumps(record))
+    host, prober = FakeHost(), FakeProber()
+    host.real_classifier = True
+    result = cycle(cfg, host, prober)
+    blocking = set(result["quiescence"]["blocking"])
+    for index, record in enumerate(_PARITY_RECORDS_3289):
+        held = f"assist.assist-{index:02d}:ASSIST_RECONCILE" in blocking
+        expected = record.get("status") == "UNKNOWN_REQUIRES_RECONCILE" or (
+            _assist_flagged_for_reconcile(record)
+        )
+        assert held == expected, record
+
+
 def test_deferral_log_is_bounded(cfg: ad.Config, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ad, "DEFERRALS_MAX_BYTES", 200)
     host, prober = FakeHost(), FakeProber()
