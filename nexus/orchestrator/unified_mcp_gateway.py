@@ -2737,6 +2737,16 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                     )
                     current["account_lease_reconciliation_result"] = lease_result.get("result")
                     if lease_result.get("result") not in {"ALREADY_ABSENT", "LEASE_RECEIPT_REMOVED"}:
+                        if current.get("status") == "COMPLETED":
+                            # The completed result stays; only the lease is left to reconcile (#3290).
+                            current.update({
+                                "reconciliation_required": True,
+                                "account_lease_released": False,
+                                "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+                                "last_polled_at": self._utc_now(),
+                            })
+                            current = self._assist_write_current(task_id, current)
+                            return self._assist_response(current, operation="reconcile")
                         current.update({
                             "status": "UNKNOWN_REQUIRES_RECONCILE",
                             "blocker": "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
@@ -2749,6 +2759,15 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                         return self._assist_response(current, operation="reconcile")
                     current["account_lease_released"] = True
                     current["account_lease_cleanup_status"] = "RELEASED"
+
+                if current.get("status") == "COMPLETED":
+                    # The lease is the only open item: keep the status and result (#3290).
+                    current.update({
+                        "reconciliation_required": False,
+                        "last_polled_at": self._utc_now(),
+                    })
+                    current = self._assist_write_current(task_id, current)
+                    return self._assist_response(current, operation="reconcile")
 
                 # No durable exit marker means the provider outcome is not
                 # recoverable from output alone.  Only after lease cleanup is
