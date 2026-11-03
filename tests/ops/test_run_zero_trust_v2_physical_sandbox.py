@@ -58,3 +58,14 @@ def test_build_probe_validates_the_attestation_with_the_runner_secret(monkeypatc
     assert seen == {"probe_secret": "s-3229", "validated": attestation, "validate_secret": "s-3229"}
     assert report["summary"]["promotion_eligible"] is True
     assert report["summary"]["attestation_validation_status"] == "PASS"
+
+
+def test_physical_sandbox_main_refuses_to_sign_without_a_secret(monkeypatch, tmp_path, capsys) -> None:
+    from scripts.ops import run_zero_trust_v2_physical_sandbox as run
+
+    monkeypatch.delenv("NEXUS_V2_RUNNER_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("NEXUS_V2_RUNNER_SIGNING_SECRET_FILE", raising=False)
+    code = run.main(["--output", str(tmp_path / "out.json"), "--replay-matrix", str(tmp_path / "none.json")])
+    assert code == 2
+    assert not (tmp_path / "out.json").exists()
+    assert "no signing secret" in capsys.readouterr().err

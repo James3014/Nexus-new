@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+from nexus.learning.zero_trust_v2_sandbox import sandbox_attestation_signature
 from scripts.ops.build_zero_trust_v2_promotion_report import build_zero_trust_v2_promotion_report
+
+
+def _signed_attestation() -> dict:
+    body = {
+        "issuer": "nexus.runner",
+        "sandbox_mode": "macos_sandbox",
+        "status": "PASS",
+        "network_disabled": True,
+        "workspace_isolated": True,
+        "tmp_isolated": True,
+        "teardown_status": "PASS",
+    }
+    signature = sandbox_attestation_signature(
+        attestation_body=body, signing_secret="fake-secret-3249"
+    )
+    return {**body, "signature": signature}
 
 
 def _candidate_row(**overrides: object) -> dict:
@@ -42,12 +59,13 @@ def test_zero_trust_v2_promotion_report_accepts_only_complete_v2_evidence() -> N
                     negative_control_blocked_count=1,
                     receipt_provenance="runtime_signed",
                     receipt_signature="sig",
-                    sandbox_attestation={"status": "PASS"},
+                    sandbox_attestation=_signed_attestation(),
                     baseline_sandwich={"baseline_delta_status": "CLEAN"},
                     cleanup_attestation={"teardown_status": "PASS"},
                 )
             ]
-        }
+        },
+        signing_secret="fake-secret-3249",
     )
 
     assert result["summary"]["ready_for_manual_apply_count"] == 1

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nexus.learning.skill_fit_closure import write_json
 from nexus.learning.zero_trust_v2_physical_sandbox import run_macos_sandbox_probe
+from nexus.learning.zero_trust_v2_signing_secret import SigningSecretError, resolve_signing_secret  # noqa: E402
 from nexus.learning.zero_trust_v2_sandbox import validate_sandbox_attestation
 
 
@@ -49,9 +49,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build Zero-Trust V2 physical sandbox probe report.")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--command", nargs="+", default=["/bin/echo", "nexus-zero-trust-v2-sandbox-probe"])
+    parser.add_argument("--secret-file", default=None, help="0600 file holding the signing secret")
+    parser.add_argument("--allow-nonproduction-secret", action="store_true", help="allow the built-in default secret; output is marked non-production")
     args = parser.parse_args(argv)
-    signing_secret = os.environ.get("NEXUS_V2_RUNNER_SIGNING_SECRET", "local-nonproduction-v2-sandbox-probe")
-    result = build_zero_trust_v2_sandbox_probe(command=args.command, signing_secret=signing_secret)
+    try:
+        secret = resolve_signing_secret(
+            secret_file=args.secret_file,
+            allow_nonproduction=args.allow_nonproduction_secret,
+            nonproduction_default="local-nonproduction-v2-sandbox-probe",
+        )
+    except SigningSecretError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    result = build_zero_trust_v2_sandbox_probe(command=args.command, signing_secret=secret.value)
+    result["signing_secret_source"] = secret.source
+    result["nonproduction_secret"] = secret.nonproduction
     write_json(args.output, result)
     print(json.dumps({"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True))
     return 0

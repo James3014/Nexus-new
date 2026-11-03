@@ -174,3 +174,43 @@ def test_zero_trust_v2_physical_rows_block_an_attestation_whose_signature_does_n
     candidate = next(row for row in result if row["arm_type"] == "candidate_skill_v2")
     assert candidate["v2_evidence_count"] == 0
     assert candidate["promotion_evaluation"]["status"] == "BLOCKED"
+
+
+def _credit_rows(secret: str):
+    def probe(command, *, signing_secret, **_):
+        return _passing_probe(command, signing_secret="secret") | {
+            "sandbox_attestation": _signed(
+                {
+                    **build_mock_sandbox_attestation(artifact_hash="artifact"),
+                    "sandbox_mode": "macos_sandbox",
+                    "status": "PASS",
+                    "raw_observation": {"returncode": 0},
+                },
+                secret,
+            )
+        }
+
+    rows = [_row("candidate_skill_v2"), _row("wrong_or_quarantined_skill_v2")]
+    return run_zero_trust_v2_physical_rows(
+        rows,
+        command=["/bin/echo", "ok"],
+        signing_secret=secret,
+        run_id="run-1",
+        promotion_credit_allowed=True,
+        sandbox_probe=probe,
+    )
+
+
+def test_report_built_with_the_default_secret_is_not_promotion_eligible() -> None:
+    result = _credit_rows("local-nonproduction-v2-physical-runner")
+
+    candidate = next(row for row in result if row["arm_type"] == "candidate_skill_v2")
+    assert candidate["promotion_evaluation"]["status"] == "BLOCKED"
+    assert "nonproduction_signing_secret" in candidate["promotion_evaluation"]["reasons"]
+
+
+def test_report_built_with_a_real_secret_is_still_promotion_eligible() -> None:
+    result = _credit_rows("fake-real-secret-3249")
+
+    candidate = next(row for row in result if row["arm_type"] == "candidate_skill_v2")
+    assert candidate["promotion_evaluation"]["status"] == "READY_FOR_MANUAL_APPLY"
