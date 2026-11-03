@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -91,6 +92,7 @@ def _gate(
     *,
     python: str = sys.executable,
     state: bool = False,
+    timeout: int = 120,
 ) -> tuple[int, dict[str, object]]:
     contract_path = tmp_path / "green-contract.json"
     contract_path.write_text(json.dumps(contract or _contract()), encoding="utf-8")
@@ -107,7 +109,7 @@ def _gate(
         "--python",
         python,
         "--timeout",
-        "120",
+        str(timeout),
     ]
     if state:
         cmd += ["--state-root", str(tmp_path / "state")]
@@ -492,3 +494,60 @@ def test_editing_the_text_of_a_legacy_debt_line_counts_as_new(
     code, receipt = _gate(repo, tmp_path, python=fake_ruff)
     assert code == guard.EXIT_BLOCKED
     assert receipt["reason_codes"] == ["LINT_FAILURE"]
+
+
+# #3234: the linter availability probe runs in the candidate repository; it must not import
+# candidate content and must honour the gate timeout like every other candidate-side command.
+
+
+def test_lint_probe_does_not_import_candidate_content_named_like_the_linter(
+    repo: Path, tmp_path: Path
+) -> None:
+    marker = tmp_path / "imported-by"
+    (repo / "ruff.py").write_text(
+        "import sys\n"
+        f"open({str(marker)!r}, 'a').write(repr(sys.orig_argv) + chr(10))\n"
+        "raise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a module named like the linter at the repo root")
+    _fix(repo)
+    _gate(repo, tmp_path)
+    imported_by = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+    linter_runs = [line for line in imported_by if "'-m', 'ruff'" in line]
+    assert linter_runs == [], f"a linter invocation imported candidate content: {linter_runs}"
+
+
+@pytest.fixture
+def stalling_python(tmp_path: Path) -> str:
+    """A python wrapper whose linter probe never answers; everything else runs for real."""
+    path = tmp_path / "stalling-python"
+    path.write_text(
+        f"#!{sys.executable}\nimport os, sys, time\n"
+        "if sys.argv[1:4] == ['-m', 'ruff', '--version']:\n    time.sleep(600)\n"
+        f"os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_lint_probe_honours_the_gate_timeout(
+    repo: Path, tmp_path: Path, stalling_python: str
+) -> None:
+    _fix(repo)
+    started = time.monotonic()
+    code, receipt = _gate(repo, tmp_path, python=stalling_python, timeout=3)
+    assert time.monotonic() - started < 60, "the gate waited on the probe past its timeout"
+    assert code != 0 and "ENVIRONMENT_FAILURE" in receipt["reason_codes"], receipt
+
+
+def test_ruff_env_keeps_the_candidate_repository_off_the_module_path(monkeypatch) -> None:
+    """#3234: no bytecode, the working directory off sys.path, and no inherited PYTHONPATH
+    (a relative entry there would resolve inside the candidate repository)."""
+    monkeypatch.setenv("PYTHONPATH", ".:/somewhere/else")
+    env = guard._ruff_env()
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONPATH" not in env

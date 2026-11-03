@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
 import shutil
 import subprocess
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.learning.zero_trust_v2_receipts import canonical_json_hash
+from nexus.learning.zero_trust_v2_sandbox import sandbox_attestation_signature
 
 
 DEFAULT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "PYTHONPATH")
@@ -31,8 +31,9 @@ def _artifact_hash(payload: dict[str, Any]) -> str:
 
 
 def _sandbox_signature(*, attestation_body: dict[str, Any], signing_secret: str) -> str:
-    digest = canonical_json_hash(attestation_body)
-    return hmac.new(signing_secret.encode("utf-8"), digest.encode("utf-8"), hashlib.sha256).hexdigest()
+    return sandbox_attestation_signature(
+        attestation_body=attestation_body, signing_secret=signing_secret
+    )
 
 
 def _sbpl_string(value: str) -> str:
@@ -212,7 +213,15 @@ def run_macos_sandbox_probe(
         "workspace_isolation_reason": isolation_reason,
         "tmp_isolated": isolated,
         "env_allowlist_hash": _env_allowlist_hash(child_env),
-        "resource_limits": {"cpu": "process_timeout", "memory_mb": memory_mb, "timeout_sec": timeout_sec},
+        # Only the timeout is enforced on the child; the memory figure is what the caller
+        # asked for and nothing applies it, so it is not reported as a limit (#3229).
+        "resource_limits": {
+            "cpu": "process_timeout",
+            "memory_mb": None,
+            "memory_mb_requested": memory_mb,
+            "memory_enforced": False,
+            "timeout_sec": timeout_sec,
+        },
         "teardown_status": teardown_status,
         "artifact_hash": artifact_hash,
         "runner_quarantine_status": "NONE" if teardown_status == "PASS" else "QUARANTINED",

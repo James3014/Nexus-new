@@ -1,7 +1,21 @@
 from __future__ import annotations
 
 from nexus.learning.zero_trust_v2_physical_runner import run_zero_trust_v2_physical_rows
-from nexus.learning.zero_trust_v2_sandbox import build_mock_sandbox_attestation
+from nexus.learning.zero_trust_v2_sandbox import (
+    build_mock_sandbox_attestation,
+    sandbox_attestation_signature,
+)
+
+
+def _signed(attestation: dict, signing_secret: str) -> dict:
+    """The attestation as the runner issues it: signed over every field but the signature."""
+    body = {key: value for key, value in attestation.items() if key != "signature"}
+    return {
+        **body,
+        "signature": sandbox_attestation_signature(
+            attestation_body=body, signing_secret=signing_secret
+        ),
+    }
 
 
 def _row(arm_type: str) -> dict:
@@ -22,13 +36,15 @@ def _passing_probe(command: list[str], *, signing_secret: str, **_: object) -> d
     return {
         "status": "PASS",
         "promotion_eligible": True,
-        "sandbox_attestation": {
-            **build_mock_sandbox_attestation(artifact_hash="artifact"),
-            "sandbox_mode": "macos_sandbox",
-            "status": "PASS",
-            "signature": "runner-signature",
-            "raw_observation": {"returncode": 0},
-        },
+        "sandbox_attestation": _signed(
+            {
+                **build_mock_sandbox_attestation(artifact_hash="artifact"),
+                "sandbox_mode": "macos_sandbox",
+                "status": "PASS",
+                "raw_observation": {"returncode": 0},
+            },
+            signing_secret,
+        ),
     }
 
 
@@ -41,13 +57,15 @@ def _blocked_probe(command: list[str], *, signing_secret: str, **_: object) -> d
     return {
         "status": "BLOCKED",
         "promotion_eligible": False,
-        "sandbox_attestation": {
-            **build_mock_sandbox_attestation(artifact_hash="artifact", network_disabled=False),
-            "sandbox_mode": "macos_sandbox",
-            "status": "BLOCKED",
-            "signature": "runner-signature",
-            "raw_observation": {"returncode": 71, "sandbox_apply_failed": True},
-        },
+        "sandbox_attestation": _signed(
+            {
+                **build_mock_sandbox_attestation(artifact_hash="artifact", network_disabled=False),
+                "sandbox_mode": "macos_sandbox",
+                "status": "BLOCKED",
+                "raw_observation": {"returncode": 71, "sandbox_apply_failed": True},
+            },
+            signing_secret,
+        ),
     }
 
 
@@ -128,3 +146,31 @@ def test_zero_trust_v2_physical_rows_pass_workspace_files_to_probe() -> None:
 
     candidate = next(row for row in result if row["arm_type"] == "candidate_skill_v2")
     assert candidate["execution_status"] == "PASS"
+
+
+def _tampered_probe(command: list[str], *, signing_secret: str, **_: object) -> dict:
+    """A passing attestation whose signature does not match its body."""
+    probe = _passing_probe(command, signing_secret=signing_secret)
+    probe["sandbox_attestation"] = {
+        **probe["sandbox_attestation"],
+        "artifact_hash": "another-artifact",
+    }
+    return probe
+
+
+def test_zero_trust_v2_physical_rows_block_an_attestation_whose_signature_does_not_match() -> None:
+    """#3229: the runner verifies the attestation signature with its own secret."""
+    rows = [_row("candidate_skill_v2"), _row("wrong_or_quarantined_skill_v2")]
+
+    result = run_zero_trust_v2_physical_rows(
+        rows,
+        command=["/bin/echo", "ok"],
+        signing_secret="secret",
+        run_id="run-1",
+        promotion_credit_allowed=True,
+        sandbox_probe=_tampered_probe,
+    )
+
+    candidate = next(row for row in result if row["arm_type"] == "candidate_skill_v2")
+    assert candidate["v2_evidence_count"] == 0
+    assert candidate["promotion_evaluation"]["status"] == "BLOCKED"

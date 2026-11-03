@@ -415,3 +415,42 @@ if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
             env_source={"PATH": "/usr/bin:/bin"},
         )
         _assert_not_isolated(result, "sandbox_launch_failed")
+
+
+# #3229: the attestation names only limits the runner enforces, and its signature is checked
+# when the validator knows the secret.
+
+
+def _probe_attestation(tmp_path: Path) -> dict[str, Any]:
+    return run_macos_sandbox_probe(
+        ["/bin/echo", "ok"],
+        signing_secret="test-secret",
+        sandbox_exec_path="/usr/bin/sandbox-exec",
+        subprocess_run=_completed,
+        base_tmp_dir=tmp_path,
+        env_source={"PATH": "/usr/bin:/bin"},
+    )["sandbox_attestation"]
+
+
+def test_probe_does_not_report_a_memory_limit_it_does_not_enforce(tmp_path: Path) -> None:
+    limits = _probe_attestation(tmp_path)["resource_limits"]
+    assert limits["memory_mb"] is None
+    assert limits["memory_enforced"] is False
+    assert limits["memory_mb_requested"] == 512
+    assert limits["cpu"] == "process_timeout" and limits["timeout_sec"] == 3
+
+
+def test_attestation_signature_is_verified_when_the_secret_is_known(tmp_path: Path) -> None:
+    attestation = _probe_attestation(tmp_path)
+    assert validate_sandbox_attestation(attestation, signing_secret="test-secret")["reasons"] == []
+    tampered = {**attestation, "artifact_hash": "another-artifact"}
+    assert (
+        "invalid_sandbox_signature"
+        in validate_sandbox_attestation(tampered, signing_secret="test-secret")["reasons"]
+    )
+    assert (
+        "invalid_sandbox_signature"
+        in validate_sandbox_attestation(attestation, signing_secret="other-secret")["reasons"]
+    )
+    # Without the secret the field checks stand alone, as before.
+    assert validate_sandbox_attestation(tampered)["reasons"] == []
