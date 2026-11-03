@@ -5202,7 +5202,7 @@ def _run_resume_turn(
 
     DSH runs under ``_run_dsh_supervised``: in its own session, within the turn wall clock, its
     whole group killed and confirmed empty before it is reaped, its merged output written to a
-    log under the state root and echoed to stdout once the turn is over. A SIGTERM, SIGHUP or
+    log under the state root and echoed to stdout once the turn is recorded. A SIGTERM, SIGHUP or
     SIGINT while DSH runs kills the group, records the turn as interrupted and returns
     ``128 + signal`` (#3202); before, the workflow ended on the default action with DSH still
     running and the turn unrecorded. A non-zero exit or a failed cleanup records a failed turn,
@@ -5229,7 +5229,6 @@ def _run_resume_turn(
         except DshTurnInterrupted as exc:
             interrupted = exc.signum
             dsh_exit = 128 + exc.signum
-        _echo_file(log_path)
         if dsh_exit != 0 or cleanup_failures:
             failed = record_failed_turn(
                 root,
@@ -5243,9 +5242,11 @@ def _run_resume_turn(
             print(json.dumps(record, sort_keys=True), file=sys.stderr)
         else:
             _write_turn_state(root, session_id, TURN_OK)
-        if signals.received is not None:
-            return 128 + signals.received
-    return dsh_exit
+        code = 128 + signals.received if signals.received is not None else dsh_exit
+    # Recorded first, replayed after, outside the guard: a stdout nobody reads blocks the
+    # replay, and that wait must neither hide the record nor hold a stop signal.
+    _echo_file(log_path)
+    return code
 
 
 def main(argv: Sequence[str] | None = None) -> int:

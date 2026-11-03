@@ -453,3 +453,88 @@ def test_stop_signal_during_a_resumed_turn_kills_the_dsh_group_and_records_it(
     record = json.loads(stderr.strip().splitlines()[-1])
     assert record["log_path"].endswith(".log")
     assert "ready" in stdout  # DSH's output, echoed from the log once the turn is over
+
+
+def test_resume_records_the_turn_before_replaying_output_to_an_unread_stdout(
+    tmp_path: Path, driver_cleanup
+) -> None:
+    """#3235 review: the replay of DSH's output can block on a stdout nobody reads; the turn
+    must already be recorded by then, and the blocked replay must not sit inside the guard."""
+    repo = _git_repo(tmp_path)
+    dsh_bin = tmp_path / "dshbig3235"
+    dsh_bin.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.stdout.write('x' * 200000 + '\\n')\n"
+        "sys.stdout.flush()\n",
+        "utf-8",
+    )
+    dsh_bin.chmod(0o755)
+    state = tmp_path / "state"
+    driver = tmp_path / "driver3235b.py"
+    driver.write_text(
+        RESUME_DRIVER.format(
+            script=str(SCRIPT),
+            dsh_bin=str(dsh_bin),
+            state=str(state),
+            repo=str(repo),
+            home=str(tmp_path / "home"),
+        ),
+        "utf-8",
+    )
+    env = {**os.environ, "NEXUS_DSH_SKIP_MODEL_CATALOG_CHECK": "1"}
+    proc = subprocess.Popen(
+        [sys.executable, str(driver)],
+        stdout=subprocess.PIPE,  # never read until the end: the replay blocks on it
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+    )
+    driver_cleanup.append(proc)
+
+    assert _wait_for(lambda: guard.load_turn_state(state, "sess-3235") is not None, 20)
+    turn = guard.load_turn_state(state, "sess-3235")
+    assert turn is not None and turn["state"] == guard.TURN_OK
+    assert proc.poll() is None  # still replaying into the unread pipe
+
+    proc.send_signal(signal.SIGTERM)  # outside the guard now: the default action applies
+    stdout, _stderr = proc.communicate(timeout=30)
+    assert proc.returncode in (-signal.SIGTERM, 128 + signal.SIGTERM)
+    assert guard.load_turn_state(state, "sess-3235")["state"] == guard.TURN_OK
+
+
+def test_resume_turn_returns_128_plus_a_signal_held_after_dsh_exited(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A stop signal that lands while DSH's group is being cleaned up (after DSH exited 0) is
+    held, the turn is recorded as it ended, and the command still exits 128 + signal."""
+    repo = _git_repo(tmp_path)
+    exe = tmp_path / "dshquick3235"
+    exe.write_text(f"#!{sys.executable}\nprint('done', flush=True)\n", "utf-8")
+    exe.chmod(0o755)
+    real_cleanup = guard._kill_dsh_group_and_reap
+
+    def cleanup_hit_by_a_signal(proc, failures):
+        os.kill(os.getpid(), signal.SIGTERM)  # to this test process only; the guard holds it
+        real_cleanup(proc, failures)
+
+    monkeypatch.setattr(guard, "_kill_dsh_group_and_reap", cleanup_hit_by_a_signal)
+    binding = {
+        "session_id": "sess-3235-held",
+        "repository": "James3014/Nexus-new",
+        "issue_number": 3235,
+        "repo_root": str(repo),
+        "dsh_home": str(tmp_path / "home"),
+        "goal_id": None,
+        "binding_hash": None,
+    }
+    state = tmp_path / "state"
+    code = guard._run_resume_turn(
+        state,
+        binding,
+        [str(exe)],
+        env=dict(os.environ),
+        pre_turn=guard._worktree_snapshot(repo),
+    )
+    assert code == 128 + signal.SIGTERM
+    turn = guard.load_turn_state(state, "sess-3235-held")
+    assert turn is not None and turn["state"] == guard.TURN_OK  # DSH did finish
+    assert "done" in capsys.readouterr().out  # replayed after the record
