@@ -87,6 +87,19 @@ HARDENED_GIT_CONFIG = (
 )  # fmt: skip
 # Subcommands that would otherwise look into submodules (and run their filters).
 _IGNORE_SUBMODULES_COMMANDS = frozenset({"status", "diff"})
+# Caller options ahead of the subcommand, as the core runner (``nexus.core.hardened_git``)
+# allows them since #3165: ``-c`` pairs for the commit identity or for a key pinned above
+# (whose pinned value comes after the caller's and so wins); anything else is refused (#3227).
+_PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in HARDENED_GIT_CONFIG[1::2])
+_CALLER_CONFIG_KEYS = frozenset({
+    "user.name",
+    "user.email",
+    "author.name",
+    "author.email",
+    "committer.name",
+    "committer.email",
+})
+CALLER_GIT_OPTION_REFUSED = "EXTERNAL_TARGET_CALLER_GIT_OPTION_REFUSED"
 # Config keys that name a command git runs on file content: filter drivers
 # (clean/smudge/process) and diff textconv/external commands (#2749).
 GIT_DRIVER_CONFIG_REGEX = r"^filter\.|^diff\..*\.(textconv|command)$"
@@ -465,13 +478,21 @@ def hardened_git_argv(args: Sequence[str], *, attr_source: Optional[str] = None)
 
     Leading ``-c`` pairs of ``args`` (e.g. the candidate commit's author) stay,
     but the hardened values come after them, so they win (a caller's
-    ``core.hooksPath`` is overridden by ``/dev/null``).
+    ``core.hooksPath`` is overridden by ``/dev/null``). Any other key, and any
+    other option ahead of the subcommand (``--config-env``, ``-C``,
+    ``--exec-path`` ...), raises ``ExternalGitRefused`` (#3227), as the core
+    runner refuses them since #3165.
     """
     rest = list(args)
     leading: list[str] = []
     while len(rest) >= 2 and rest[0] == "-c":
+        key = rest[1].split("=", 1)[0].lower()
+        if key not in _CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
+            raise ExternalGitRefused(CALLER_GIT_OPTION_REFUSED)
         leading.extend(rest[:2])
         rest = rest[2:]
+    if rest and rest[0].startswith("-"):
+        raise ExternalGitRefused(CALLER_GIT_OPTION_REFUSED)
     prefix = [f"--attr-source={attr_source}"] if attr_source else []
     if rest and rest[0] in _IGNORE_SUBMODULES_COMMANDS:
         rest = [rest[0], "--ignore-submodules=all", *rest[1:]]
