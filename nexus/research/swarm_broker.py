@@ -35,11 +35,45 @@ _STALE_INDEX_LOCK_SEC = 2 * GIT_TIMEOUT_S
 # lease started from; release puts the swarm back there. It undoes HEAD moved during a lease, not
 # a deliberate rewrite: any process running git as the same user during the lease can change it.
 _LEASE_BASE_REF = "refs/worktree/nexus-swarm-base"
+# Lock files a git killed mid-reset can leave in the swarm's registration: the index, HEAD
+# (written by the forced detached checkout), its reflog, and the lease-base ref (#3230).
+_REGISTRATION_LOCK_FILES: tuple[tuple[str, ...], ...] = (
+    ("index.lock",),
+    ("HEAD.lock",),
+    ("ORIG_HEAD.lock",),
+    ("logs", "HEAD.lock"),
+    ("refs", "worktree", f"{_LEASE_BASE_REF.rsplit('/', 1)[-1]}.lock"),
+)
 # A swarm whose recovery failed is not tried again for this long (in this process), so an
 # acquire does not wait on the same failing git calls each time.
 _RECOVERY_BACKOFF_SEC = 10 * 60
 # Swarm (path, st_dev, st_ino) -> time.monotonic() of its last failed recovery.
 _RECOVERY_FAILED_AT: dict[tuple[str, int, int], float] = {}
+
+
+def _remove_stale_lock_at(
+    git_dir_fd: int, parents: list[str], name: str, stale_after: float
+) -> bool:
+    """Unlink `name` under `parents` below the opened git dir when it is a regular file older
+    than `stale_after` seconds; a link, a missing directory or a young file is left alone."""
+    fds = [git_dir_fd]
+    try:
+        for part in parents:
+            try:
+                fds.append(_open_child_dir(fds[-1], part, create=False))
+            except OSError:
+                return False
+        try:
+            info = os.stat(name, dir_fd=fds[-1], follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(info.st_mode) or time.time() - info.st_mtime < stale_after:
+            return False
+        _unlink_at(fds[-1], name)
+        return True
+    finally:
+        for fd in fds[1:]:
+            os.close(fd)
 
 
 class _SwarmDirSwapped(Exception):
@@ -859,8 +893,10 @@ class SwarmBroker:
             return False
 
     def _clear_stale_registration_lock(self, swarm_dir: Path, stale_after: float) -> bool:
-        """Remove an `index.lock` older than `stale_after` seconds from the swarm's own
-        registration under the controller, relative to that opened directory.
+        """Remove the git lock files older than `stale_after` seconds from the swarm's own
+        registration under the controller (`_REGISTRATION_LOCK_FILES`: not only `index.lock`,
+        since the reset also writes HEAD and the lease-base ref, #3230), each relative to that
+        opened directory; True when any was removed.
 
         `hardened_git.clear_stale_index_lock` only clears a git dir inside the work tree, and a
         swarm's registration lies outside it. The age bound stands in for its running-git
@@ -874,20 +910,20 @@ class SwarmBroker:
             git_dir_fd = _open_real_dir(git_dir)
         except OSError:
             return False
+        removed: list[str] = []
         try:
-            try:
-                info = os.stat("index.lock", dir_fd=git_dir_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                return False
-            if not stat.S_ISREG(info.st_mode) or time.time() - info.st_mtime < stale_after:
-                return False
-            _unlink_at(git_dir_fd, "index.lock")
+            for *parents, name in _REGISTRATION_LOCK_FILES:
+                if _remove_stale_lock_at(git_dir_fd, parents, name, stale_after):
+                    removed.append("/".join([*parents, name]))
         finally:
             os.close(git_dir_fd)
-        logger.warning(
-            "⚠️ [SwarmBroker] Removed a stale index.lock from the registration of %s", swarm_dir
-        )
-        return True
+        if removed:
+            logger.warning(
+                "⚠️ [SwarmBroker] Removed stale %s from the registration of %s",
+                ", ".join(removed),
+                swarm_dir,
+            )
+        return bool(removed)
 
     def _release_pinned(self, swarm_dir: Path, pinned: int) -> bool:
         """Reset and unlock the swarm directory open at `pinned`; True once the lock is removed.
@@ -900,6 +936,16 @@ class SwarmBroker:
         for cache_dir in _SHARED_CACHE_DIRS:
             _unlink_link_at(pinned, cache_dir)
         if not self.is_independently_registered_worktree(swarm_dir):
+            if _entry_exists_at(pinned, ".git"):
+                # A worktree-shaped swarm whose registration could not be confirmed (a git
+                # query that failed, or a path that named something else for a moment) is
+                # left locked and marked for recovery: unlocking here would hand the next
+                # lease whatever this one left behind (#3230).
+                logger.warning(
+                    "⚠️ [SwarmBroker] Swarm registration could not be confirmed; left locked: %s",
+                    swarm_dir,
+                )
+                return False
             _unlink_at(pinned, _LOCK_NAME)
             logger.warning("⚠️ [SwarmBroker] Refused to clean unregistered swarm placeholder: %s", swarm_dir)
             return True

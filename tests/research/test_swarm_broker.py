@@ -1909,3 +1909,115 @@ def test_mark_stale_lease_only_marks_swarm_directories(tmp_path: Path, monkeypat
 
     assert (other / ".swarm_lock").read_text(encoding="utf-8") == ""
     assert (sandbox / "SENTINEL").exists()
+
+
+# #3230: a release whose registration check cannot be made keeps the lock, and recovery clears
+# every registration lock file the reset can trip on, not only index.lock.
+
+
+def test_release_keeps_the_lock_when_the_registration_check_cannot_be_made(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    broker = SwarmBroker(controller)
+    real_output = SwarmBroker._git_output
+
+    def worktree_list_fails(self, args, cwd):
+        if args[:2] == ["worktree", "list"]:
+            return None  # a transient git failure during the release's check
+        return real_output(self, args, cwd)
+
+    monkeypatch.setattr(SwarmBroker, "_git_output", worktree_list_fails)
+    broker.release(swarm)
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert SwarmBroker(controller).acquire(timeout_sec=0.05) is None
+
+    monkeypatch.setattr(SwarmBroker, "_git_output", real_output)
+    from nexus.research import swarm_broker as swarm_broker_module
+
+    swarm_broker_module._RECOVERY_FAILED_AT.clear()  # the failed attempt above set a backoff
+    assert broker.recover_failed_releases() == [swarm]
+    assert not (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_still_unlocks_a_placeholder_without_git_metadata(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    placeholder = controller / ".nexus-swarm-001"
+    placeholder.mkdir()
+    (placeholder / ".swarm_lock").write_text("", encoding="utf-8")
+    (placeholder / "leftover.txt").write_text("kept", encoding="utf-8")
+    broker = SwarmBroker(controller)
+    broker.release(placeholder)
+    assert not (placeholder / ".swarm_lock").exists()
+    assert (placeholder / "leftover.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_clears_a_stale_head_lock_left_by_a_killed_reset(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    head_lock = Path(_git(swarm, "rev-parse", "--absolute-git-dir")) / "HEAD.lock"
+    head_lock.write_text("", encoding="utf-8")
+    broker = SwarmBroker(controller)
+    broker.release(swarm)
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (swarm / "candidate.txt").exists()
+    _age(head_lock)
+
+    assert broker.recover_failed_releases() == [swarm]
+
+    assert not head_lock.exists()
+    assert not (swarm / "candidate.txt").exists()
+    assert broker.locked_swarms() == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_clears_the_lease_base_and_reflog_locks_so_the_next_lease_can_start(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    git_dir = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    extra = [
+        git_dir / "refs" / "worktree" / "nexus-swarm-base.lock",
+        git_dir / "logs" / "HEAD.lock",
+    ]
+    for lock in (index_lock, *extra):
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("", encoding="utf-8")
+        _age(lock)
+
+    acquired = SwarmBroker(controller).acquire(timeout_sec=0.05)
+
+    assert acquired is not None and acquired.resolve() == swarm.resolve()
+    assert not any(lock.exists() for lock in (index_lock, *extra))
+    assert not (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_recovery_leaves_a_young_or_linked_registration_lock_alone(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm, index_lock = _locked_registered_swarm(tmp_path)
+    git_dir = index_lock.parent
+    outside = tmp_path / "outside.lock"
+    outside.write_text("", encoding="utf-8")
+    _age(outside)
+    (git_dir / "HEAD.lock").symlink_to(outside)
+    # The link itself is old too: only the regular-file check leaves it alone.
+    os.utime(git_dir / "HEAD.lock", (1, 1), follow_symlinks=False)
+    _age(index_lock)
+    broker = SwarmBroker(controller)
+
+    recovered = broker.recover_failed_releases()
+
+    assert recovered == []  # the linked HEAD.lock still blocks the reset
+    assert outside.exists() and (git_dir / "HEAD.lock").is_symlink()
+    assert not index_lock.exists()
+    assert (sandbox / "SENTINEL").exists()
