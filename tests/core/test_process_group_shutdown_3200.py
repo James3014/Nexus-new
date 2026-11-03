@@ -131,3 +131,49 @@ def test_kill_group_if_exited_still_answers_a_poll_during_shutdown(tmp_path, mon
         while not kill_group_if_exited(process) and time.monotonic() < deadline:
             time.sleep(0.05)
     assert process.returncode == 0
+
+
+def test_an_interrupt_right_after_popen_returns_still_kills_and_reaps_the_group(monkeypatch):
+    """#3306: the gap between Popen returning and the cleanup block must be protected."""
+    spawned: list[int] = []
+
+    class InterruptedPopen(subprocess.Popen):
+        armed = False
+
+        @property
+        def stdout(self):
+            if self.armed:
+                raise KeyboardInterrupt  # a terminate-signal handler raising
+            return self._out
+
+        @stdout.setter
+        def stdout(self, value):
+            self._out = value
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            spawned.append(self.pid)
+            self.armed = True
+
+    monkeypatch.setattr(argv_command.subprocess, "Popen", InterruptedPopen)
+    with pytest.raises(KeyboardInterrupt):
+        run_reaping_process_group(["/bin/sh", "-c", "sleep 60 & wait"], timeout=60)
+    (pgid,) = spawned
+    try:
+        # Only this test's own child group; it must be gone, i.e. killed and reaped.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        with pytest.raises(ProcessLookupError):
+            os.killpg(pgid, 0)
+        with pytest.raises(ChildProcessError):
+            os.waitpid(pgid, os.WNOHANG)  # already reaped: no zombie left
+    finally:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
