@@ -537,3 +537,27 @@ def test_the_write_grant_check_accepts_only_bound_paths(tmp_path):
     # So is a write grant in a form the check does not read.
     odd = _profile_for(names, names) + '\n(allow file-write* (regex #"^/"))'
     assert not mos._writes_stay_bound(odd, bound)
+
+
+def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path):
+    # A confined command may nest directories far past the recursion limit and lock the
+    # innermost one; the private area must still be gone (or the failure reported), never
+    # left behind quietly (#3238). Host-side only.
+    private = tmp_path / "private"
+    private.mkdir()
+    fd = os.open(private, os.O_RDONLY)
+    try:
+        for _ in range(1500):
+            os.mkdir("d", dir_fd=fd)
+            nxt = os.open("d", os.O_RDONLY, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        os.chmod(fd, 0)
+    finally:
+        os.close(fd)
+
+    try:
+        mos._remove_private_dir(str(private))
+    except mos.SandboxError:
+        pass
+    assert not private.exists()
