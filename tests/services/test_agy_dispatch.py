@@ -5943,8 +5943,8 @@ def test_exit_zero_empty_output_with_current_terminal_quota_log_is_not_completed
     original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
     observed: list[object] = []
 
-    def record_observation(cwd: str, baseline: dict[str, object]):
-        paths = original_observe(cwd, baseline)
+    def record_observation(cwd: str, baseline: dict[str, object], **kwargs):
+        paths = original_observe(cwd, baseline, **kwargs)
         observed.append(paths)
         return paths
 
@@ -7194,3 +7194,201 @@ def test_run_agy_effect_watch_uses_recorded_repo_root_when_repo_appears_in_cwd(
 
     assert code == 0
     assert any(event.get("first_effect_at") for event in events)
+
+
+def _normal_mode_runner_seen(tmp_path: Path, cwd: Path, **dispatch_kwargs) -> dict[str, object]:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    seen: dict[str, object] = {}
+
+    def runner(*, source_repo_root=None, **_kwargs):
+        seen["root"] = source_repo_root
+        return 0, "done", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="read only",
+        cwd=str(cwd),
+        mode="plan",
+        coordinator=_WriteScopeCoordinator(home),
+        run_agy_fn=runner,
+        **dispatch_kwargs,
+    )
+    assert code == 0
+    return seen
+
+
+def test_dispatch_run_binds_the_recorded_root_itself_on_the_foreground_path(
+    tmp_path: Path,
+) -> None:
+    """#3335: with no root passed in (foreground), dispatch_run binds the repository
+    root the journal records for cwd at its own entry."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+    recorded = dispatch.direct_operation_journal._git_identity(str(sub))[0]
+    assert recorded
+
+    seen = _normal_mode_runner_seen(tmp_path, sub)
+
+    assert seen["root"] == recorded
+
+
+def test_dispatch_run_keeps_a_passed_root_over_a_rebound_one(tmp_path: Path) -> None:
+    """#3335: a root the background supervisor passed is kept as is."""
+    repo = tmp_path / "repo"
+    sub = _init_repo_with_sub(repo)
+
+    seen = _normal_mode_runner_seen(tmp_path, sub, source_repo_root="/passed/root")
+
+    assert seen["root"] == "/passed/root"
+
+
+def test_normal_mode_dispatch_run_hands_the_root_to_the_runner(tmp_path: Path) -> None:
+    """#3335: the hand-off of the recorded root to the runner in normal mode."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    seen = _normal_mode_runner_seen(tmp_path, plain, source_repo_root=str(plain))
+
+    assert seen["root"] == str(plain)
+
+
+def test_start_up_git_helper_runs_through_the_hardened_runner(tmp_path: Path) -> None:
+    """#3335: a repository config that names a program (fsmonitor) must not be run by the
+    start-up git helper."""
+    repo = tmp_path / "repo"
+    _init_repo_with_sub(repo)
+    marker = tmp_path / "ran"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+    hook.chmod(0o700)
+    subprocess.run(["git", "config", "core.fsmonitor", str(hook)], cwd=repo, check=True)
+
+    assert dispatch._git_is_dirty(str(repo)) is False
+    assert not marker.exists()
+    # control: a plain git status does run it
+    subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True)
+    assert marker.exists()
+
+
+def _linked_worktree_with_program_config(tmp_path: Path) -> tuple[Path, Path]:
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    subprocess.run(["git", "config", "filter.x.clean", "cat"], cwd=main, check=True)
+    return main, wt
+
+
+def test_linked_worktree_subdir_with_program_config_is_still_refused(tmp_path: Path) -> None:
+    """#3335: a subdirectory of a linked worktree stays a linked worktree when the shared
+    config names a program (the hardened runner refuses there)."""
+    _main, wt = _linked_worktree_with_program_config(tmp_path)
+
+    assert dispatch._is_linked_worktree(str(wt / "sub")) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(wt / "sub"), fallback_clone_path=None)
+
+
+def test_run_git_does_not_raise_on_a_non_utf8_config_name(tmp_path: Path) -> None:
+    """#3335: a config subsection name that is not UTF-8 gives (1, '') instead of an
+    exception, and the linked-worktree check does not turn into an acceptance."""
+    repo = tmp_path / "repo"
+    _init_repo_with_sub(repo)
+    cfg = repo / ".git" / "config"
+    cfg.write_bytes(cfg.read_bytes() + b'[branch "\xff\xfe"]\n\tremote = origin\n')
+
+    assert dispatch._run_git("status", "--porcelain", cwd=str(repo)) == (1, "")
+
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    mcfg = main / ".git" / "config"
+    mcfg.write_bytes(mcfg.read_bytes() + b'[branch "\xff\xfe"]\n\tremote = origin\n')
+    assert dispatch._is_linked_worktree(str(wt / "sub")) is True
+
+
+def test_foreground_subdir_write_scope_resolves_against_the_top_level(
+    tmp_path: Path, pass_through_boundary
+) -> None:
+    """#3335: with cwd in a subdirectory, the foreground write scope is resolved against
+    the repository top level, so a declared path under cwd matches the observed change."""
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "root"
+    sub = _init_repo_with_sub(root)
+
+    def runner(write_boundary=None, **_kwargs):
+        (sub / "x").write_text("changed by worker\n", encoding="utf-8")
+        return 0, "done", "", False, 10
+
+    events: list[dict[str, object]] = []
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(sub),
+        mode="accept-edits",
+        write_paths=[str(sub / "x")],
+        temp_command_permissions=False,
+        coordinator=_WriteScopeCoordinator(home),
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert not [
+        e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    ]
+
+
+def _decoy_git_entry(at: Path, kind: str, tmp_path: Path) -> None:
+    """A .git entry that git skips during discovery (not a repository)."""
+    entry = at / ".git"
+    if kind == "broken_link":
+        entry.symlink_to(tmp_path / "missing-target")
+    elif kind == "empty_dir":
+        entry.mkdir()
+    else:  # link to a plain directory
+        plain = tmp_path / "plain-dir"
+        plain.mkdir(exist_ok=True)
+        entry.symlink_to(plain)
+
+
+@pytest.mark.parametrize("kind", ["broken_link", "empty_dir", "link_to_plain_dir"])
+@pytest.mark.parametrize("where", ["between", "at_cwd"])
+def test_linked_worktree_check_skips_a_git_entry_that_is_not_a_repository(
+    tmp_path: Path, kind: str, where: str
+) -> None:
+    """#3335: a .git that git itself skips (between cwd and the linked worktree root, or
+    at cwd) does not end discovery, so the linked worktree is still found and refused."""
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    cwd = wt / "sub" / "deep"
+    cwd.mkdir(parents=True)
+    _decoy_git_entry(wt / "sub" if where == "between" else cwd, kind, tmp_path)
+
+    assert dispatch._is_linked_worktree(str(cwd)) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)
+
+
+def test_linked_worktree_check_is_not_stopped_by_a_git_dir_with_an_invalid_head(
+    tmp_path: Path,
+) -> None:
+    """#3335: a .git directory with objects/ and refs/ but an invalid HEAD (which git skips)
+    between cwd and the linked worktree root does not hide the linked worktree."""
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    decoy = wt / "sub" / ".git"
+    (decoy / "objects").mkdir(parents=True)
+    (decoy / "refs").mkdir()
+    (decoy / "HEAD").write_text("garbage\n", encoding="utf-8")
+    cwd = wt / "sub" / "inner"
+    cwd.mkdir()
+
+    assert dispatch._is_linked_worktree(str(cwd)) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)
