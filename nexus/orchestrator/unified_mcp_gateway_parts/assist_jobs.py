@@ -85,16 +85,19 @@ _ASSIST_DEFAULT_LANE_MODELS = frozenset({"glm-5.2", "cline-pass/glm-5.2"})
 
 
 def assist_default_lane_refused(provider: Any, model: Any) -> bool:
-    """True when the default lane is off and the requested provider and model (each the
-    value the launch path reads before its default, so ``a or b`` chains included) are
-    either both empty after its strip, or exactly the default lane (#3171)."""
+    """True when the default lane is off and the provider and model, as resolved by the
+    launch path (its defaults applied, #3195), are either both empty after its strip, or
+    the default lane (#3171): provider cline with the default model, or with no model at
+    all, which the cline command would fill with the default."""
     if os.environ.get(ASSIST_DEFAULT_LANE_ENABLED_ENV) == "1":
         return False
     provider_name = str(provider or "").strip().lower()
     model_name = str(model or "").strip()
     if not provider_name and not model_name:
         return True
-    return provider_name == "cline" and model_name in _ASSIST_DEFAULT_LANE_MODELS
+    return provider_name == "cline" and (
+        not model_name or model_name in _ASSIST_DEFAULT_LANE_MODELS
+    )
 
 
 class _AssistJobsMixin(_JobsBase):
@@ -133,10 +136,16 @@ class _AssistJobsMixin(_JobsBase):
         existing = self._assist_read(task_id)
         if existing is not None:
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
-        if assist_default_lane_refused(arguments.get("provider") or arguments.get("preferred_worker"), arguments.get("model") or arguments.get("preferred_model")):
-            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         provider = str(arguments.get("provider") or arguments.get("preferred_worker") or "cline").strip().lower()
         model = str(arguments.get("model") or arguments.get("preferred_model") or "glm-5.2").strip()
+        # #3164 on the values as given (both blank is the lane); #3195 also on the resolved
+        # pair, so naming only the provider or only the model does not reach the lane either.
+        # Still before any record, workspace or process.
+        if assist_default_lane_refused(
+            arguments.get("provider") or arguments.get("preferred_worker"),
+            arguments.get("model") or arguments.get("preferred_model"),
+        ) or assist_default_lane_refused(provider, model):
+            raise _gateway().GatewayInputError(f"ASSIST_DEFAULT_LANE_UNAVAILABLE: {ASSIST_DEFAULT_LANE_UNAVAILABLE_HINT}")
         if provider != "cline":
             raise _gateway().GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
         metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)

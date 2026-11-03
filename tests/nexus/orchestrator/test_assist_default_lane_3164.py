@@ -3,8 +3,9 @@
 The default lane (cline, glm-5.2) failed every launch once its authorisation expired.
 A submit that names neither provider nor model is refused with its own blocker before
 the version preflight, the job record, the workspace and the provider process, unless
-``NEXUS_ASSIST_DEFAULT_LANE_ENABLED`` is exactly ``"1"``.  A caller that names a
-provider or a model keeps the behaviour it had before.
+``NEXUS_ASSIST_DEFAULT_LANE_ENABLED`` is exactly ``"1"``.  #3195: the decision is made on
+the resolved provider and model, so naming only one half of the default lane is refused
+too; a caller that names another provider or model keeps the behaviour it had before.
 
 Every process start and signal is replaced by a stub that fails the test, so no
 provider binary is ever run.
@@ -104,6 +105,14 @@ def _no_job_written(state: Path) -> bool:
     return not jobs.exists() or not any(jobs.iterdir())
 
 
+def _resolves_to_the_default_lane(named: dict[str, Any]) -> bool:
+    """What the launch path resolves ``named`` to (#3195): cline unless another provider is
+    named; glm-5.2 unless another model is named."""
+    provider = str(named.get("provider") or named.get("preferred_worker") or "cline").lower()
+    model = str(named.get("model") or named.get("preferred_model") or "glm-5.2").strip()
+    return provider == "cline" and model in {"", "glm-5.2", "cline-pass/glm-5.2"}
+
+
 def test_implicit_assist_submit_is_refused_before_any_effect(box) -> None:
     gateway, state, launches = box
     message = _error(gateway, "nexus_assist_submit", _assist("lane-assist-1"))
@@ -163,12 +172,15 @@ def test_switch_on_keeps_the_previous_implicit_assist_behaviour(box, monkeypatch
     [{"provider": "cline"}, {"model": "glm-5.2"}, {"provider": "cline", "model": "glm-5.3"}],
 )
 def test_a_probe_that_names_provider_or_model_keeps_its_behaviour(box, named) -> None:
-    gateway, _state, launches = box
-    assert (
-        _error(gateway, "nexus_model_probe", _probe("lane-probe-4", **named))
-        == "ASSIST_PROVIDER_VERSION_FAILED"
-    )
-    assert [kind for kind, _ in launches] == ["run"]
+    gateway, state, launches = box
+    error = _error(gateway, "nexus_model_probe", _probe("lane-probe-4", **named))
+    if _resolves_to_the_default_lane(named):
+        # #3195: half of the default lane still resolves to it; refused before the preflight.
+        assert error.startswith(PROBE_BLOCKER), error
+        assert launches == [] and _no_job_written(state)
+    else:
+        assert error == "ASSIST_PROVIDER_VERSION_FAILED"
+        assert [kind for kind, _ in launches] == ["run"]
 
 
 @pytest.mark.parametrize(
@@ -184,13 +196,15 @@ def test_a_probe_that_names_provider_or_model_keeps_its_behaviour(box, named) ->
 def test_an_assist_that_names_provider_or_model_keeps_its_behaviour(
     box, monkeypatch, tmp_path, named
 ) -> None:
-    gateway, _state, launches = box
+    gateway, state, launches = box
     monkeypatch.setenv("NEXUS_CLINE_BIN", str(tmp_path / "missing-cline"))
-    assert (
-        _error(gateway, "nexus_assist_submit", _assist("lane-assist-4", **named))
-        == "ASSIST_PROVIDER_UNAVAILABLE"
-    )
-    assert launches == []
+    error = _error(gateway, "nexus_assist_submit", _assist("lane-assist-4", **named))
+    if _resolves_to_the_default_lane(named):
+        # #3195: refused on the resolved pair, before the executable lookup.
+        assert error.startswith(ASSIST_BLOCKER), error
+    else:
+        assert error == "ASSIST_PROVIDER_UNAVAILABLE"
+    assert launches == [] and _no_job_written(state)
 
 
 def test_an_assist_naming_another_provider_keeps_its_unsupported_blocker(box) -> None:
@@ -454,3 +468,36 @@ def test_switch_off_a_retry_on_another_cline_model_launches_again(box, monkeypat
     retried = gateway._assist_retry("lane-assist-37")
     assert retried["status"] == "FAILED"
     assert [kind for kind, _ in launches] == ["Popen", "Popen"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "blocker"),
+    [
+        ("nexus_assist_submit", {"provider": "cline"}, ASSIST_BLOCKER),
+        ("nexus_assist_submit", {"model": "glm-5.2"}, ASSIST_BLOCKER),
+        ("nexus_assist_submit", {"provider": "cline", "model": "  "}, ASSIST_BLOCKER),
+        ("nexus_model_probe", {"provider": "cline"}, PROBE_BLOCKER),
+        ("nexus_model_probe", {"model": "glm-5.2"}, PROBE_BLOCKER),
+        ("nexus_model_probe", {"provider": "cline", "model": "  "}, PROBE_BLOCKER),
+    ],
+)
+def test_half_of_the_default_lane_is_refused_before_any_effect(
+    box, tool, arguments, blocker
+) -> None:
+    """#3195: naming only the provider, only the model, or a blank model still resolves to
+    the default lane; it is refused before the preflight, the record and the process."""
+    gateway, state, launches = box
+    make = _assist if tool == "nexus_assist_submit" else _probe
+    assert _error(gateway, tool, make("lane-half-1", **arguments)).startswith(blocker)
+    assert launches == [] and _no_job_written(state)
+
+
+@pytest.mark.parametrize("arguments", [{"provider": "cline"}, {"model": "glm-5.2"}])
+def test_switch_on_keeps_half_named_requests_on_the_lane(box, monkeypatch, arguments) -> None:
+    gateway, _state, launches = box
+    monkeypatch.setenv(SWITCH, "1")
+    assert (
+        _error(gateway, "nexus_model_probe", _probe("lane-half-2", **arguments))
+        == "ASSIST_PROVIDER_VERSION_FAILED"
+    )
+    assert [kind for kind, _ in launches] == ["run"]
