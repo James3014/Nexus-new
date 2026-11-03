@@ -153,7 +153,9 @@ def run_hardened_git(
         # A linked worktree's admin dir: its registration is checked again and its common
         # dir pinned.
         if separate_git_dir:
-            common_dir = git_dir.resolve()
+            # Git run here may write wherever the git dir's own files point.
+            if git_dir_is_self_contained(git_dir):
+                common_dir = git_dir.resolve()
         elif linked_worktree_git_dir(repo_dir) == git_dir.resolve():
             try:
                 common_dir = _common_dir(git_dir.resolve())
@@ -279,8 +281,10 @@ def repository_git_dir(repo_dir: Path) -> Optional[Path]:
 
 def git_dir_is_self_contained(git_dir: Path) -> bool:
     """True when git, run on ``git_dir``, reads and writes refs, objects and the index only
-    inside it: nothing in it is a symlink (hooks aside, which are never run here), and it
-    names no other repository through ``commondir`` or object alternates."""
+    inside it: nothing in it is a symlink (hooks aside, which are never run here), no file
+    outside ``objects`` (config, HEAD, refs, packed-refs, index) is hard-linked from elsewhere,
+    and it names no other repository through ``commondir`` or object alternates. Objects may
+    be hard links (``git clone --local``); they are content-addressed and never rewritten."""
     git_dir = Path(git_dir)
     if git_dir.is_symlink() or not git_dir.is_dir():
         return False
@@ -290,8 +294,14 @@ def git_dir_is_self_contained(git_dir: Path) -> bool:
     for root, dirs, files in os.walk(git_dir):
         if Path(root) == git_dir:
             dirs[:] = [name for name in dirs if name != "hooks"]
+        in_objects = (
+            Path(root) == git_dir / "objects" or (git_dir / "objects") in Path(root).parents
+        )
         for name in (*dirs, *files):
-            if os.path.islink(os.path.join(root, name)):
+            path = os.path.join(root, name)
+            if os.path.islink(path):
+                return False
+            if name in files and not in_objects and os.lstat(path).st_nlink > 1:
                 return False
     return True
 

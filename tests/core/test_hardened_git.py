@@ -792,9 +792,12 @@ def test_a_separate_git_dir_is_its_own_common_dir(env):
     _git(env, "--git-dir", str(elsewhere), "config", "hook.planted.command", "true")
     (git_dir / "commondir").write_text(f"{elsewhere}\n", encoding="utf-8")
 
-    assert not hardened_git.repository_config_can_start_a_program(
-        work, git_dir=git_dir, separate_git_dir=True
+    # Naming another repository makes the git dir not self-contained: refused, never read.
+    refused = hardened_git.run_hardened_git(
+        work, "config", "--list", git_dir=git_dir, separate_git_dir=True
     )
+    assert refused.returncode == 128
+    assert "hook.planted" not in refused.stdout
 
 
 @pytest.mark.parametrize("key", ["core.hooksPath", "CORE.HOOKSPATH"])
@@ -892,3 +895,48 @@ def test_both_git_argv_builders_allow_the_same_caller_keys():
     from nexus.orchestrator import measure_external_target as external
 
     assert hardened_git._CALLER_CONFIG_KEYS == external._CALLER_CONFIG_KEYS
+
+
+def test_a_hard_linked_metadata_file_makes_a_git_dir_not_self_contained(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-config"
+    outside.write_text("[core]\n\tbare = false\n", encoding="utf-8")
+    (git_dir / "config").unlink()
+    (git_dir / "config").hardlink_to(outside)
+
+    assert hardened_git.git_dir_is_self_contained(git_dir) is False
+
+
+def test_a_local_clone_with_hard_linked_objects_is_still_self_contained(env):
+    work, _ = _separate_git_dir_repo(env)
+    clone = env / "clone"
+    _git(env, "clone", "-q", "--local", str(work), str(clone))
+    _git(env, "clone", "-q", "--local", "--bare", str(work), str(env / "bare.git"))
+
+    assert hardened_git.git_dir_is_self_contained(clone / ".git") is True
+    assert hardened_git.git_dir_is_self_contained(env / "bare.git") is True
+
+
+def test_a_separate_git_dir_that_is_not_self_contained_is_refused(env):
+    work, git_dir = _separate_git_dir_repo(env)
+    outside = env / "outside-head"
+    outside.write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_dir / "HEAD").unlink()
+    (git_dir / "HEAD").hardlink_to(outside)
+
+    refused = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert refused.returncode == 128
+    assert "not a worktree" in refused.stderr
+
+
+def test_a_normal_separate_git_dir_still_runs(env):
+    work, git_dir = _separate_git_dir_repo(env)
+
+    ok = hardened_git.run_hardened_git(
+        work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
+    )
+
+    assert ok.returncode == 0
