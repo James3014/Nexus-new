@@ -981,3 +981,35 @@ def test_seal_lists_new_files_when_the_ignore_file_ignores_itself(
     paths = [row["path"] for row in receipt["untracked_files"]]
     assert "hidden.dat" in paths
     assert ".gitignore" in paths
+
+
+def test_plan_mode_counts_a_new_file_under_a_self_ignoring_rule_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / ".gitignore").write_text("*\n", encoding="utf-8")
+        (cwd / "new.txt").write_text("written by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
+
+
+def test_plan_mode_counts_a_new_file_under_a_git_dir_exclude_rule_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        info = live._shadow_git_dir(cwd) / "info"
+        info.mkdir(exist_ok=True)
+        (info / "exclude").write_text("*\n", encoding="utf-8")
+        (cwd / "new.txt").write_text("written by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
