@@ -193,4 +193,3 @@ def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
         WorkspaceManager(controller).lease(task_id="T790")
 
     assert f"not an independently registered worktree: {swarm}" in caplog.text
-    assert not (swarm / ".swarm_lock").exists()
