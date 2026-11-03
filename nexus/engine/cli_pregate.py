@@ -12,7 +12,7 @@ import tempfile
 import json
 from dataclasses import replace
 from types import SimpleNamespace
-from nexus.core.contained_write import drop_escaping_links
+from nexus.core.contained_write import PinnedRoot, drop_escaping_links, root_identity
 from nexus.engine.target_env_context import TargetEnvContext
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,9 @@ def run_cli_pregate(
         try:
             with tempfile.TemporaryDirectory(prefix="nexus-pregate-", ignore_cleanup_errors=True) as scratch:
                 work_dir = Path(scratch).resolve()
+                # Recorded as soon as the directory exists; the sandbox refuses it if the path
+                # names anything else by the time a command runs (#3236).
+                work_identity = root_identity(work_dir)
                 shutil.copytree(
                     target_repo_root,
                     work_dir,
@@ -190,7 +193,13 @@ def run_cli_pregate(
                 drop_escaping_links(work_dir)
                 env["PYTHONPATH"] = str(work_dir)
                 return _run_pregate_commands(
-                    commands, work_dir, env, timeout_per_cmd, confined=True, source_root=target_repo_root
+                    commands,
+                    work_dir,
+                    env,
+                    timeout_per_cmd,
+                    confined=True,
+                    source_root=target_repo_root,
+                    work_identity=work_identity,
                 )
         except _CopyCapExceeded:
             return False, _fail_closed_results(commands, "pregate workspace over the copy size cap")
@@ -226,7 +235,7 @@ def _fail_closed_results(commands: List[str], reason: str) -> List[dict]:
     return [{"cmd": cmd, "exit_code": -1, "passed": False, "stderr_tail": reason[-500:]} for cmd in commands]
 
 
-def _run_confined_worker(request):
+def _run_confined_worker(request, work_identity: Optional[Tuple[int, int]] = None):
     """Run ``request`` in its cwd under the model-output sandbox (#2967).
 
     Reads are widened only for the resolved interpreter and absolute file arguments, as for
@@ -242,7 +251,8 @@ def _run_confined_worker(request):
     from nexus.executors.cli_worker import run_cli_worker
 
     readable = (*interpreter_readable_roots(request.executable), *argument_file_roots(request.command))
-    with model_sandbox(request.cwd, readable=readable) as (prefix, sandbox_env):
+    root = request.cwd if work_identity is None else PinnedRoot(request.cwd, work_identity)
+    with model_sandbox(root, readable=readable) as (prefix, sandbox_env):
         if len(prefix) != 3 or prefix[:2] != [SANDBOX_EXEC, "-p"]:
             raise ValueError("unexpected model sandbox prefix")
         env = {**sandbox_env, **{key: request.env[key] for key in ("PATH", "PYTHONPATH")}}
@@ -266,6 +276,7 @@ def _run_pregate_commands(
     *,
     confined: bool,
     source_root: Optional[Path] = None,
+    work_identity: Optional[Tuple[int, int]] = None,
 ) -> Tuple[bool, List[dict]]:
     from nexus.engine.model_output_sandbox import SandboxError
 
@@ -292,7 +303,7 @@ def _run_pregate_commands(
             confinement = None
             if confined:
                 try:
-                    worker = _run_confined_worker(request)
+                    worker = _run_confined_worker(request, work_identity)
                     confinement = "os_sandbox"
                 except SandboxError as exc:
                     if str(exc) != "no_os_barrier" or not _copy_only_allowed():
