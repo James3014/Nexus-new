@@ -100,37 +100,34 @@ class WorkspaceManager:
         # 優先尋找並租用 .nexus-swarm-* 目錄，避免 git worktree add 的開銷
         swarm_dirs = sorted([d for d in self.project_root.glob(".nexus-swarm-*") if d.is_dir()])
         if swarm_dirs and self._env_enabled(self.LEGACY_SWARM_REUSE_ENV):
+            broker = None
+            swarm_path = None
             try:
+                from nexus.core.hardened_git import run_hardened_git
                 from nexus.research.swarm_broker import SwarmBroker
                 broker = SwarmBroker(self.project_root)
                 swarm_path = broker.acquire(timeout_sec=5.0)
                 if swarm_path:
                     print(f"🐝 [Swarm-Reuse] Leasing existing sandbox: {swarm_path.name}")
                     if not broker.is_independently_registered_worktree(swarm_path):
-                        broker.release(swarm_path)
-                        raise WorkspacePermissionError(
-                            f"Swarm sandbox is not an independently registered worktree: {swarm_path}"
+                        message = (
+                            "Swarm sandbox is not an independently registered worktree: "
+                            f"{swarm_path}"
                         )
+                        broker.release(swarm_path)
+                        swarm_path = None
+                        raise WorkspacePermissionError(message)
 
-                    base_head = subprocess.run(
-                        ["git", "rev-parse", "HEAD"],
-                        cwd=self.project_root,
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    ).stdout.strip()
-                    subprocess.run(
-                        ["git", "checkout", "--detach", base_head],
-                        cwd=swarm_path,
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        ["git", "checkout", "-b", branch_name],
-                        cwd=swarm_path,
-                        check=True,
-                        capture_output=True,
-                    )
+                    base_head = run_hardened_git(self.project_root, "rev-parse", "HEAD")
+                    if base_head.returncode != 0:
+                        raise RuntimeError(f"git rev-parse HEAD failed: {base_head.stderr.strip()}")
+                    for git_args in (
+                        ("checkout", "--detach", base_head.stdout.strip()),
+                        ("checkout", "-b", branch_name),
+                    ):
+                        step = run_hardened_git(swarm_path, *git_args)
+                        if step.returncode != 0:
+                            raise RuntimeError(f"git {git_args[0]} failed: {step.stderr.strip()}")
                     
                     # 標記此 workspace 為 swarm 類型以便 cleanup 處理
                     (swarm_path / ".swarm_lease").write_text(branch_name, encoding="utf-8")
@@ -139,6 +136,13 @@ class WorkspaceManager:
                     return task_id, branch_name, swarm_path
             except Exception as e:
                 logger.warning(f"⚠️ [Swarm-Reuse] Failed to acquire swarm, falling back: {e}")
+                if broker is not None and swarm_path:
+                    try:
+                        broker.release(swarm_path)
+                    except Exception as release_error:
+                        logger.warning(
+                            f"⚠️ [Swarm-Reuse] Release after failure failed: {release_error}"
+                        )
         elif swarm_dirs:
             logger.info(
                 "[Workspace] Legacy swarm reuse disabled; use governed TargetWorktreeLease "
