@@ -546,6 +546,7 @@ def build_seatbelt_profile(
     extra_protected_paths: tuple[Path, ...] = (),
     extra_reallowed_paths: tuple[Path, ...] = (),
     deny_process_fork: bool = False,
+    extra_pinned_directories: tuple[Path, ...] = (),
 ) -> str:
     """Deny every file write except the target and the per-run root.
 
@@ -585,6 +586,10 @@ def build_seatbelt_profile(
         for name in extra_protected_target_names:
             entry = _sbpl_path(writable_target / name)
             deny += [f'  (literal "{entry}")', f'  (subpath "{entry}")']
+    # Directories holding protected entries (cline's run HOME) cannot be renamed
+    # or replaced either, or a fresh protected tree could be planted (#3181).
+    for pinned in extra_pinned_directories:
+        deny.append(f'  (literal "{_sbpl_path(pinned)}")')
     # Absolute paths inside a writable root that stay read-only (e.g. cline's
     # run-HOME hooks/plugins, #2332); ``extra_reallowed_paths`` re-opens a
     # subtree of them (cline's data directory).
