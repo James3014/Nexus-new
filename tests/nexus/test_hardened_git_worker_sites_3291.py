@@ -466,3 +466,20 @@ def test_nightshift_commit_that_does_not_land_is_not_promoted(tmp_path):
 
     assert runner._commit_improvement(workpath, 1.0) is False
     assert runner.base_commit == base_before
+
+
+def test_nightshift_stage_failure_is_not_promoted(tmp_path):
+    runner, root, workpath = _leased_runner(tmp_path)
+    (workpath / "f.txt").write_text("new\n")
+    base_before = runner.base_commit
+    real = runner._workpath_git
+
+    def add_fails(path, *args):
+        if "add" in args:
+            return subprocess.CompletedProcess(args, 128, "", "permission denied")
+        return real(path, *args)
+
+    runner._workpath_git = add_fails
+
+    assert runner._commit_improvement(workpath, 1.0) is False
+    assert runner.base_commit == base_before
