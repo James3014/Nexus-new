@@ -446,3 +446,48 @@ def test_drone_artifact_written_for_a_plain_repo(tmp_path, monkeypatch):
     assert out["drone_used"] is True
     assert artifact.is_file() and not artifact.is_symlink()
     assert artifact == repo / ".nexus" / "reports" / "drones" / "drone-001_local_msa_crystal.json"
+
+
+def test_write_in_run_dir_refuses_a_hard_link_and_keeps_the_target(tmp_path):
+    outside = _outside(tmp_path)
+    target = outside / "host.txt"
+    target.write_text("keep", encoding="utf-8")
+    run_dir = tmp_path / "runs" / "run_1"
+    run_dir.mkdir(parents=True)
+    os.link(target, run_dir / "record.json")
+    identity = _capture_run_dir_identity(run_dir)
+
+    with pytest.raises(RunDirUnsafe, match="hard link"):
+        _write_in_run_dir(run_dir, identity, ("record.json",), b"{}", exclusive=False)
+
+    assert target.read_text(encoding="utf-8") == "keep"
+
+
+def test_write_in_run_dir_still_overwrites_a_plain_file(tmp_path):
+    run_dir = tmp_path / "runs" / "run_1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "record.json").write_text("long old content", encoding="utf-8")
+    identity = _capture_run_dir_identity(run_dir)
+
+    _write_in_run_dir(run_dir, identity, ("record.json",), b"{}", exclusive=False)
+
+    assert (run_dir / "record.json").read_bytes() == b"{}"
+
+
+def test_report_write_refuses_a_hard_link_and_keeps_the_target(tmp_path):
+    outside = _outside(tmp_path)
+    target = outside / "host.txt"
+    target.write_text("keep", encoding="utf-8")
+    run_dir = tmp_path / "runs" / "run_1"
+    run_dir.mkdir(parents=True)
+    os.link(target, run_dir / "report.md")
+    identity = _capture_run_dir_identity(run_dir)
+
+    with pytest.raises(RunDirUnsafe, match="hard link"):
+        SandboxRunner._write_report_nofollow(run_dir, identity, "report.md", "new")
+
+    assert target.read_text(encoding="utf-8") == "keep"
+
+    (run_dir / "ok.md").write_text("old old old", encoding="utf-8")
+    SandboxRunner._write_report_nofollow(run_dir, identity, "ok.md", "new")
+    assert (run_dir / "ok.md").read_text(encoding="utf-8") == "new"

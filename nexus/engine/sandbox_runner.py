@@ -173,7 +173,8 @@ def _write_in_run_dir(
             os.close(dir_fd)
             dir_fd = next_fd
         flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
-        flags |= os.O_EXCL if exclusive else os.O_TRUNC
+        if exclusive:
+            flags |= os.O_EXCL
         try:
             fd = os.open(parts[-1], flags, 0o644, dir_fd=dir_fd)
         except OSError as exc:
@@ -183,6 +184,10 @@ def _write_in_run_dir(
         with os.fdopen(fd, "wb") as handle:
             if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                 raise RunDirEntryRefused(f"{parts[-1]} is not a regular file")
+            if os.fstat(handle.fileno()).st_nlink != 1:
+                raise RunDirEntryRefused(f"{parts[-1]} is a hard link")
+            if not exclusive:
+                handle.truncate(0)
             handle.write(data)
     finally:
         os.close(dir_fd)
@@ -353,13 +358,16 @@ class SandboxRunner:
                 raise RunDirUnsafe("run_dir device/inode changed before the report write")
             fd = os.open(
                 name,
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC,
+                os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
                 0o644,
                 dir_fd=dir_fd,
             )
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                     raise RunDirUnsafe(f"{name} is not a regular file")
+                if os.fstat(handle.fileno()).st_nlink != 1:
+                    raise RunDirUnsafe(f"{name} is a hard link")
+                handle.truncate(0)
                 handle.write(text)
         finally:
             os.close(dir_fd)
