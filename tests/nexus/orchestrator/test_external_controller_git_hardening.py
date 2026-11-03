@@ -533,3 +533,38 @@ def test_live_parity_non_external_controller_git_argv_and_env_unchanged(tmp_path
         assert flags[1:7] == _HARDENED, args
         assert stdin is subprocess.DEVNULL
         assert not {"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"} & set(env)
+
+
+# #3227: the measurement runner refuses the caller options the core runner refuses.
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-c", "core.sshCommand=x", "status"],
+        ["-c", "diff.external=x", "diff", "HEAD"],
+        ["-c", "CORE.HOOKSPATH=/h", "-c", "alias.st=status", "status"],
+        ["--config-env=core.hooksPath=H", "status"],
+        ["-C", "/elsewhere", "status"],
+        ["--exec-path=/x", "rev-parse", "HEAD"],
+    ],
+)
+def test_hardened_argv_refuses_caller_options_other_than_identity_and_pinned_keys(args):
+    from nexus.orchestrator.measure_external_target import ExternalGitRefused
+
+    with pytest.raises(ExternalGitRefused, match="EXTERNAL_TARGET_CALLER_GIT_OPTION_REFUSED"):
+        hardened_git_argv(args)
+
+
+def test_hardened_argv_keeps_identity_and_pinned_caller_keys():
+    argv = hardened_git_argv([
+        "-c",
+        "user.email=e",
+        "-c",
+        "Commit.GpgSign=true",
+        "commit",
+        "-m",
+        "x",
+    ])
+    assert argv[1:5] == ["-c", "user.email=e", "-c", "Commit.GpgSign=true"]
+    assert argv.index("commit.gpgSign=false") > argv.index("Commit.GpgSign=true")

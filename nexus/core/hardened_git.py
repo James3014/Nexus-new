@@ -210,10 +210,15 @@ def config_names_a_repository_program(names: List[str]) -> bool:
     cover), diff drivers (``diff.external``, ``diff.<driver>.textconv`` or ``.command``, which
     only some subcommands can switch off), signing programs (``gpg.program``,
     ``gpg.<format>.program``), includes (read from files outside this check) and promisor
-    remotes (a missing object is fetched, which can start a transport program). Harmless keys
-    such as ``diff.algorithm`` are not refused."""
+    remotes (a missing object is fetched, which can start a transport program), and
+    ``diff.submodule`` (a diff or log then descends into a populated submodule and reads its
+    config, which the runner's ``--ignore-submodules=all`` only prevents while no caller flag
+    behind it turns submodules back on, #3227). Harmless keys such as ``diff.algorithm`` are
+    not refused."""
     for name in (raw.lower() for raw in names):
         if name.startswith(("filter.", "gpg.", "hook.", "include.", "includeif.")):
+            return True
+        if name == "diff.submodule":
             return True
         if name == "diff.external" or (
             name.startswith("diff.") and name.endswith((".command", ".textconv"))

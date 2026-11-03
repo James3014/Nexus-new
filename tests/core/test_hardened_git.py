@@ -489,6 +489,7 @@ def test_hardened_log_and_show_verify_no_signature_with_a_repository_signing_pro
         ("includeIf.gitdir:/x/.path", True),
         ("remote.origin.promisor", True),
         ("extensions.partialClone", True),
+        ("diff.submodule", True),
         ("diff.algorithm", False),
         ("diff.renames", False),
         ("core.autocrlf", False),
