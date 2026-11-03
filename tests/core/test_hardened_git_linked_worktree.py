@@ -139,11 +139,21 @@ def _replace_with_prefilled_fifo(path: Path) -> int:
 
 def _returns_within(seconds: float, call):
     box: list = []
-    thread = threading.Thread(target=lambda: box.append(call()), daemon=True)
+
+    def run() -> None:
+        try:
+            box.append((True, call()))
+        except BaseException as exc:  # handed back to the caller below
+            box.append((False, exc))
+
+    thread = threading.Thread(target=run, daemon=True)
     thread.start()
     thread.join(seconds)
     assert not thread.is_alive(), "pointer read blocked on a non-regular file"
-    return box[0]
+    ok, value = box[0]
+    if not ok:
+        raise value
+    return value
 
 
 def test_a_commondir_replaced_by_a_named_pipe_fails_closed_promptly(env):
