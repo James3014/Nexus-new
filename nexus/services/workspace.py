@@ -6,6 +6,7 @@ import uuid
 import fcntl
 import shutil
 import subprocess
+import tempfile
 import typing
 
 # 🔗 核心技能路徑 (Phase 3 & 6)
@@ -215,28 +216,57 @@ class WorkspaceManager:
 
     def sync_staged_to_sandbox(self, sandbox_path):
         """將主工作區的 Staged 內容同步至沙盒。"""
-        patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch"))
+        # One absolute path: git diff, Path.stat and git apply run in different cwds.
+        # Without NEXUS_SYNC_PATCH the patch goes in a private temporary directory, not a
+        # fixed shared path; a configured path that is a link is refused.
+        configured = os.getenv("NEXUS_SYNC_PATCH")
+        private_dir = None
+        if configured:
+            patch_file = Path(configured).absolute()
+            if patch_file.is_symlink():
+                print(f"⚠️ [Sync Error] patch path is a link: {patch_file}")
+                return False
+        else:
+            private_dir = tempfile.mkdtemp(prefix="nexus-sync-")
+            patch_file = Path(private_dir) / "sync.patch"
         try:
-            # 1. 在主工作區產出 Patch
-            with open(patch_file, "w") as f:
-                subprocess.run(
-                    ["git", "diff", "--staged"],
-                    cwd=self.project_root,
-                    stdout=f,
-                    check=True,
-                )
+            from nexus.core.hardened_git import (
+                repository_config_can_start_a_program,
+                repository_git_dir,
+                run_hardened_git,
+            )
+
+            # 1. 在主工作區產出 Patch（git 自己寫檔，內容原樣；逾時丟 TimeoutExpired）
+            diff = run_hardened_git(
+                Path(self.project_root), "diff", "--staged", f"--output={patch_file}"
+            )
+            if diff.returncode != 0:
+                raise RuntimeError(f"git diff --staged failed: {diff.stderr}")
 
             # 2. 在沙盒套用 Patch
             if patch_file.stat().st_size > 0:
-                subprocess.run(
-                    ["git", "apply", str(patch_file)], cwd=sandbox_path, check=True
+                sandbox = Path(sandbox_path)
+                sandbox_git_dir = repository_git_dir(sandbox)
+                if sandbox_git_dir is None or repository_config_can_start_a_program(
+                    sandbox, git_dir=sandbox_git_dir
+                ):
+                    raise RuntimeError("sandbox git dir unusable or its config names a program")
+                applied = run_hardened_git(
+                    sandbox, "apply", str(patch_file), git_dir=sandbox_git_dir
                 )
-                subprocess.run(["git", "add", "."], cwd=sandbox_path, check=True)
+                if applied.returncode != 0:
+                    raise RuntimeError(f"git apply failed: {applied.stderr}")
+                added = run_hardened_git(sandbox, "add", ".", git_dir=sandbox_git_dir)
+                if added.returncode != 0:
+                    raise RuntimeError(f"git add failed: {added.stderr}")
                 print("🔄 [Sync] Staged changes migrated to sandbox.")
             return True
         except Exception as e:
             print(f"⚠️ [Sync Error] {e}")
             return False
+        finally:
+            if private_dir is not None:
+                shutil.rmtree(private_dir, ignore_errors=True)
 
     def harvest(self, branch_name, sandbox_path):
         """原子化收割：排隊合併回主幹。"""
