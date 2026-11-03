@@ -247,9 +247,11 @@ def run_bounded_swarm(
             record["isolation"] = confined.describe()
             run = confined.run(lane.python_script_argv(script), cwd=wt, timeout=VERIFY_TIMEOUT_SEC)
             record["verify_exit_codes"] = [run.returncode]
+            record["isolation"] = confined.describe()  # now with root restorations (#3266)
             all_passed = run.returncode == 0
         except subprocess.TimeoutExpired:
             record["verify_exit_codes"] = [None]
+            record["isolation"] = confined.describe()
         except lane.SandboxError as exc:
             record.update(verify_result=f"not_executed:sandbox_error:{exc}"[:120])
             return {**record, "passed": False, "score": 0.0}
