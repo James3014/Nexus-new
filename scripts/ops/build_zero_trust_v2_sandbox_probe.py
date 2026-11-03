@@ -22,7 +22,7 @@ DEFAULT_OUTPUT = Path("docs/reports/NEXUS_ZERO_TRUST_V2_SANDBOX_PROBE_2026-05-21
 
 def build_zero_trust_v2_sandbox_probe(*, command: list[str], signing_secret: str) -> dict:
     probe = run_macos_sandbox_probe(command, signing_secret=signing_secret)
-    verdict = validate_sandbox_attestation(probe["sandbox_attestation"])
+    verdict = validate_sandbox_attestation(probe["sandbox_attestation"], signing_secret=signing_secret)
     return {
         "schema": "nexus.zero_trust_v2.sandbox_probe_report.v1",
         "status": "PASS",
