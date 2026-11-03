@@ -2164,7 +2164,12 @@ def _acquired_lease(tmp_path: Path) -> tuple[Path, Path, SwarmBroker]:
 def test_acquire_records_the_holder_in_the_lock(tmp_path: Path, monkeypatch):
     sandbox = _sentinel_cwd(tmp_path, monkeypatch)
     _controller, swarm, broker = _acquired_lease(tmp_path)
-    assert (swarm / ".swarm_lock").read_text(encoding="utf-8") == f"held pid={os.getpid()}\n"
+    text = (swarm / ".swarm_lock").read_text(encoding="utf-8")
+    assert text.startswith(f"held pid={os.getpid()}")
+    # The second identity: the process start time, read back the same way later.
+    from nexus.research.swarm_broker import _process_start_identity
+
+    assert text == f"held pid={os.getpid()} id={_process_start_identity(os.getpid())}\n"
     assert broker.locked_swarms() == [(swarm, "held")]
     assert (sandbox / "SENTINEL").exists()
 
@@ -2261,3 +2266,157 @@ def test_process_exists_is_false_for_a_pid_the_os_cannot_take():
 
     assert _process_exists(2**40) is False
     assert _process_exists(os.getpid()) is True
+
+
+def test_start_identity_of_this_process_is_stable_and_a_missing_pid_has_none():
+    from nexus.research.swarm_broker import _process_start_identity
+
+    identity = _process_start_identity(os.getpid())
+    assert identity and identity == _process_start_identity(os.getpid())
+    assert _process_start_identity(2**22 + 12345) is None
+
+
+def test_an_aged_lock_naming_a_live_pid_with_another_start_time_is_marked(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    lock = swarm / ".swarm_lock"
+    text = lock.read_text(encoding="utf-8")
+    pid_part, _, _ = text.partition(" id=")
+    lock.write_text(f"{pid_part} id=other-boot:1\n", encoding="utf-8")
+    _age(lock, 3 * 3600)
+
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is True
+
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_an_aged_pid_only_lock_whose_holder_runs_is_kept(tmp_path: Path, monkeypatch):
+    # A lock written before #3259 (or without a readable start time) names only a pid; while
+    # that pid runs the lease is left alone, as before (#3277 review).
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    (swarm / ".swarm_lock").write_bytes(f"held pid={os.getpid()}\n".encode())
+    _age(swarm / ".swarm_lock", 3 * 3600)
+
+    assert SwarmBroker(controller).mark_stale_lease(swarm, 2 * 3600) is False
+    assert (swarm / ".swarm_lock").read_bytes() == f"held pid={os.getpid()}\n".encode()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_an_aged_lock_is_kept_when_the_start_time_cannot_be_read_now(tmp_path: Path, monkeypatch):
+    # Not being able to read the start time now says nothing about the holder: keep the lock.
+    _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    _age(swarm / ".swarm_lock", 3 * 3600)
+    monkeypatch.setattr("nexus.research.swarm_broker._process_start_identity", lambda pid: None)
+
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is False
+
+
+def test_the_ps_start_time_is_read_in_utc(monkeypatch):
+    # The ps fallback must not depend on the host's time zone (#3277 review).
+    import nexus.research.swarm_broker as broker_module
+
+    def no_proc(*_a, **_k):
+        raise OSError("no /proc")
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        return subprocess.CompletedProcess(argv, 0, stdout="Tue Nov  3 06:37:00 2026\n")
+
+    monkeypatch.setattr(broker_module, "open", no_proc, raising=False)
+    monkeypatch.setattr(broker_module.subprocess, "run", fake_run)
+
+    assert broker_module._process_start_identity(os.getpid()) == "ps:Tue_Nov_3_06:37:00_2026"
+    assert seen.get("TZ") == "UTC"
+
+
+def _commit_submodule(controller: Path, tmp_path: Path) -> str:
+    sub = tmp_path / "subrepo"
+    _init_repo(sub)
+    _git(
+        controller,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        str(sub),
+        "vendor",
+    )
+    _git(controller, "commit", "-q", "-m", "add submodule")
+    return _git(controller, "rev-parse", "HEAD")
+
+
+def _swarm_with_submodule(tmp_path: Path) -> tuple[Path, Path]:
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    base = _commit_submodule(controller, tmp_path)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    (swarm / ".swarm_lock").write_text("", encoding="utf-8")
+    return controller, swarm
+
+
+def test_release_stays_locked_while_a_submodule_is_initialised(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _swarm_with_submodule(tmp_path)
+    _git(swarm, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q")
+    (swarm / "vendor" / "lease_note.txt").write_text("lease output\n", encoding="utf-8")
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_stays_locked_when_files_were_written_in_an_uninitialised_submodule_path(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _swarm_with_submodule(tmp_path)
+    (swarm / "vendor" / "lease_note.txt").write_text("lease output\n", encoding="utf-8")
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_unlocks_when_the_submodule_path_is_untouched(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _swarm_with_submodule(tmp_path)
+    (swarm / "candidate.txt").write_text("scratch\n", encoding="utf-8")
+
+    SwarmBroker(controller).release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert not (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_restores_the_full_tree_after_a_lease_enabled_sparse_checkout(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    _git(swarm, "sparse-checkout", "set", "--no-cone", "/nothing-here")
+    assert not (swarm / "tracked.txt").exists()
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
+    assert _git(swarm, "config", "--bool", "--get-all", "core.sparseCheckout") != "true"
+    assert _git(swarm, "status", "--porcelain") == ""
+    assert (sandbox / "SENTINEL").exists()
