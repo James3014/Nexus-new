@@ -2446,6 +2446,8 @@ def test_inventory_marks_one_broken_worktree_and_keeps_the_rest(sh2_repo, sentin
     entries = {w.path: w for w in inventory.worktrees}
     assert entries[str(bad.resolve())].evidence_unavailable is True
     assert entries[str(bad.resolve())].classification == "KEEP_DIRTY_OR_UNKNOWN"
+    assert entries[str(bad.resolve())].is_dirty is True
+    assert entries[str(bad.resolve())].disposition == "OWNER_DECISION_REQUIRED"
     assert entries[str(good.resolve())].evidence_unavailable is False
     assert entries[str(good.resolve())].is_dirty is False
     assert entries[str(controller.resolve())].classification == "KEEP_CONTROLLER"
@@ -2470,3 +2472,40 @@ def test_inventory_reads_worktrees_bound_to_its_controller(sh2_repo, sentinel_cw
     entries = {w.path: w for w in inventory.worktrees}
     assert entries[str(listed.resolve())].evidence_unavailable is True
     assert entries[str(listed.resolve())].blocker_reason == "status_evidence_unavailable"
+    assert entries[str(listed.resolve())].is_dirty is True
+    assert entries[str(listed.resolve())].disposition == "OWNER_DECISION_REQUIRED"
+
+
+def test_direct_completion_audit_blocks_when_one_worktree_status_is_unreadable(
+    sh2_repo, sentinel_cwd
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    bad = _add_outside_worktree(sh2_repo, "audit-bad")
+    (bad / ".git").write_text(f"gitdir: {controller.parent / 'missing-gitdir'}\n", encoding="utf-8")
+
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        allowed_files=["src/allowed.txt"],
+        task_states={},
+    )
+
+    assert f"owner_decision_required:{bad.resolve()}" in audit["blockers"], audit
+
+
+def test_unbound_target_outside_root_with_a_git_symlink_to_a_directory_is_refused(
+    sh2_repo, sentinel_cwd
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    outside = sh2_repo["controller"].parent / "outside-symlink"
+    outside.mkdir()
+    (outside / ".git").symlink_to(controller / ".git", target_is_directory=True)
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager._status_bytes(outside)
+
+    assert _controller_git_state(controller) == before

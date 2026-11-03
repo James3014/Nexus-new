@@ -3809,6 +3809,8 @@ class WorktreeManager:
                 disposition = "FORENSIC_RETAIN"
             elif process_evidence_unavailable:
                 disposition = "OWNER_DECISION_REQUIRED"
+            elif status_unavailable and not (process_active or lock_present):
+                disposition = "OWNER_DECISION_REQUIRED"
             elif process_active or lock_present or is_dirty:
                 disposition = (
                     "ACTIVE_RETAIN" if process_active or lock_present else "OWNER_DECISION_REQUIRED"
