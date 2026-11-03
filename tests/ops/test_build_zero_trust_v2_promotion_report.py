@@ -14,7 +14,9 @@ def _signed_attestation() -> dict:
         "tmp_isolated": True,
         "teardown_status": "PASS",
     }
-    signature = sandbox_attestation_signature(attestation_body=body, signing_secret="fake-secret-3249")
+    signature = sandbox_attestation_signature(
+        attestation_body=body, signing_secret="fake-secret-3249"
+    )
     return {**body, "signature": signature}
 
 

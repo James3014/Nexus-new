@@ -22,7 +22,10 @@ def _signed_attestation(secret: str = SECRET) -> dict:
         "teardown_status": "PASS",
         "artifact_hash": "a" * 64,
     }
-    return {**body, "signature": sandbox_attestation_signature(attestation_body=body, signing_secret=secret)}
+    return {
+        **body,
+        "signature": sandbox_attestation_signature(attestation_body=body, signing_secret=secret),
+    }
 
 
 def _complete_v2_row() -> dict:
@@ -120,3 +123,13 @@ def test_promotion_without_a_secret_cannot_verify_and_is_blocked() -> None:
 
     assert verdict["status"] == BLOCKED
     assert verdict["reasons"] == ["sandbox_signature_not_verified"]
+
+
+def test_non_ascii_attestation_signature_blocks_the_row_instead_of_raising() -> None:
+    row = _complete_v2_row()
+    row["sandbox_attestation"]["signature"] = "sig\u00e9"
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert verdict["reasons"] == ["sandbox_signature_invalid"]

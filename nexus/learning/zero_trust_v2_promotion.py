@@ -65,9 +65,14 @@ def evaluate_zero_trust_v2_promotion_candidate(
         reasons.append("nonproduction_signing_secret")
     else:
         attestation = row.get("sandbox_attestation")
-        verdict = validate_sandbox_attestation(
-            attestation if isinstance(attestation, Mapping) else {}, signing_secret=signing_secret
-        )
+        try:
+            verdict = validate_sandbox_attestation(
+                attestation if isinstance(attestation, Mapping) else {},
+                signing_secret=signing_secret,
+            )
+        except (TypeError, ValueError):
+            # A malformed signature (non-ASCII text, say) is one bad row, not a failed report.
+            verdict = {"status": "INVALID", "sandbox_mode": None}
         if verdict["status"] != "PASS" or verdict["sandbox_mode"] == "mocked_non_promotion":
             reasons.append("sandbox_signature_invalid")
     if _get_path(row, "baseline_sandwich", "baseline_delta_status") != "CLEAN":

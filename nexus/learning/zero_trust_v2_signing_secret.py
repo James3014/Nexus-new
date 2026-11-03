@@ -51,7 +51,10 @@ def read_secret_file(path: str) -> str:
             raise SigningSecretError(
                 "signing secret file mode must be 0600 (owner read/write only)"
             )
-        value = os.read(fd, 65536).decode("utf-8").strip()
+        try:
+            value = os.read(fd, 65536).decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise SigningSecretError("signing secret file is not UTF-8 text") from exc
     finally:
         os.close(fd)
     if not value:
