@@ -235,7 +235,9 @@ def test_ps_start_time_environment_pins_utc_on_both_sweep_sides_3300():
     # Comparer side: the wrapper exports TZ=UTC before its first ps lstart call.
     text = WRAPPER.read_text(encoding="utf-8")
     sweep = text[text.index('if [ "$1" = "--sweep" ]') :]
-    tz_at = sweep.index("TZ=UTC")
+    tz_line = re.search(r"^\s*TZ=UTC$", sweep, re.M)
+    assert tz_line
+    tz_at = tz_line.start()
     assert re.search(r"^\s*export LC_ALL TZ$", sweep, re.M)
     assert tz_at < sweep.index("-o lstart=")
 
