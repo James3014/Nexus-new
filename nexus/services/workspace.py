@@ -103,8 +103,8 @@ class WorkspaceManager:
             broker = None
             swarm_path = None
             try:
-                from nexus.research.swarm_broker import SwarmBroker
                 from nexus.core.hardened_git import run_hardened_git
+                from nexus.research.swarm_broker import SwarmBroker
                 broker = SwarmBroker(self.project_root)
                 swarm_path = broker.acquire(timeout_sec=5.0)
                 if swarm_path:

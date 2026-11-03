@@ -2633,9 +2633,7 @@ def test_acquire_marks_swarm_when_recording_the_lease_base_raises_oserror(
     assert (sandbox / "SENTINEL").exists()
 
 
-def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(
-    tmp_path: Path, monkeypatch
-):
+def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(tmp_path: Path, monkeypatch):
     sandbox = _sentinel_cwd(tmp_path, monkeypatch)
     controller = tmp_path / "controller"
     base = _init_repo(controller)
