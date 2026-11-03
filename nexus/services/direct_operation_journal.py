@@ -419,9 +419,7 @@ def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
     return None
 
 
-def _status_entries(
-    cwd: str, repo_root: str | None = None
-) -> dict[str, dict[str, str]] | None:
+def _status_entries(cwd: str, repo_root: str | None = None) -> dict[str, dict[str, str]] | None:
     bound = _bound_repository(cwd, repo_root)
     if bound is None:
         return None
