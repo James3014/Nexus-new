@@ -8518,3 +8518,55 @@ def test_sigint_outside_spawn_still_raises_keyboard_interrupt(default_sigint: No
             with pytest.raises(KeyboardInterrupt):
                 signal.raise_signal(signal.SIGINT)
     assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+@pytest.mark.parametrize(
+    ("signals", "expected"),
+    [
+        ((signal.SIGTERM, signal.SIGINT), signal.SIGTERM),
+        ((signal.SIGINT, signal.SIGINT), signal.SIGINT),
+        ((signal.SIGINT, signal.SIGTERM), signal.SIGTERM),
+    ],
+)
+def test_a_second_signal_during_spawn_still_waits_for_the_handle(
+    entry: str,
+    signals: tuple[int, int],
+    expected: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    default_sigint: None,
+) -> None:
+    """#3325: two signals inside Popen's constructor raise nothing until the handle
+    exists; the group is stopped, and a stop (SIGTERM) wins over an interrupt."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ad.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    class SlowPopen:
+        pid = 535354
+        returncode = 0
+        stdout = None
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            for signum in signals:
+                signal.raise_signal(signum)
+
+        def wait(self, timeout: Any = None) -> int:
+            return 0
+
+        def communicate(self, timeout: Any = None) -> tuple[str, None]:
+            return "", None
+
+    monkeypatch.setattr(ad.subprocess, "Popen", SlowPopen)
+    raised = KeyboardInterrupt if expected == signal.SIGINT else ad.DeployerTerminated
+    host = ad.Host()
+    with pytest.raises(raised) as caught:
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    if expected != signal.SIGINT:
+        assert caught.value.signum == expected
+    assert killed and all(pid == 535354 for pid, _ in killed)
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}

@@ -732,9 +732,13 @@ def termination_raises() -> Iterator[None]:
         raise DeployerTerminated(signum)
 
     def _raise_interrupt(signum: int, _frame: Any) -> None:
-        # Outside the spawn window this is the default Ctrl-C behaviour.
-        if _SPAWN_DEFER["active"] and not _SPAWN_DEFER["pending"]:
-            _SPAWN_DEFER["pending"] = signum
+        # Outside the spawn window this is the default Ctrl-C behaviour.  Inside
+        # it nothing raises: a signal already held (SIGTERM/SIGHUP, or an
+        # earlier SIGINT) is kept, and a later SIGTERM/SIGHUP replaces a held
+        # SIGINT in ``_raise``, so a stop wins over an interrupt.
+        if _SPAWN_DEFER["active"]:
+            if _SPAWN_DEFER["pending"] is None:
+                _SPAWN_DEFER["pending"] = signum
             return
         raise KeyboardInterrupt
 
