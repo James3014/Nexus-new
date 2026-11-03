@@ -564,14 +564,10 @@ class SwarmBroker:
 
     def _git_output(self, args: List[str], cwd: Path) -> Optional[str]:
         try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except (OSError, subprocess.CalledProcessError):
+            result = run_hardened_git(cwd, *args)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if result.returncode != 0:
             return None
         return result.stdout.strip()
 
