@@ -641,7 +641,11 @@ def run_reaping_process_group(
     ``_KILL_SETTLE_SECONDS``), or a group that cannot be listed, raises PermissionError once
     the child is reaped; a leader itself still alive then is left unreaped, not waited for.
     ``stdin`` is passed to ``Popen`` as is (e.g. ``subprocess.DEVNULL``); None inherits it.
-    ``subprocess.PIPE`` is refused: nothing here would ever write to or close it."""
+    ``subprocess.PIPE`` is refused: nothing here would ever write to or close it.
+
+    An exception raised once ``Popen`` has returned (e.g. by a signal handler) is covered too
+    (#3306). One raised inside ``Popen`` itself, between fork and exec, is covered only if the
+    caller defers its handler's raise while spawning."""
 
     if stdin == subprocess.PIPE:
         raise ValueError("stdin=PIPE is not supported: nothing would write to it")
@@ -659,9 +663,12 @@ def run_reaping_process_group(
         text=text,
         start_new_session=True,
     )
-    streams = (process.stdout, process.stderr)
+    streams: tuple = (None, None)
     try:
         try:
+            # Inside the protected region: an exception raised right after Popen returns (a
+            # terminate-signal handler) still gets the group killed and reaped (#3306).
+            streams = (process.stdout, process.stderr)
             # Neither step reaps the child: communicate() and wait() would.
             output, timed_out = _read_pipes(process, deadline)
             timed_out = timed_out or not _wait_leader_unreaped(process.pid, deadline)

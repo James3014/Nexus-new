@@ -6,6 +6,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
+from nexus.core.hardened_git import (
+    linked_worktree_git_dir,
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.engine.cli_pregate import run_cli_pregate
 from nexus.engine.target_env_context import TargetEnvContext
 from nexus.learning.predictor_toggle import LEWM_PREDICTOR, influence_entry, record_influence
@@ -154,6 +160,12 @@ class RepairAttemptService:
 
             def swarm_worker(_strategy, wt_path, _tid, _desc, _ctx):
                 strategy_name = str(_strategy.get("name") or "")
+                # Resolved once, before the pregate commands (worker-controlled) run in the
+                # worktree; the diff below is bound to this git dir.
+                if Path(wt_path).resolve() == self.project_root.resolve():
+                    wt_git_dir = repository_git_dir(Path(wt_path))
+                else:
+                    wt_git_dir = linked_worktree_git_dir(Path(wt_path), self.project_root.resolve())
                 trajectory_id = _battle_trajectory_id(
                     task_id, attempt, strategy_name, source_revision
                 )
@@ -275,14 +287,18 @@ class RepairAttemptService:
 
                 score = (sum(1 for g in wt_gates if g["passed"]) / max(len(wt_gates), 1)) * 10.0
                 candidate_payload = ""
-                if source_revision:
+                if (
+                    source_revision
+                    and wt_git_dir is not None
+                    and not repository_config_can_start_a_program(Path(wt_path), git_dir=wt_git_dir)
+                ):
                     try:
-                        diff_proc = subprocess.run(
-                            ["git", "diff", "--binary", source_revision],
-                            cwd=str(wt_path),
-                            check=False,
-                            capture_output=True,
-                            text=True,
+                        diff_proc = run_hardened_git(
+                            Path(wt_path),
+                            "diff",
+                            "--binary",
+                            source_revision,
+                            git_dir=wt_git_dir,
                             timeout=10,
                         )
                         candidate_payload = diff_proc.stdout or ""
