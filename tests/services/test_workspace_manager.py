@@ -179,7 +179,15 @@ def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
     monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
     monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
     monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
-    monkeypatch.setattr(SwarmBroker, "is_independently_registered_worktree", lambda s, p: False)
+    real_check = SwarmBroker.is_independently_registered_worktree
+    calls = []
+
+    def registered_only_for_acquire(self, path):
+        # `acquire` checks first; the manager's own check afterwards sees it unregistered.
+        calls.append(path)
+        return real_check(self, path) if len(calls) == 1 else False
+
+    monkeypatch.setattr(SwarmBroker, "is_independently_registered_worktree", registered_only_for_acquire)
 
     with caplog.at_level("WARNING"):
         WorkspaceManager(controller).lease(task_id="T790")
