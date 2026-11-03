@@ -24,6 +24,24 @@ from nexus.services.external_intelligence import (
     project_refresh,
 )
 
+_REAL_POPEN = subprocess.Popen
+
+
+@pytest.fixture(autouse=True)
+def _fake_popen_waits_via_communicate(monkeypatch):
+    """The OpenCLI transport waits through communicate_then_kill_group (#3293); a fake Popen in
+    this module has no pipes to read, so its wait is the fake's own communicate()."""
+    from nexus.services import external_intelligence as module
+
+    real = module.communicate_then_kill_group
+
+    def wait(process, timeout, before_kill=None):
+        if isinstance(process, _REAL_POPEN):
+            return real(process, timeout, before_kill)
+        return process.communicate(timeout=timeout)
+
+    monkeypatch.setattr(module, "communicate_then_kill_group", wait)
+
 
 def record(**updates):
     value = {

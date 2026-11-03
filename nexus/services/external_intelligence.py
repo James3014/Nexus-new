@@ -14,6 +14,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from nexus.core.argv_command import (
+    ProcessGroupReapingUnavailable,
+    communicate_then_kill_group,
+    require_child_stays_unreaped,
+)
 from nexus.services.eia_source_excerpt import (
     EXCERPT_SCHEMA,
     ExcerptError,
@@ -1464,6 +1469,12 @@ def observed_model_violation(
     return False
 
 
+def _decode_output(data: bytes | str | None) -> str:
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return data or ""
+
+
 class OpenCLIExternalIntelligenceTransport:
     """One-write OpenCLI transport followed by stable read-back of the same conversation.
 
@@ -1536,12 +1547,16 @@ class OpenCLIExternalIntelligenceTransport:
         self, argv: Sequence[str], env: Mapping[str, str]
     ) -> tuple[int | None, str, str, bool]:
         try:
+            # Refused before anything is spawned (#3293).
+            require_child_stays_unreaped()
+        except ProcessGroupReapingUnavailable:
+            return 1, "", "process group reaping unavailable", False
+        try:
             process = subprocess.Popen(
                 list(argv),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 start_new_session=True,
                 shell=False,
                 env=dict(env),
@@ -1550,8 +1565,10 @@ class OpenCLIExternalIntelligenceTransport:
             return None, "", "", False
         try:
             try:
-                stdout, stderr = process.communicate(timeout=self.timeout + 5)
-                return process.returncode, stdout or "", stderr or "", False
+                # Waits in the shared process-group path, so the process-wide stop flag
+                # (#3200/#3206) kills this group and reaps it before it propagates (#3293).
+                stdout, stderr = communicate_then_kill_group(process, self.timeout + 5)
+                return process.returncode, _decode_output(stdout), _decode_output(stderr), False
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
@@ -1565,7 +1582,11 @@ class OpenCLIExternalIntelligenceTransport:
                     except (OSError, ProcessLookupError):
                         pass
                     stdout, stderr = process.communicate()
-                return process.returncode, stdout or "", stderr or "", True
+                return process.returncode, _decode_output(stdout), _decode_output(stderr), True
+            except (ChildProcessError, PermissionError):
+                # A group member survived SIGKILL or the group could not be listed: treat as
+                # an unknown outcome, reconciled read-only like a timeout.
+                return process.returncode, "", "", True
         finally:
             for stream in (process.stdout, process.stderr):
                 if stream is not None:
