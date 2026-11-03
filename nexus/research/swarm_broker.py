@@ -385,6 +385,34 @@ def _recovery_key(swarm_dir: Path, pinned: int) -> tuple[str, int, int]:
     return (str(swarm_dir), *_fd_identity(pinned))
 
 
+_HOLDER_MARK_PREFIX = b"held pid="
+
+
+def _holder_mark() -> bytes:
+    return _HOLDER_MARK_PREFIX + str(os.getpid()).encode("ascii") + b"\n"
+
+
+def _lock_holder_pid(lock_fd: int) -> Optional[int]:
+    """The pid recorded in a held lock (`held pid=<n>`); None for a lock without one (an older
+    lock, or one already marked)."""
+    head = os.pread(lock_fd, 64, 0)
+    if not head.startswith(_HOLDER_MARK_PREFIX):
+        return None
+    digits = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
+    return int(digits) if digits.isdigit() else None
+
+
+def _process_exists(pid: int) -> bool:
+    """Whether a process with `pid` exists on this host; nothing is delivered to it."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _write_release_failed_mark(lock_fd: int) -> None:
     os.ftruncate(lock_fd, 0)
     os.pwrite(lock_fd, _RELEASE_FAILED_MARK, 0)
@@ -555,9 +583,15 @@ class SwarmBroker:
                 return None
             try:
                 # Exclusive create in the validated directory: cross-process lock.
-                os.close(os.open(_LOCK_NAME, _NEW_FILE_FLAGS, 0o644, dir_fd=pinned))
+                lock_fd = os.open(_LOCK_NAME, _NEW_FILE_FLAGS, 0o644, dir_fd=pinned)
             except FileExistsError:
                 return False
+            try:
+                # The holder's pid, so an unattended cleanup can tell a lease that is still
+                # running from one whose holder is gone (#3232).
+                os.write(lock_fd, _holder_mark())
+            finally:
+                os.close(lock_fd)
             # 🚀 [Shared Cache] 加速啟動：掛載重型依賴
             self._mount_shared_cache(swarm_dir, pinned)
             if not _names_dir(swarm_dir, pinned):
@@ -822,8 +856,10 @@ class SwarmBroker:
         `recover_failed_releases` resets the swarm before it goes back to the pool; True when
         marked.
 
-        For an operator who knows the holder is gone: the lock is never removed here, and a
-        link standing at the swarm path or at its lock is not followed.
+        A lock that names its holder (every lock `acquire` takes, #3232) is not marked while
+        that process still exists, however old the lock is: the unattended NightShift cleanup
+        would otherwise reset a lease that is still running. The lock is never removed here,
+        and a link standing at the swarm path or at its lock is not followed.
         """
         if not self._is_swarm_child_dir(swarm_dir):
             return False
@@ -837,6 +873,15 @@ class SwarmBroker:
                 return False
             try:
                 if time.time() - os.fstat(lock_fd).st_mtime <= older_than_sec:
+                    return False
+                holder = _lock_holder_pid(lock_fd)
+                if holder is not None and _process_exists(holder):
+                    logger.warning(
+                        "⚠️ [SwarmBroker] Lock older than the TTL but its holder (pid %d) is "
+                        "still running; not marked: %s",
+                        holder,
+                        swarm_dir,
+                    )
                     return False
                 _write_release_failed_mark(lock_fd)
                 return True

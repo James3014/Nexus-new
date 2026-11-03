@@ -2143,3 +2143,72 @@ def test_argv_batches_stay_under_the_budget_and_keep_order():
     ]
     assert _argv_batches([], budget=10) == []
     assert _argv_batches(["x" * 50], budget=10) == [["x" * 50]]  # one oversized path still goes
+
+
+# #3232: the lock names its holder, and an aged lock is not marked stale while that holder
+# still runs.
+
+
+def _acquired_lease(tmp_path: Path) -> tuple[Path, Path, SwarmBroker]:
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    broker = SwarmBroker(controller)
+    acquired = broker.acquire(timeout_sec=0.05)
+    assert acquired is not None
+    (swarm / "work_in_progress.txt").write_text("live holder output\n", encoding="utf-8")
+    return controller, swarm, broker
+
+
+def test_acquire_records_the_holder_in_the_lock(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    assert (swarm / ".swarm_lock").read_text(encoding="utf-8") == f"held pid={os.getpid()}\n"
+    assert broker.locked_swarms() == [(swarm, "held")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_an_aged_lock_is_not_marked_stale_while_its_holder_runs(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    _age(swarm / ".swarm_lock", 3 * 3600)
+    probed: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "kill", lambda pid, sig: probed.append((pid, sig)))
+
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is False
+
+    assert probed == [(os.getpid(), 0)]
+    assert broker.locked_swarms() == [(swarm, "held")]
+    assert broker.recover_failed_releases() == []
+    assert (swarm / "work_in_progress.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_an_aged_lock_of_a_gone_holder_is_marked_and_recovered(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    _controller, swarm, broker = _acquired_lease(tmp_path)
+    _age(swarm / ".swarm_lock", 3 * 3600)
+
+    def gone(pid, sig):
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr(os, "kill", gone)
+
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is True
+
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert broker.recover_failed_releases() == [swarm]
+    assert not (swarm / "work_in_progress.txt").exists()
+    assert broker.locked_swarms() == []
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_a_lock_without_a_holder_is_still_marked_by_age_alone(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)  # an older, empty lock
+    _age(swarm / ".swarm_lock", 3 * 3600)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: pytest.fail("no holder to probe"))
+
+    assert SwarmBroker(controller).mark_stale_lease(swarm, 2 * 3600) is True
+    assert (sandbox / "SENTINEL").exists()
