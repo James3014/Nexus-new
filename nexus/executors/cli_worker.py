@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, Tuple
 
 from nexus.core.argv_command import communicate_then_kill_group, require_child_stays_unreaped
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.executors.exec_policy import (
     assert_git_repo_config_safe,
     git_target_directory,
@@ -1164,7 +1165,10 @@ def run_cli_worker(
         _RUN_START_TICKS.pop(run_tag, None)
         if on_process_group is not None:
             on_process_group(None)
-        shutil.rmtree(isolated_home, ignore_errors=True)
+        # The worker CLI ran with this home: a locked or deep entry must not stay behind unseen.
+        cleanup_error = remove_untrusted_tree_quietly(isolated_home)
+        if cleanup_error is not None:
+            _logger.warning("cli_worker isolated home cleanup failed: %s", cleanup_error)
 
     wall_time_ms = max(0, int((time.monotonic() - started) * 1000))
     result = CliWorkerResult(

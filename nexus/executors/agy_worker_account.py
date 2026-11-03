@@ -83,6 +83,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.executors import cli_worker
 from nexus.executors.agy_dispatch_boundary import (
     AGY_WRITE_BOUNDARY_UNAVAILABLE,
@@ -399,7 +400,9 @@ def gc_unreferenced_worker_run_roots(
                 or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
             ):
                 continue
-            shutil.rmtree(root, ignore_errors=True)
+            remove_error = remove_untrusted_tree_quietly(root)
+            if remove_error is not None:
+                _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_REMOVE_FAILED %s", remove_error)
             if os.path.lexists(root):
                 _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_LEFTOVER root=%s", root)
             else:
@@ -514,7 +517,9 @@ def reap_orphaned_worker_run(
             return _worker_user_has_no_process(WORKER_USER, run_command)
         if sweep_run_root(root, run_command=run_command) != "CLEAN":
             return False
-        shutil.rmtree(root, ignore_errors=True)
+        remove_error = remove_untrusted_tree_quietly(root)
+        if remove_error is not None:
+            _LOG.warning("AGY_WORKER_RUN_ROOT_REMOVE_FAILED %s", remove_error)
         if os.path.lexists(root):
             _LOG.warning("AGY_WORKER_RUN_ROOT_LEFTOVER_AFTER_CLEAN_SWEEP root=%s", root)
         return True
@@ -1536,7 +1541,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 # run's processes gone with the per-run wrapper sweep instead of
                 # the coarse "the worker account owns no process" check.
                 if not (self._possibly_launched and self._swept is not True):
-                    shutil.rmtree(self.run_root, ignore_errors=True)
+                    remove_error = remove_untrusted_tree_quietly(self.run_root)
+                    if remove_error is not None:
+                        _LOG.warning("AGY_WORKER_RUN_ROOT_REMOVE_FAILED %s", remove_error)
                 if os.path.lexists(self.run_root):
                     self.leftover_run_root = str(self.run_root)
                     sys.stderr.write(

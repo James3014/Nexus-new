@@ -293,7 +293,8 @@ class PrivateAreaNotRemoved(SandboxError):
     Unlike a plain ``SandboxError`` the command may have run: ``run_model_argv`` and
     ``run_model_command_string`` set ``result`` to the finished ``CompletedProcess`` and
     ``interrupted_by`` to the exception that ended the run instead (``subprocess.TimeoutExpired``,
-    ``FileNotFoundError``, …); both are ``None`` when nothing ran or the block was used directly.
+    …). A missing executable raises ``FileNotFoundError`` before the command starts, so there
+    ``interrupted_by`` is ``None``, as it is when nothing ran or the block was used directly.
     The error is a ``SandboxError`` so an existing ``except SandboxError`` still catches it;
     catch this type first to tell "ran, then cleanup failed" from "did not run"."""
 
