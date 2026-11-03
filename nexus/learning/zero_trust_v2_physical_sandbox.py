@@ -97,10 +97,17 @@ def _profile_confines_writes(profile: str, *, workspace_dir: Path, tmp_dir: Path
     # Whole-profile comparison: each line must be exactly one known rule, so an extra
     # form sharing a line with a known rule is rejected too.
     rules = [line.strip() for line in profile.splitlines() if line.strip()]
+    # Written out here, independent of the profile generator, so a widened generator
+    # cannot make its own output match.
     expected = [
-        line.strip()
-        for line in _reference_sandbox_profile(workspace_dir, tmp_dir).splitlines()
-        if line.strip()
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        _extra_deny_rule(),
+        "(deny file-write*)",
+        f'(allow file-read* (subpath "{_sbpl_string(str(workspace_dir.resolve()))}"))',
+        f'(allow file-read* (subpath "{_sbpl_string(str(tmp_dir.resolve()))}"))',
+        _write_allow_rule(workspace_dir, tmp_dir),
     ]
     return rules == expected
 
