@@ -93,7 +93,11 @@ def _codex_invoke(tmp_path: Path, monkeypatch) -> None:
     contract = _contract(tmp_path)
     lease = _lease(tmp_path, contract)
     monkeypatch.setattr(codex_executor, "materialize_codex_home", lambda home: "refused_for_test")
-    CodexCliExecutor().invoke(contract, lease, prompt="x")
+    # An absolute stand-in, so the request does not need codex on PATH (CI has none).
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    CodexCliExecutor(executable=str(executable)).invoke(contract, lease, prompt="x")
 
 
 def test_codex_run_home_deep_locked_tree_is_removed(tmp_path, monkeypatch):
