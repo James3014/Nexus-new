@@ -679,8 +679,12 @@ def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneOb
         f"replay_action_id={action_id}",
         f"replay_request_hash={request_hash}",
     )
+    from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+        _assist_flagged_for_reconcile,
+    )
+
     reconciliation_required = bool(
-        snapshot.get("reconciliation_required")
+        _assist_flagged_for_reconcile(snapshot)
         or snapshot.get("uncertain_mutation")
         or next_action == "nexus_task_reconcile"
         or status == "UNKNOWN_REQUIRES_RECONCILE"

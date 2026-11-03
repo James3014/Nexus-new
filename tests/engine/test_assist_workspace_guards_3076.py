@@ -1811,5 +1811,83 @@ def test_reconcile_moves_a_cancelled_record_written_before_3244_so_retry_works(b
     settled = box.gateway._assist_read(TASK)
     assert settled is not None
     assert settled["account_lease_cleanup_status"] == "RELEASED", settled
+    assert settled["status"] == "CANCELLED", settled
     assert not settled.get("reconciliation_required"), settled
     _assert_retry_passes_the_reconcile_gates(box)
+
+
+_OLD_SHAPE = {
+    "status": "CANCELLED",
+    "account_lease_released": False,
+    "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+}
+
+
+def test_old_shape_record_reads_as_needing_reconcile_on_every_status_surface(box):
+    """CANCELLED, lease held for reconciliation, no flag: not settled, held, and every status
+    surface points at nexus_task_reconcile (#3276)."""
+    job = _job(box, "", **_OLD_SHAPE)
+    assert "reconciliation_required" not in job
+    assert not assist_response._assist_settled(job)
+    assert assist_response._assist_held(job)
+    action = box.gateway._assist_action(job)
+    assert action["next_action"] == "nexus_task_reconcile"
+    assert action["recommended_tool"] == "nexus_task_reconcile"
+    assert action["pending"] is False or action["attention_required"] is True
+    response = box.gateway._assist_response(job)
+    assert response["next_action"] == "nexus_task_reconcile"
+    state = {"task_id": TASK, **_OLD_SHAPE}
+    payload = box.gateway._recovery_payload(state)
+    assert payload["next_action"] == "nexus_task_reconcile"
+    assert payload["recommended_tool"] == "nexus_task_reconcile"
+    assert payload["uncertain_mutation"] is True
+    assert payload["attention_required"] is True
+
+
+def test_released_or_flagless_cancelled_record_stays_settled(box):
+    job = _job(
+        box,
+        "",
+        status="CANCELLED",
+        account_lease_released=True,
+        account_lease_cleanup_status="RELEASED",
+    )
+    assert assist_response._assist_settled(job) and not assist_response._assist_held(job)
+    payload = box.gateway._recovery_payload({"task_id": TASK, **job})
+    assert payload["next_action"] == "none" and payload["uncertain_mutation"] is False
+
+
+def test_reconcile_leaves_a_running_probe_holding_its_lease_alone(box, monkeypatch):
+    """A running probe holds its lease normally (cleanup status unset): reconcile does not
+    treat it as needing reconciliation and does not touch workspace, record or lease."""
+    workspace = _workspace(box.root)
+    box.gateway._assist_write(
+        _job(
+            box,
+            str(workspace),
+            job_kind="model_probe",
+            status="RUNNING",
+            account_alias_hash="alias-live",
+            account_lease_id_hash="lease-live",
+            account_lease_owner_pid=FAKE_PID,
+            account_lease_released=False,
+        )
+    )
+    group = _FakeGroup(member_alive=True)
+
+    def provider_alive(pid: int, sig: int) -> None:
+        assert pid == FAKE_PID and sig == 0, (pid, sig)
+
+    monkeypatch.setattr(os, "kill", provider_alive)
+    monkeypatch.setattr(os, "killpg", group.killpg)
+    monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
+    _fake_lease_coordinator(monkeypatch, "LEASE_RECEIPT_REMOVED")
+    before = box.gateway._assist_read(TASK)
+    assert before is not None and not assist_response._assist_held(before)
+    box.gateway._task_reconcile({"task_id": TASK})
+    after = box.gateway._assist_read(TASK)
+    assert after is not None
+    assert after["status"] == "RUNNING" and after["account_lease_released"] is False, after
+    assert not after.get("reconciliation_required"), after
+    assert after.get("account_lease_cleanup_status") != "RELEASED", after
+    assert workspace.exists() and group.sent == []

@@ -174,6 +174,7 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
     _AssistProbeMixin as _AssistProbeMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_flagged_for_reconcile,
     _assist_workspace_removable,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
@@ -2630,7 +2631,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         action = dict(action)
         task_id = str(state.get("task_id") or action.get("task_id") or "")
         status = str(state.get("status") or action.get("task_status") or "UNKNOWN")
-        terminal = status in {"CANCELLED", "INTEGRATED", "REJECTED", "SUPERSEDED", "FINAL_BLOCK"} and not bool(state.get("reconciliation_required"))
+        terminal = status in {"CANCELLED", "INTEGRATED", "REJECTED", "SUPERSEDED", "FINAL_BLOCK"} and not _assist_flagged_for_reconcile(state)
         next_action = str(action.get("next_action") or ("none" if terminal else "nexus_task_reconcile"))
         candidate = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         if not candidate and isinstance(action.get("candidate"), Mapping):
@@ -2652,7 +2653,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             action_id = state["request"]["action"].get("action_id")
         recommended = action.get("recommended_tool") or next_action
         if recommended not in PUBLIC_TOOL_NAMES:
-            if status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or state.get("reconciliation_required"):
+            if status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or _assist_flagged_for_reconcile(state):
                 recommended = "nexus_task_reconcile"
             elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
                 recommended = "nexus_task_status"
@@ -2676,7 +2677,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 "candidate_ref": state.get("candidate_ref"),
             },
             "cleanup_status": cleanup,
-            "uncertain_mutation": status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or bool(state.get("reconciliation_required")),
+            "uncertain_mutation": status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or _assist_flagged_for_reconcile(state),
         }
         if include_state:
             result["state"] = dict(state)
@@ -2710,13 +2711,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             current = self._assist_refresh(task_id) or assisted
             needs_reconcile = (
                 current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
-                or bool(current.get("reconciliation_required"))
-                # A record written before #3244 (a cancel whose lease release found no claim)
-                # holds the lease for reconciliation without the flag; it needs this too (#3250).
-                or (
-                    current.get("account_lease_cleanup_status") == "RECONCILIATION_REQUIRED"
-                    and current.get("account_lease_released") is not True
-                )
+                or _assist_flagged_for_reconcile(current)
             )
             if needs_reconcile and not _assist_workspace_removable(current):
                 # A provider group member may still run in the workspace and on the account:
@@ -2760,7 +2755,8 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 # proven may reconciliation converge to a retryable failure;
                 # output alone never upgrades the result to success.
                 current.update({
-                    "status": "FAILED",
+                    # A cancel stays a cancel; only a lost process becomes a failure (#3276).
+                    "status": "CANCELLED" if current.get("status") == "CANCELLED" else "FAILED",
                     "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
                     "reconciliation_required": False,
                     "reconciled_from": "UNKNOWN_REQUIRES_RECONCILE",
