@@ -1462,7 +1462,6 @@ def seal_shadow_candidate(
             source,
             "ls-files",
             "--others",
-            "--exclude-standard",
             "-z",
             index_file=index_file,
             **pin,
