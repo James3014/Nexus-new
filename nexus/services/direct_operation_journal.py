@@ -743,7 +743,7 @@ class DirectOperationJournal:
         if op_dir.exists():
             raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS")
         repo_root, base_head = _git_identity(cwd)
-        source_baseline = capture_source_baseline(cwd) if repo_root else None
+        source_baseline = capture_source_baseline(cwd, repo_root) if repo_root else None
         source_baseline_hash = source_baseline_sha256(source_baseline)
         source_attribution_state = (
             "BASELINE_CAPTURED" if source_baseline_hash is not None else "UNAVAILABLE"

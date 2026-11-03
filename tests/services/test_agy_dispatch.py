@@ -7045,3 +7045,47 @@ def test_background_capability_check_pool_busy_records_failure_kind(
     assert record["status"] == "FAILED"
     assert record["failure_kind"] == "AGY_ACCOUNT_POOL_BUSY"
     assert record["first_effect_at"] is None
+
+
+def test_attempt_write_scope_uses_recorded_repo_root_when_repo_appears_in_cwd(
+    tmp_path: Path, pass_through_boundary
+) -> None:
+    """#3328: a repository created inside cwd during an attempt must not replace the
+    recorded root in the per-attempt changed-path check that feeds the write scope."""
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "root"
+    sub = root / "sub"
+    sub.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "outside.txt").write_text("before\n", encoding="utf-8")
+    (sub / "x").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=root, check=True)
+
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def runner(write_boundary=None, **_kwargs):
+        (root / "outside.txt").write_text("changed by worker\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=sub, check=True)
+        with (sub / ".git" / "config").open("a", encoding="utf-8") as handle:
+            handle.write('[filter "x"]\n\tclean = cat\n')
+        return 0, "done", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(sub),
+        mode="accept-edits",
+        write_paths=[str(sub / "x")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+        source_repo_root=str(root),
+    )
+
+    assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
