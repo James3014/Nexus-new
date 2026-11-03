@@ -7371,3 +7371,24 @@ def test_linked_worktree_check_skips_a_git_entry_that_is_not_a_repository(
     assert dispatch._is_linked_worktree(str(cwd)) is True
     with pytest.raises(dispatch.WorktreeFallbackError):
         dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)
+
+
+def test_linked_worktree_check_is_not_stopped_by_a_git_dir_with_an_invalid_head(
+    tmp_path: Path,
+) -> None:
+    """#3335: a .git directory with objects/ and refs/ but an invalid HEAD (which git skips)
+    between cwd and the linked worktree root does not hide the linked worktree."""
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    decoy = wt / "sub" / ".git"
+    (decoy / "objects").mkdir(parents=True)
+    (decoy / "refs").mkdir()
+    (decoy / "HEAD").write_text("garbage\n", encoding="utf-8")
+    cwd = wt / "sub" / "inner"
+    cwd.mkdir()
+
+    assert dispatch._is_linked_worktree(str(cwd)) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)

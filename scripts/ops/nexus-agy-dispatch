@@ -3352,17 +3352,19 @@ def _is_linked_worktree(cwd: str) -> bool:
     try:
         # Discovery in Python (not git), from cwd itself upwards: a repo whose
         # config names a program makes the hardened runner refuse, which must
-        # not read as "not linked" (fail closed). Like git, skip a .git that is
-        # not a repository (broken link, empty directory, link to a plain one).
+        # not read as "not linked" (fail closed). Any gitfile (a regular .git
+        # file with a gitdir: line) at cwd or above counts, whatever lies in
+        # between, so this does not have to copy git's own repository checks.
         start = Path(cwd).resolve()
         for parent in (start, *start.parents):
             candidate = parent / ".git"
-            if candidate.is_file() or (
-                candidate.is_dir()
-                and (candidate / "HEAD").is_file()
-                and (candidate / "objects").is_dir()
-                and (candidate / "refs").is_dir()
-            ):
+            if not candidate.is_file():
+                continue
+            try:
+                pointer = candidate.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return True  # an unreadable gitfile: fail closed
+            if _WORKTREE_GITFILE_RE.search(pointer):
                 git_path = candidate
                 break
         else:
