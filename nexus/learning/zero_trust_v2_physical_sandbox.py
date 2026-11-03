@@ -22,6 +22,19 @@ SANDBOX_DEVICE_WRITE_ALLOWLIST = ("/dev/null",)
 SANDBOX_EXEC_FAILURE_RETURNCODES = frozenset({64, 65, 71})
 
 
+# The one directory the sandbox launcher is taken from; the observer's PATH is not consulted (#3240).
+TRUSTED_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
+
+def _file_sha256(path: str | None) -> str | None:
+    if not path:
+        return None
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _env_allowlist_hash(env: dict[str, str]) -> str:
     return canonical_json_hash({key: env[key] for key in sorted(env)})
 
@@ -119,7 +132,11 @@ def run_macos_sandbox_probe(
     if not signing_secret:
         raise ValueError("signing_secret must not be empty")
 
-    sandbox_exec = sandbox_exec_path or shutil.which("sandbox-exec")
+    sandbox_exec = sandbox_exec_path or shutil.which(
+        "sandbox-exec", path=str(Path(TRUSTED_SANDBOX_EXEC).parent)
+    )
+    sandbox_exec_unexpected = bool(sandbox_exec) and str(sandbox_exec) != TRUSTED_SANDBOX_EXEC
+    sandbox_exec_sha256 = _file_sha256(str(sandbox_exec) if sandbox_exec else None)
     source_env = dict(env_source if env_source is not None else os.environ)
     child_env = {key: source_env[key] for key in env_allowlist if key in source_env}
     sandbox_available = bool(sandbox_exec)
@@ -179,10 +196,17 @@ def run_macos_sandbox_probe(
     )
     command_passed = returncode == 0 and not timed_out and not sandbox_apply_failed
     # A timeout leaves no exit status, so the profile is not demonstrably applied.
-    sandbox_ran = sandbox_available and not timed_out and not sandbox_apply_failed
+    sandbox_ran = (
+        sandbox_available
+        and not sandbox_exec_unexpected
+        and not timed_out
+        and not sandbox_apply_failed
+    )
     isolated = sandbox_ran and writes_confined
     if not sandbox_available:
         isolation_reason = "sandbox_exec_unavailable"
+    elif sandbox_exec_unexpected:
+        isolation_reason = "sandbox_exec_path_unexpected"
     elif timed_out:
         isolation_reason = "sandbox_outcome_unknown_timeout"
     elif sandbox_apply_failed:
@@ -199,6 +223,8 @@ def run_macos_sandbox_probe(
         "stderr_sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
         "timed_out": timed_out,
         "sandbox_available": sandbox_available,
+        "sandbox_exec_path": str(sandbox_exec) if sandbox_exec else None,
+        "sandbox_exec_sha256": sandbox_exec_sha256,
         "sandbox_apply_failed": sandbox_apply_failed,
         "write_scope_confined": writes_confined,
     }
