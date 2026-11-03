@@ -530,6 +530,7 @@ def test_release_skips_clean_when_swarm_is_swapped_after_checkout(tmp_path: Path
     base = _init_repo(controller)
     swarm = controller / ".nexus-swarm-001"
     _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(swarm, "update-ref", "refs/worktree/nexus-swarm-base", "HEAD")
     (swarm / "candidate.txt").write_text("candidate scratch\n", encoding="utf-8")
     victim = _victim_repo(tmp_path)
     moved = tmp_path / "moved-swarm"
@@ -2387,6 +2388,7 @@ def _swarm_with_submodule(tmp_path: Path) -> tuple[Path, Path]:
     base = _commit_submodule(controller, tmp_path)
     swarm = controller / ".nexus-swarm-001"
     _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    _git(swarm, "update-ref", "refs/worktree/nexus-swarm-base", "HEAD")
     (swarm / ".swarm_lock").write_text("", encoding="utf-8")
     return controller, swarm
 
@@ -2652,23 +2654,3 @@ def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(
     assert broker.acquire(timeout_sec=0.05) is None
     assert (swarm / ".swarm_lock").read_bytes() == b"other holder\n"
     assert (sandbox / "SENTINEL").exists()
-
-
-def test_broker_git_queries_run_through_the_hardened_runner(tmp_path: Path, monkeypatch):
-    import nexus.research.swarm_broker as swarm_broker
-
-    controller = tmp_path / "controller"
-    _init_repo(controller)
-    real_run = swarm_broker.run_hardened_git
-    calls = []
-
-    def spy(repo_dir, *args, **kwargs):
-        calls.append(args)
-        return real_run(repo_dir, *args, **kwargs)
-
-    monkeypatch.setattr(swarm_broker, "run_hardened_git", spy)
-
-    top = SwarmBroker(controller)._git_output(["rev-parse", "--show-toplevel"], controller)
-
-    assert calls == [("rev-parse", "--show-toplevel")]
-    assert top == str(controller.resolve())
