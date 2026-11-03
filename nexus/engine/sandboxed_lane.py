@@ -695,6 +695,36 @@ class Confinement:
         self.profile = profile
         self.env = env
         self.roots = roots
+        # Mode and flags each root had at setup (#3239): attribute changes stay allowed inside
+        # the lane (#3177), so they are put back after every command, before host-side writes.
+        self._root_metadata: dict[Path, tuple[int, int]] = {}
+        for root in roots:
+            try:
+                info = os.lstat(root)
+            except OSError:
+                continue
+            self._root_metadata[root] = (stat.S_IMODE(info.st_mode), getattr(info, "st_flags", 0))
+        # Roots whose mode or flags a command changed and that were restored, and the ones
+        # whose restore failed (with the error), so a caller can tell the two apart.
+        self.root_restorations: list[str] = []
+        self.root_restore_failures: list[str] = []
+
+    def restore_root_metadata(self) -> None:
+        for root, (mode, flags) in self._root_metadata.items():
+            try:
+                info = os.lstat(root)
+                if stat.S_IMODE(info.st_mode) == mode and getattr(info, "st_flags", 0) == flags:
+                    continue
+                # Flags first: an immutable flag also refuses the chmod that follows.
+                chflags = getattr(os, "chflags", None)  # BSD/macOS only
+                if chflags is not None:
+                    chflags(root, flags)
+                os.chmod(root, mode)
+            except OSError as exc:
+                self.root_restore_failures.append(f"{root}: {type(exc).__name__}: {exc}")
+                continue
+            if str(root) not in self.root_restorations:
+                self.root_restorations.append(str(root))
 
     def describe(self) -> dict[str, object]:
         return {
@@ -706,16 +736,19 @@ class Confinement:
         }
 
     def run(self, argv: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
-        return run_confined(
-            argv,
-            cwd=cwd,
-            confine_roots=self.roots,
-            profile=lambda: self.profile,
-            env=self.env,
-            timeout=timeout,
-            require_barrier=True,
-            reap_process_group=True,
-        )
+        try:
+            return run_confined(
+                argv,
+                cwd=cwd,
+                confine_roots=self.roots,
+                profile=lambda: self.profile,
+                env=self.env,
+                timeout=timeout,
+                require_barrier=True,
+                reap_process_group=True,
+            )
+        finally:
+            self.restore_root_metadata()
 
 
 def confinement(
