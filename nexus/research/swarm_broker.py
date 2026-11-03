@@ -30,8 +30,9 @@ _LOCK_FILE_FLAGS = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CL
 # Written into the lock by a release that left the swarm locked; only such a lock is recovered.
 _RELEASE_FAILED_MARK = b"release_failed\n"
 _STATE_RELEASE_FAILED = "release_failed"
-# Written instead when `_start_lease` failed, so the swarm never reached a worker; its tree
-# is untouched and recovery may put it back at its HEAD when no lease base was recorded.
+# Written instead when `_start_lease` failed, so the swarm never reached a worker; as long as
+# it was never leased before, its tree is untouched and recovery may put it back at its HEAD
+# when no lease base was recorded.
 _UNSTARTED_MARK = b"release_failed\nunstarted\n"
 _FAILED_MARKS = (_RELEASE_FAILED_MARK, _UNSTARTED_MARK)
 _MARK_READ_LEN = len(_UNSTARTED_MARK) + 1

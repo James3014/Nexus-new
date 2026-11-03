@@ -2690,3 +2690,21 @@ def test_handed_out_lease_without_a_base_stays_locked_after_recovery(tmp_path: P
     broker = SwarmBroker(controller)
     assert broker.recover_failed_releases() == []
     assert broker.locked_swarms() == [(swarm, "release_failed")]
+
+
+def test_unstarted_swarm_stays_recoverable_after_a_failed_recovery(tmp_path: Path, monkeypatch):
+    import nexus.research.swarm_broker as swarm_broker
+
+    controller, swarm = _first_start_fails_then_recovers(tmp_path, monkeypatch, False)
+    index_lock = Path(_git(swarm, "rev-parse", "--absolute-git-dir")) / "index.lock"
+    index_lock.write_text("", encoding="utf-8")  # fresh: not cleared, so the reset fails
+    broker = SwarmBroker(controller)
+
+    assert broker.recover_failed_releases() == []
+    assert broker.locked_swarms() == [(swarm, "release_failed")]
+    assert (swarm / ".swarm_lock").read_bytes() == b"release_failed\nunstarted\n"
+
+    index_lock.unlink()
+    swarm_broker._RECOVERY_FAILED_AT.clear()  # the retry backoff of the failed attempt
+    assert broker.recover_failed_releases() == [swarm]
+    assert broker.acquire(timeout_sec=0.05) == swarm
