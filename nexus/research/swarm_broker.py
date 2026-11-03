@@ -529,6 +529,8 @@ class SwarmBroker:
     """
     def __init__(self, workspace: Path):
         self.workspace = workspace.resolve()
+        # Identity (dev, ino) of the lock file each `_try_lock` created, by swarm path.
+        self._taken_lock_identity: dict[Path, tuple[int, int]] = {}
         # Find all available swarm directories (e.g., .nexus-swarm-001 to 050)
         self.swarm_dirs = sorted([d for d in self.workspace.glob(".nexus-swarm-*") if self._is_swarm_child_dir(d)])
         if not self.swarm_dirs:
@@ -545,14 +547,10 @@ class SwarmBroker:
 
     def _git_output(self, args: List[str], cwd: Path) -> Optional[str]:
         try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=cwd,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except (OSError, subprocess.CalledProcessError):
+            result = run_hardened_git(cwd, *args)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
             return None
         return result.stdout.strip()
 
@@ -693,6 +691,7 @@ class SwarmBroker:
                 # The holder's pid, so an unattended cleanup can tell a lease that is still
                 # running from one whose holder is gone (#3232).
                 os.write(lock_fd, _holder_mark())
+                self._taken_lock_identity[swarm_dir] = _fd_identity(lock_fd)
             finally:
                 os.close(lock_fd)
             # 🚀 [Shared Cache] 加速啟動：掛載重型依賴
@@ -734,7 +733,7 @@ class SwarmBroker:
             result = run_hardened_git(
                 swarm_dir, "update-ref", _LEASE_BASE_REF, "HEAD", git_dir=git_dir
             )
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, OSError):
             result = None
         if result is None or result.returncode != 0:
             logger.warning(
@@ -753,11 +752,25 @@ class SwarmBroker:
             return
         try:
             if _fd_identity(pinned) != identity:
+                logger.warning(
+                    "⚠️ [SwarmBroker] Swarm path names another directory; not marked: %s",
+                    swarm_dir,
+                )
                 return
             lock_fd = _open_lock(pinned)
             if lock_fd is None:
+                logger.warning(
+                    "⚠️ [SwarmBroker] Lock is not a regular file; not marked: %s", swarm_dir
+                )
                 return
             try:
+                taken = self._taken_lock_identity.pop(swarm_dir, None)
+                if taken is None or _fd_identity(lock_fd) != taken:
+                    logger.warning(
+                        "⚠️ [SwarmBroker] Lock is not the one this acquire took; not marked: %s",
+                        swarm_dir,
+                    )
+                    return
                 _write_release_failed_mark(lock_fd)
             finally:
                 os.close(lock_fd)
@@ -1215,11 +1228,12 @@ class SwarmBroker:
         base = run_hardened_git(
             swarm_dir, "rev-parse", "--verify", "--quiet", base_commit, git_dir=git_dir
         )
-        target = base.stdout.strip() if base.returncode == 0 else "HEAD"
-        if target == "HEAD":
+        target = base.stdout.strip() if base.returncode == 0 else ""
+        if not re.fullmatch(r"[0-9a-f]{40}", target):
             logger.warning(
-                "⚠️ [SwarmBroker] No lease base recorded; resetting to HEAD: %s", swarm_dir
+                "⚠️ [SwarmBroker] No usable lease base recorded; left locked: %s", swarm_dir
             )
+            return False
         # A sparse-checkout the lease turned on is disabled first, restoring the full tree, so
         # the next lease does not inherit the paths it left out (#3256).
         if not self._disable_sparse_checkout(swarm_dir, git_dir, pinned):

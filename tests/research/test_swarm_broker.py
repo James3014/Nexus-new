@@ -2551,3 +2551,122 @@ def test_release_stays_locked_when_the_submodule_working_tree_cannot_be_removed(
 
     assert (swarm / ".swarm_lock").exists()
     assert broker.locked_swarms() == [(swarm, "release_failed")]
+
+
+# --- fail-closed release base, hardened git, and lease-start failures (#3169) ---------------------
+
+
+def _swarm_with_lease_base(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    acquired = SwarmBroker(controller).acquire(timeout_sec=0.05)
+    assert acquired is not None
+    return sandbox, controller, swarm, acquired
+
+
+def test_release_keeps_swarm_locked_when_the_lease_base_is_missing(tmp_path: Path, monkeypatch):
+    sandbox, controller, swarm, acquired = _swarm_with_lease_base(tmp_path, monkeypatch)
+    (swarm / "lease_work.txt").write_text("work\n", encoding="utf-8")
+    _git(swarm, "update-ref", "-d", "refs/worktree/nexus-swarm-base")
+
+    SwarmBroker(controller).release(acquired)
+
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "lease_work.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_keeps_swarm_locked_when_the_lease_base_is_not_a_full_commit_id(
+    tmp_path: Path, monkeypatch
+):
+    import nexus.research.swarm_broker as swarm_broker
+
+    sandbox, controller, swarm, acquired = _swarm_with_lease_base(tmp_path, monkeypatch)
+    (swarm / "lease_work.txt").write_text("work\n", encoding="utf-8")
+    real_run = swarm_broker.run_hardened_git
+    checkouts = []
+
+    def odd_base(repo_dir, *args, **kwargs):
+        if "--verify" in args:
+            return subprocess.CompletedProcess(args, 0, "--detach\n", "")
+        if args and args[0] == "checkout":
+            checkouts.append(args)
+        return real_run(repo_dir, *args, **kwargs)
+
+    monkeypatch.setattr(swarm_broker, "run_hardened_git", odd_base)
+
+    SwarmBroker(controller).release(acquired)
+
+    assert not checkouts
+    assert (swarm / ".swarm_lock").exists()
+    assert (swarm / "lease_work.txt").exists()
+
+
+def test_acquire_marks_swarm_when_recording_the_lease_base_raises_oserror(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    real_run = subprocess.run
+
+    def raising_update_ref(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "update-ref" in cmd:
+            raise OSError("git vanished")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", raising_update_ref)
+    acquired = SwarmBroker(controller).acquire(timeout_sec=0.05)
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    assert acquired is None
+    assert SwarmBroker(controller).locked_swarms() == [(swarm, "release_failed")]
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(
+    tmp_path: Path, monkeypatch
+):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    broker = SwarmBroker(controller)
+
+    def fail_after_lock_swap(swarm_dir, identity):
+        # Another party swaps the lock for its own file after this acquire took it.
+        (swarm / ".swarm_lock").unlink()
+        (swarm / ".swarm_lock").write_bytes(b"other holder\n")
+        return False
+
+    monkeypatch.setattr(broker, "_start_lease", fail_after_lock_swap)
+
+    assert broker.acquire(timeout_sec=0.05) is None
+    assert (swarm / ".swarm_lock").read_bytes() == b"other holder\n"
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_broker_git_queries_run_through_the_hardened_runner(tmp_path: Path, monkeypatch):
+    import nexus.research.swarm_broker as swarm_broker
+
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    real_run = swarm_broker.run_hardened_git
+    calls = []
+
+    def spy(repo_dir, *args, **kwargs):
+        calls.append(args)
+        return real_run(repo_dir, *args, **kwargs)
+
+    monkeypatch.setattr(swarm_broker, "run_hardened_git", spy)
+
+    top = SwarmBroker(controller)._git_output(["rev-parse", "--show-toplevel"], controller)
+
+    assert calls == [("rev-parse", "--show-toplevel")]
+    assert top == str(controller.resolve())

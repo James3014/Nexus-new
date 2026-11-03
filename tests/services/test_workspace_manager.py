@@ -138,3 +138,30 @@ def test_lease_accepts_registered_swarm_worktree_and_preserves_controller(tmp_pa
     assert _git(controller, "rev-parse", "HEAD") == head_before
     assert _git(controller, "branch", "--show-current") == branch_before
     assert _git(controller, "status", "--porcelain=v1", "-z") == status_before
+
+
+def test_legacy_reuse_releases_the_swarm_when_its_checkout_fails(tmp_path, monkeypatch):
+    import nexus.core.hardened_git as hardened_git
+
+    controller = tmp_path / "controller"
+    head = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), head)
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
+    monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
+    real_run = hardened_git.run_hardened_git
+    seen = []
+
+    def failing_branch_checkout(repo_dir, *args, **kwargs):
+        if args[:2] == ("checkout", "-b"):
+            seen.append(args)
+            return subprocess.CompletedProcess(args, 1, "", "fatal: refused\n")
+        return real_run(repo_dir, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git, "run_hardened_git", failing_branch_checkout)
+
+    WorkspaceManager(controller).lease(task_id="T789")
+
+    assert seen
+    assert not (swarm / ".swarm_lock").exists()
