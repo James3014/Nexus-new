@@ -2293,22 +2293,47 @@ def test_an_aged_lock_naming_a_live_pid_with_another_start_time_is_marked(
     assert (sandbox / "SENTINEL").exists()
 
 
-def test_an_aged_lock_with_a_pid_but_no_start_time_is_marked_by_age(tmp_path: Path, monkeypatch):
-    _sentinel_cwd(tmp_path, monkeypatch)
+def test_an_aged_pid_only_lock_whose_holder_runs_is_kept(tmp_path: Path, monkeypatch):
+    # A lock written before #3259 (or without a readable start time) names only a pid; while
+    # that pid runs the lease is left alone, as before (#3277 review).
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
     controller, swarm = _registered_swarm(tmp_path)
     (swarm / ".swarm_lock").write_bytes(f"held pid={os.getpid()}\n".encode())
     _age(swarm / ".swarm_lock", 3 * 3600)
 
-    assert SwarmBroker(controller).mark_stale_lease(swarm, 2 * 3600) is True
+    assert SwarmBroker(controller).mark_stale_lease(swarm, 2 * 3600) is False
+    assert (swarm / ".swarm_lock").read_bytes() == f"held pid={os.getpid()}\n".encode()
+    assert (sandbox / "SENTINEL").exists()
 
 
-def test_an_aged_lock_is_marked_when_the_start_time_cannot_be_read_now(tmp_path: Path, monkeypatch):
+def test_an_aged_lock_is_kept_when_the_start_time_cannot_be_read_now(tmp_path: Path, monkeypatch):
+    # Not being able to read the start time now says nothing about the holder: keep the lock.
     _sentinel_cwd(tmp_path, monkeypatch)
     _controller, swarm, broker = _acquired_lease(tmp_path)
     _age(swarm / ".swarm_lock", 3 * 3600)
     monkeypatch.setattr("nexus.research.swarm_broker._process_start_identity", lambda pid: None)
 
-    assert broker.mark_stale_lease(swarm, 2 * 3600) is True
+    assert broker.mark_stale_lease(swarm, 2 * 3600) is False
+
+
+def test_the_ps_start_time_is_read_in_utc(monkeypatch):
+    # The ps fallback must not depend on the host's time zone (#3277 review).
+    import nexus.research.swarm_broker as broker_module
+
+    def no_proc(*_a, **_k):
+        raise OSError("no /proc")
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        return subprocess.CompletedProcess(argv, 0, stdout="Tue Nov  3 06:37:00 2026\n")
+
+    monkeypatch.setattr(broker_module, "open", no_proc, raising=False)
+    monkeypatch.setattr(broker_module.subprocess, "run", fake_run)
+
+    assert broker_module._process_start_identity(os.getpid()) == "ps:Tue_Nov_3_06:37:00_2026"
+    assert seen.get("TZ") == "UTC"
 
 
 def _commit_submodule(controller: Path, tmp_path: Path) -> str:

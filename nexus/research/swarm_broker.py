@@ -418,7 +418,9 @@ def _process_start_identity(pid: int) -> Optional[str]:
                 capture_output=True,
                 text=True,
                 timeout=5,
-                env={"LC_ALL": "C", "PATH": "/bin:/usr/bin"},
+                # ps prints the start time in the host's zone; pin it so a zone change while
+                # the lease runs does not turn a live holder into a stranger.
+                env={"LC_ALL": "C", "PATH": "/bin:/usr/bin", "TZ": "UTC"},
                 check=False,
             )
         except (OSError, subprocess.SubprocessError, ValueError):
@@ -442,10 +444,11 @@ def _holder_mark() -> bytes:
 _MAX_PID = 2**22
 
 
-def _lock_holder(lock_fd: int) -> Optional[tuple[int, str]]:
-    """The holder recorded in a held lock (`held pid=<n> id=<start identity>`); None for a
-    lock without both parts (an older lock, one already marked, one whose start identity could
-    not be read when it was taken) or one whose values this host could not have written.
+def _lock_holder(lock_fd: int) -> Optional[tuple[int, Optional[str]]]:
+    """The holder recorded in a held lock: `held pid=<n> id=<start identity>`, or `held
+    pid=<n>` alone (written before #3259, or when the start identity could not be read at
+    acquire), which gives no identity to compare. None for a lock without a holder (one
+    already marked) or one whose values this host could not have written.
 
     The lock sits at the root of a directory the lease's own commands run in, so its content
     is not trusted: pid 0 or 1 (never a lease), or a number past `_MAX_PID`, reads as no
@@ -455,12 +458,14 @@ def _lock_holder(lock_fd: int) -> Optional[tuple[int, str]]:
         return None
     line = head[len(_HOLDER_MARK_PREFIX) :].split(b"\n", 1)[0]
     digits, sep, identity = line.partition(_HOLDER_ID_PREFIX)
-    if not sep or not digits.isdigit() or len(digits) > 8:
+    if not digits.isdigit() or len(digits) > 8:
         return None
-    if not _HOLDER_ID_RE.fullmatch(identity):
+    if sep and not _HOLDER_ID_RE.fullmatch(identity):
         return None
     pid = int(digits)
-    return (pid, identity.decode("ascii")) if 1 < pid <= _MAX_PID else None
+    if not 1 < pid <= _MAX_PID:
+        return None
+    return (pid, identity.decode("ascii") if sep else None)
 
 
 def _process_exists(pid: int) -> bool:
@@ -477,11 +482,18 @@ def _process_exists(pid: int) -> bool:
     return True
 
 
-def _holder_is_running(holder: tuple[int, str]) -> bool:
-    """The recorded holder still runs: its pid exists and its start identity is the recorded
-    one. An identity that cannot be read now does not vouch for the holder."""
+def _holder_is_running(holder: tuple[int, Optional[str]]) -> bool:
+    """The recorded holder may still run: its pid exists, and its start identity, when both
+    the recorded and the current one are known, is the recorded one. Only a missing pid or two
+    known identities that differ count as stopped; anything unknown keeps the lock, because
+    resetting a lease that still runs is worse than keeping one swarm out of the pool."""
     pid, recorded = holder
-    return _process_exists(pid) and _process_start_identity(pid) == recorded
+    if not _process_exists(pid):
+        return False
+    if recorded is None:
+        return True
+    current = _process_start_identity(pid)
+    return current is None or current == recorded
 
 
 def _write_release_failed_mark(lock_fd: int) -> None:
