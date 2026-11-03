@@ -252,7 +252,8 @@ def repository_config_can_start_a_program(
             git_dir=git_dir,
             separate_git_dir=separate_git_dir,
         )
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, UnicodeDecodeError):
+        # A config whose names git prints as bytes that do not decode cannot be read.
         return True
     return config.returncode != 0 or config_names_a_repository_program(config.stdout.splitlines())
 

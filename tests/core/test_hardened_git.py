@@ -253,6 +253,16 @@ def test_an_unreadable_repository_config_counts_as_naming_a_program(env, monkeyp
     assert hardened_git.repository_config_can_start_a_program(env) is True
 
 
+def test_a_config_whose_names_do_not_decode_counts_as_naming_a_program(tmp_path):
+    """#3344: git prints a config subsection name as raw bytes; one that is not UTF-8 is an
+    unreadable config (refused), not an exception out of the check."""
+    repo = _repo_with_local_work(tmp_path / "repo")
+    config = repo / ".git" / "config"
+    config.write_bytes(config.read_bytes() + b'[branch "\xff\xfe"]\n\tremote = origin\n')
+
+    assert hardened_git.repository_config_can_start_a_program(repo) is True
+
+
 def test_reset_clears_a_stale_index_lock_a_timed_out_step_left_and_the_next_reset_restores(
     env, monkeypatch, caplog
 ):
