@@ -650,6 +650,9 @@ class Config:
 # Signals that stop the deployer from outside: launchd stopping the job, a
 # closed terminal or a dropped ssh session (#3199).
 TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+# Ctrl-C keeps raising ``KeyboardInterrupt`` as before; its handler only differs
+# while a child is being spawned, where it is held like a termination (#3325).
+INTERRUPT_SIGNAL = signal.SIGINT
 
 
 class DeployerTerminated(BaseException):
@@ -672,6 +675,10 @@ class DeployerTerminated(BaseException):
 _SPAWN_DEFER: Dict[str, Any] = {"active": False, "pending": None}
 
 
+def _held_signal_exception(signum: int) -> BaseException:
+    return KeyboardInterrupt() if signum == INTERRUPT_SIGNAL else DeployerTerminated(signum)
+
+
 @contextlib.contextmanager
 def _defer_termination() -> Iterator[None]:
     """Hold a termination signal until the spawned child has a handle (#3304).
@@ -688,13 +695,13 @@ def _defer_termination() -> Iterator[None]:
         _SPAWN_DEFER["active"] = False
         pending, _SPAWN_DEFER["pending"] = _SPAWN_DEFER["pending"], None
         if pending is not None:
-            raise DeployerTerminated(pending) from exc
+            raise _held_signal_exception(pending) from exc
         raise
     finally:
         _SPAWN_DEFER["active"] = False
         pending, _SPAWN_DEFER["pending"] = _SPAWN_DEFER["pending"], None
     if pending is not None:
-        raise DeployerTerminated(pending)
+        raise _held_signal_exception(pending)
 
 
 @contextlib.contextmanager
@@ -724,8 +731,18 @@ def termination_raises() -> Iterator[None]:
             return
         raise DeployerTerminated(signum)
 
+    def _raise_interrupt(signum: int, _frame: Any) -> None:
+        # Outside the spawn window this is the default Ctrl-C behaviour.
+        if _SPAWN_DEFER["active"] and not _SPAWN_DEFER["pending"]:
+            _SPAWN_DEFER["pending"] = signum
+            return
+        raise KeyboardInterrupt
+
     previous: Dict[int, Any] = {}
     try:
+        current = signal.getsignal(INTERRUPT_SIGNAL)
+        if current is not signal.SIG_IGN and current is not None:
+            previous[INTERRUPT_SIGNAL] = signal.signal(INTERRUPT_SIGNAL, _raise_interrupt)
         for signum in TERMINATION_SIGNALS:
             current = signal.getsignal(signum)
             if current is signal.SIG_IGN or current is None:

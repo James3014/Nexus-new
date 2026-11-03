@@ -8462,3 +8462,49 @@ def test_terminate_signal_then_spawn_oserror_still_terminates(
     assert caught.value.signum == signal.SIGTERM
     assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
     assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+def test_sigint_during_spawn_is_deferred_and_child_group_stopped(
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3325: Ctrl-C inside Popen's constructor stops the new group afterwards."""
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(ad.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    class SlowPopen:
+        pid = 535353
+        returncode = 0
+        stdout = None
+
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            signal.raise_signal(signal.SIGINT)
+
+        def wait(self, timeout: Any = None) -> int:
+            return 0
+
+        def communicate(self, timeout: Any = None) -> tuple[str, None]:
+            return "", None
+
+    monkeypatch.setattr(ad.subprocess, "Popen", SlowPopen)
+    before = signal.getsignal(signal.SIGINT)
+    host = ad.Host()
+    with pytest.raises(KeyboardInterrupt):
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    assert killed and all(pid == 535353 for pid, _ in killed)
+    assert signal.getsignal(signal.SIGINT) is before
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+def test_sigint_outside_spawn_still_raises_keyboard_interrupt() -> None:
+    """#3325: outside the spawn window Ctrl-C is the plain KeyboardInterrupt, repeatable."""
+    before = signal.getsignal(signal.SIGINT)
+    with ad.termination_raises():
+        for _ in range(2):
+            with pytest.raises(KeyboardInterrupt):
+                signal.raise_signal(signal.SIGINT)
+    assert signal.getsignal(signal.SIGINT) is before
