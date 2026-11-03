@@ -1982,12 +1982,17 @@ def _run_agy_b_fallback(
             )
             if not mutated:
                 pin = {"git_dir": git_dir, "separate_git_dir": True}
+                # The agent's own index is checked too (a broken or dirty one is a mutation),
+                # but only the harness-built index can show that every file is clean.
+                status_check = run_hardened_git(source, "status", "--porcelain=v1", **pin)
+                mutated = status_check.returncode != 0 or bool(status_check.stdout.strip())
                 try:
                     with _fresh_index(source, pin) as index_file:
-                        status_check = run_hardened_git(
+                        fresh_check = run_hardened_git(
                             source, "status", "--porcelain=v1", index_file=index_file, **pin
                         )
-                    mutated = status_check.returncode != 0 or bool(status_check.stdout.strip())
+                    mutated = mutated or fresh_check.returncode != 0
+                    mutated = mutated or bool(fresh_check.stdout.strip())
                 except RuntimeError:
                     mutated = True
             extra_checks = None
