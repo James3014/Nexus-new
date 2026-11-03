@@ -38,9 +38,12 @@ def workspace_mgr(tmp_path):
 
 def test_workspace_lease_success(workspace_mgr):
     """驗證 Workspace 租借流程（Mock Git）。"""
-    with patch.object(
-        WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
-    ), patch("subprocess.run") as mock_run:
+    with (
+        patch.object(
+            WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0)
         
         task_id, branch, path = workspace_mgr.lease(task_id="T123")
@@ -61,9 +64,12 @@ def test_workspace_cleanup(workspace_mgr, tmp_path):
     work_path = workspace_mgr.workspace_base / task_id
     work_path.mkdir(parents=True, exist_ok=True)
     
-    with patch.object(
-        WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
-    ), patch("subprocess.run") as mock_run:
+    with (
+        patch.object(
+            WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         workspace_mgr.cleanup(task_id, branch)
         
         # physical cleanup is allowed, but branch deletion is explicit-only.
@@ -307,6 +313,7 @@ def test_sync_staged_to_sandbox_refuses_a_patch_path_that_is_a_link(tmp_path, mo
 
 # --- #3343: the remaining git calls run through the hardened runner ---
 
+
 def _hostile_repo(tmp_path):
     """A repo whose config names a smudge filter (applied to every file) that writes a marker."""
     repo = tmp_path / "project"
@@ -373,10 +380,11 @@ def test_cleanup_refuses_a_repository_config_naming_a_program(tmp_path):
     repo, marker = _hostile_repo(tmp_path)
     mgr = _manager(repo, tmp_path)
     work = mgr.workspace_base / "T1"
-    work.mkdir()
+    _git(repo, "worktree", "add", "-b", "isolated/task-T1", str(work), "HEAD")
+    marker.unlink(missing_ok=True)  # the plain add above ran the filter
     mgr.cleanup("T1", "isolated/task-T1")
     assert not marker.exists()
-    assert work.exists()  # git was not run, so nothing was removed
+    assert work.exists()  # git was not run, so the registered worktree was not removed
 
 
 def test_cleanup_branch_delete_refuses_a_config_naming_a_program(tmp_path, monkeypatch):
@@ -403,7 +411,8 @@ def test_auto_gc_refuses_a_repository_config_naming_a_program(tmp_path, monkeypa
     repo, marker = _hostile_repo(tmp_path)
     mgr = _manager(repo, tmp_path)
     stale = mgr.workspace_base / "old"
-    stale.mkdir()
+    _git(repo, "worktree", "add", "-b", "old", str(stale), "HEAD")
+    marker.unlink(missing_ok=True)  # the plain add above ran the filter
     old = 1_000_000_000
     os.utime(stale, (old, old))
     monkeypatch.setattr(mgr, "_is_independently_registered_worktree", lambda path: True)

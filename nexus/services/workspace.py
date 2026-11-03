@@ -35,7 +35,10 @@ class WorkspaceManager:
     def _hardened_git_dir(cwd) -> typing.Optional[Path]:
         """The verified git dir of ``cwd``, or None when it is unusable or its config names a
         program (git is then not run there)."""
-        from nexus.core.hardened_git import repository_config_can_start_a_program, repository_git_dir
+        from nexus.core.hardened_git import (
+            repository_config_can_start_a_program,
+            repository_git_dir,
+        )
 
         git_dir = repository_git_dir(Path(cwd))
         if git_dir is None or repository_config_can_start_a_program(Path(cwd), git_dir=git_dir):
@@ -182,11 +185,19 @@ class WorkspaceManager:
         # 建立隔離分支與 Worktree (Optimized Index Handling)
         try:
             added = self._run_git(
-                self.project_root, "worktree", "add", "-b", branch_name, str(work_path), "HEAD",
+                self.project_root,
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                str(work_path),
+                "HEAD",
                 timeout=45,
             )
             if added.returncode != 0:
-                raise subprocess.CalledProcessError(added.returncode, added.args, stderr=added.stderr)
+                raise subprocess.CalledProcessError(
+                    added.returncode, added.args, stderr=added.stderr
+                )
 
             self._sync_brain_to_path(work_path)
 
@@ -234,7 +245,9 @@ class WorkspaceManager:
                         continue
                     try:
                         logger.info(f"🧹 [Auto-GC] Pruning stale workspace: {folder.name}")
-                        self._run_git(self.project_root, "worktree", "remove", "--force", str(folder))
+                        self._run_git(
+                            self.project_root, "worktree", "remove", "--force", str(folder)
+                        )
                     except Exception:
                         pass
 
@@ -339,7 +352,12 @@ class WorkspaceManager:
     def _execute_merge(self, branch_name: str) -> bool:
         """執行正式合併。"""
         res = self._run_git(
-            self.project_root, "merge", branch_name, "--no-ff", "-m", f"Merge isolated task: {branch_name}"
+            self.project_root,
+            "merge",
+            branch_name,
+            "--no-ff",
+            "-m",
+            f"Merge isolated task: {branch_name}",
         )
         if res.returncode == 0:
             print(f"✅ [SUCCESS] Task {branch_name} harvested and merged.")
