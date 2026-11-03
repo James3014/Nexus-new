@@ -2643,8 +2643,8 @@ def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(
 
     def fail_after_lock_swap(swarm_dir, identity):
         # Another party swaps the lock for its own file after this acquire took it.
-        (swarm / ".swarm_lock").unlink()
-        (swarm / ".swarm_lock").write_bytes(b"other holder\n")
+        (swarm / ".swarm_lock.other").write_bytes(b"other holder\n")
+        os.replace(swarm / ".swarm_lock.other", swarm / ".swarm_lock")
         return False
 
     monkeypatch.setattr(broker, "_start_lease", fail_after_lock_swap)
