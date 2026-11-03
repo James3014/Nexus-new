@@ -8437,3 +8437,28 @@ def test_terminate_signal_during_spawn_still_stops_child_group(
     assert killed and all(pid == 424242 for pid, _ in killed)
     assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
     assert ad._SPAWN_DEFER == {"active": False, "pending": None}
+
+
+@pytest.mark.parametrize("entry", ["start", "run_bounded"])
+def test_terminate_signal_then_spawn_oserror_still_terminates(
+    entry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3304: a held SIGTERM wins over an OSError raised by Popen itself."""
+
+    class FailingPopen:
+        def __init__(self, *_a: Any, **_k: Any) -> None:
+            signal.raise_signal(signal.SIGTERM)
+            raise OSError("spawn failed")
+
+    monkeypatch.setattr(ad.subprocess, "Popen", FailingPopen)
+    before = {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS}
+    host = ad.Host()
+    with pytest.raises(ad.DeployerTerminated) as caught:
+        with ad.termination_raises():
+            if entry == "start":
+                host.start("true", tmp_path / "log" / "c.log")
+            else:
+                host.run_bounded(["true"], timeout=5)
+    assert caught.value.signum == signal.SIGTERM
+    assert {s: signal.getsignal(s) for s in ad.TERMINATION_SIGNALS} == before
+    assert ad._SPAWN_DEFER == {"active": False, "pending": None}

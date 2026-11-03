@@ -667,7 +667,8 @@ class DeployerTerminated(BaseException):
 
 # While a child is being spawned the handler below only records the signal;
 # ``_defer_termination`` raises it once the handle exists (#3304).  No signal
-# mask: the child would inherit it.
+# mask: the child would inherit it.  Module-global, so not reentrant: never
+# nest ``_defer_termination`` (the inner exit would clear the outer's state).
 _SPAWN_DEFER: Dict[str, Any] = {"active": False, "pending": None}
 
 
@@ -681,6 +682,14 @@ def _defer_termination() -> Iterator[None]:
     _SPAWN_DEFER["active"], _SPAWN_DEFER["pending"] = True, None
     try:
         yield
+    except BaseException as exc:
+        # The spawn itself failed (OSError...) while a stop was held: the
+        # stop wins, as it would have without the deferral.
+        _SPAWN_DEFER["active"] = False
+        pending, _SPAWN_DEFER["pending"] = _SPAWN_DEFER["pending"], None
+        if pending is not None:
+            raise DeployerTerminated(pending) from exc
+        raise
     finally:
         _SPAWN_DEFER["active"] = False
         pending, _SPAWN_DEFER["pending"] = _SPAWN_DEFER["pending"], None
