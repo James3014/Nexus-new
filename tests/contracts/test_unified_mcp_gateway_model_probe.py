@@ -384,6 +384,14 @@ def test_release_without_claim_but_with_lease_requires_reconciliation(gateway) -
     )
 
 
+def test_release_without_claim_but_with_lease_flags_the_job_for_reconciliation(gateway) -> None:
+    """A lease this instance never held (a restarted Gateway) holds the job for reconcile,
+    exactly as a failed release does, so cancel cannot leave it unretryable (#3233)."""
+    job: dict[str, Any] = {"account_lease_id_hash": "h"}
+    assert gateway._release_assist_account_claim("t1", job) is False
+    assert job["reconciliation_required"] is True
+
+
 @pytest.mark.parametrize(
     ("fail", "ok", "status"), [(False, True, "RELEASED"), (True, False, "RELEASE_FAILED")]
 )
