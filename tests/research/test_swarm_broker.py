@@ -721,6 +721,8 @@ def _registered_swarm(tmp_path: Path) -> tuple[Path, Path]:
     base = _init_repo(controller)
     swarm = controller / ".nexus-swarm-001"
     _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    # A leased swarm has its base recorded by `acquire`; release now fails closed without it.
+    _git(swarm, "update-ref", "refs/worktree/nexus-swarm-base", "HEAD")
     (swarm / ".swarm_lock").write_text("", encoding="utf-8")
     (swarm / "candidate.txt").write_text("candidate scratch\n", encoding="utf-8")
     return controller, swarm
