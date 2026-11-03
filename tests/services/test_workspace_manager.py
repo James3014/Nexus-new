@@ -280,3 +280,22 @@ def test_sync_staged_to_sandbox_refuses_sandbox_config_naming_a_program(tmp_path
 
     assert not marker.exists()
     assert "staged change" not in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_refuses_a_patch_path_that_is_a_link(tmp_path, monkeypatch):
+    """A configured patch path that is a link is refused; the link target is not written."""
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    (controller / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    _git(controller, "add", "tracked.txt")
+    target = tmp_path / "victim.txt"
+    target.write_text("keep me\n", encoding="utf-8")
+    link = tmp_path / "sync.patch"
+    link.symlink_to(target)
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(link))
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    mgr = WorkspaceManager(controller)
+
+    assert mgr.sync_staged_to_sandbox(tmp_path / "sandbox") is False
+    assert target.read_text(encoding="utf-8") == "keep me\n"
+

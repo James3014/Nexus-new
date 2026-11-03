@@ -6,6 +6,7 @@ import uuid
 import fcntl
 import shutil
 import subprocess
+import tempfile
 import typing
 
 # 🔗 核心技能路徑 (Phase 3 & 6)
@@ -216,7 +217,18 @@ class WorkspaceManager:
     def sync_staged_to_sandbox(self, sandbox_path):
         """將主工作區的 Staged 內容同步至沙盒。"""
         # One absolute path: git diff, Path.stat and git apply run in different cwds.
-        patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch")).absolute()
+        # Without NEXUS_SYNC_PATCH the patch goes in a private temporary directory, not a
+        # fixed shared path; a configured path that is a link is refused.
+        configured = os.getenv("NEXUS_SYNC_PATCH")
+        private_dir = None
+        if configured:
+            patch_file = Path(configured).absolute()
+            if patch_file.is_symlink():
+                print(f"⚠️ [Sync Error] patch path is a link: {patch_file}")
+                return False
+        else:
+            private_dir = tempfile.mkdtemp(prefix="nexus-sync-")
+            patch_file = Path(private_dir) / "sync.patch"
         try:
             from nexus.core.hardened_git import (
                 repository_config_can_start_a_program,
@@ -252,6 +264,9 @@ class WorkspaceManager:
         except Exception as e:
             print(f"⚠️ [Sync Error] {e}")
             return False
+        finally:
+            if private_dir is not None:
+                shutil.rmtree(private_dir, ignore_errors=True)
 
     def harvest(self, branch_name, sandbox_path):
         """原子化收割：排隊合併回主幹。"""
