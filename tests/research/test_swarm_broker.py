@@ -2708,3 +2708,35 @@ def test_unstarted_swarm_stays_recoverable_after_a_failed_recovery(tmp_path: Pat
     swarm_broker._RECOVERY_FAILED_AT.clear()  # the retry backoff of the failed attempt
     assert broker.recover_failed_releases() == [swarm]
     assert broker.acquire(timeout_sec=0.05) == swarm
+
+
+def test_git_output_does_not_run_a_program_named_by_the_repository(tmp_path: Path):
+    repo = tmp_path / "controller"
+    _init_repo(repo)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmonitor.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\nexit 0\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(repo, "config", "core.fsmonitor", str(hook))
+    (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
+
+    SwarmBroker(tmp_path)._git_output(["status", "--porcelain"], repo)
+
+    assert not marker.exists()
+
+
+def test_git_output_returns_none_when_git_hangs(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "controller"
+    _init_repo(repo)
+    seen = {}
+
+    def hung_run(cmd, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        if kwargs.get("timeout") is None:
+            raise AssertionError("git ran without a timeout")
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr("nexus.core.hardened_git.subprocess.run", hung_run)
+
+    assert SwarmBroker(tmp_path)._git_output(["rev-parse", "--show-toplevel"], repo) is None
+    assert seen["timeout"] is not None and seen["timeout"] > 0
