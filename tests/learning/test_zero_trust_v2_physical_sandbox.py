@@ -362,6 +362,39 @@ def test_profile_write_scope_check_rejects_widened_profiles(tmp_path: Path) -> N
     assert _profile_confines_writes(good, workspace_dir=tmp_path / "other", tmp_dir=tmp) is False
 
 
+def test_write_scope_check_catches_widened_deny_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nexus.learning.zero_trust_v2_physical_sandbox as mod
+
+    workspace, tmp = tmp_path / "workspace", tmp_path / "tmp"
+    for weaker in ("", '(deny mach-lookup (global-name "com.example.narrow"))'):
+        monkeypatch.setattr(mod, "_extra_deny_rule", lambda weaker=weaker: weaker)
+        profile = _macos_sandbox_profile(workspace, tmp)
+        assert _profile_confines_writes(profile, workspace_dir=workspace, tmp_dir=tmp) is False
+
+
+def test_write_scope_check_catches_widened_write_allow_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nexus.learning.zero_trust_v2_physical_sandbox as mod
+
+    workspace, tmp = tmp_path / "workspace", tmp_path / "tmp"
+    monkeypatch.setattr(mod, "_write_allow_rule", lambda *_a: '(allow file-write* (subpath "/"))')
+    profile = _macos_sandbox_profile(workspace, tmp)
+    assert _profile_confines_writes(profile, workspace_dir=workspace, tmp_dir=tmp) is False
+
+
+def test_write_scope_check_requires_deny_after_default_allow(tmp_path: Path) -> None:
+    workspace, tmp = tmp_path / "workspace", tmp_path / "tmp"
+    good = _macos_sandbox_profile(workspace, tmp)
+    deny = _extra_deny_rule() + "\n"
+    assert deny in good
+    moved = good.replace(deny, "").replace("(version 1)\n", "(version 1)\n" + deny)
+    assert moved != good
+    assert _profile_confines_writes(moved, workspace_dir=workspace, tmp_dir=tmp) is False
+
+
 if os.environ.get("NEXUS_RUN_REAL_SANDBOX_EXEC") == "1":
     # Opt-in only (CI is Linux and has no sandbox-exec, #2190): runs the real profile.
 
