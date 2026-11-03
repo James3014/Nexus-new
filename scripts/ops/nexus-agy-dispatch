@@ -3350,17 +3350,23 @@ def _is_linked_worktree(cwd: str) -> bool:
     returns False so normal flow is unaffected.
     """
     try:
-        git_path = Path(cwd) / ".git"
-        if not git_path.exists():
-            # Parent discovery in Python (not git): a repo whose config names
-            # a program makes the hardened runner refuse, which must not read
-            # as "not linked" (fail closed).
-            for parent in Path(cwd).resolve().parents:
-                if (parent / ".git").exists() or (parent / ".git").is_symlink():
-                    git_path = parent / ".git"
-                    break
-            else:
-                return False
+        # Discovery in Python (not git), from cwd itself upwards: a repo whose
+        # config names a program makes the hardened runner refuse, which must
+        # not read as "not linked" (fail closed). Like git, skip a .git that is
+        # not a repository (broken link, empty directory, link to a plain one).
+        start = Path(cwd).resolve()
+        for parent in (start, *start.parents):
+            candidate = parent / ".git"
+            if candidate.is_file() or (
+                candidate.is_dir()
+                and (candidate / "HEAD").is_file()
+                and (candidate / "objects").is_dir()
+                and (candidate / "refs").is_dir()
+            ):
+                git_path = candidate
+                break
+        else:
+            return False
 
         # A regular file at .git is the gitfile pointer used by linked worktrees.
         if not git_path.is_file():

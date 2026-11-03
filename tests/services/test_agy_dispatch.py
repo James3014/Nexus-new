@@ -7338,3 +7338,36 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
     assert not [
         e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
     ]
+
+
+def _decoy_git_entry(at: Path, kind: str, tmp_path: Path) -> None:
+    """A .git entry that git skips during discovery (not a repository)."""
+    entry = at / ".git"
+    if kind == "broken_link":
+        entry.symlink_to(tmp_path / "missing-target")
+    elif kind == "empty_dir":
+        entry.mkdir()
+    else:  # link to a plain directory
+        plain = tmp_path / "plain-dir"
+        plain.mkdir(exist_ok=True)
+        entry.symlink_to(plain)
+
+
+@pytest.mark.parametrize("kind", ["broken_link", "empty_dir", "link_to_plain_dir"])
+@pytest.mark.parametrize("where", ["between", "at_cwd"])
+def test_linked_worktree_check_skips_a_git_entry_that_is_not_a_repository(
+    tmp_path: Path, kind: str, where: str
+) -> None:
+    """#3335: a .git that git itself skips (between cwd and the linked worktree root, or
+    at cwd) does not end discovery, so the linked worktree is still found and refused."""
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    cwd = wt / "sub" / "deep"
+    cwd.mkdir(parents=True)
+    _decoy_git_entry(wt / "sub" if where == "between" else cwd, kind, tmp_path)
+
+    assert dispatch._is_linked_worktree(str(cwd)) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)
