@@ -2029,6 +2029,7 @@ def run_agy(
     pre_effect_max_tool_events: int | None = None,
     write_boundary: Any = None,
     lease_fd: int | None = None,
+    source_repo_root: str | None = None,
 ):
     _refuse_if_pool_stopped()
     expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
@@ -2066,7 +2067,9 @@ def run_agy(
 
     baseline_worktree_state = None
     try:
-        baseline_worktree_state = direct_operation_journal.capture_source_baseline(cwd)
+        baseline_worktree_state = direct_operation_journal.capture_source_baseline(
+            cwd, **_repo_root_kwargs(source_repo_root)
+        )
         if baseline_worktree_state is None:
             raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
     except Exception as exc:
@@ -2424,7 +2427,7 @@ def run_agy(
                     if baseline_worktree_state is not None:
                         try:
                             changed = direct_operation_journal.observed_changed_paths_since(
-                                cwd, baseline_worktree_state
+                                cwd, baseline_worktree_state, **_repo_root_kwargs(source_repo_root)
                             )
                         except Exception as exc:
                             changed = None
@@ -2467,7 +2470,7 @@ def run_agy(
                 next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
                 try:
                     changed = direct_operation_journal.observed_changed_paths_since(
-                        cwd, baseline_worktree_state
+                        cwd, baseline_worktree_state, **_repo_root_kwargs(source_repo_root)
                     )
                     if changed is None:
                         baseline_worktree_state = None
@@ -2625,7 +2628,7 @@ def run_agy(
     if baseline_worktree_state is not None and not first_effect_seen.is_set():
         try:
             changed = direct_operation_journal.observed_changed_paths_since(
-                cwd, baseline_worktree_state
+                cwd, baseline_worktree_state, **_repo_root_kwargs(source_repo_root)
             )
             if changed is None:
                 baseline_worktree_state = None
@@ -2785,6 +2788,17 @@ def _runner_accepts(runner: Any, name: str) -> bool:
         return False
     params = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
     return name in params
+
+
+def _recorded_repo_root(record: dict[str, Any]) -> str | None:
+    """The repository root the journal recorded when the dispatch started (#3328)."""
+    value = record.get("repo_root")
+    return value if isinstance(value, str) and value else None
+
+
+def _repo_root_kwargs(source_repo_root: str | None) -> dict[str, str]:
+    """``repo_root`` for the journal's git helpers only when a root was recorded."""
+    return {"repo_root": source_repo_root} if source_repo_root else {}
 
 
 def emit_meta(data: dict) -> None:
@@ -4536,6 +4550,7 @@ def dispatch_run(
     run_as_user: str | None = None,
     empty_output_min_bytes: int | None = None,
     operation_id: str | None = None,
+    source_repo_root: str | None = None,
 ) -> int:
     _refuse_if_pool_stopped()
     started_at = _monotonic()
@@ -5376,7 +5391,9 @@ def dispatch_run(
                     # #3181: no host git step in a replaced target; the
                     # boundary below refuses the attempt.
                     raise RuntimeError("TARGET_REPLACED")
-                attempt_baseline = direct_operation_journal.capture_source_baseline(cwd)
+                attempt_baseline = direct_operation_journal.capture_source_baseline(
+                    cwd, **_repo_root_kwargs(source_repo_root)
+                )
                 if attempt_baseline is None:
                     raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
             except Exception as exc:
@@ -5583,6 +5600,13 @@ def dispatch_run(
                     runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 if write_boundary is not None:
                     runner_kwargs["write_boundary"] = write_boundary
+                # Run-as-user: the runner works in a per-run copy, not the recorded root.
+                if (
+                    source_repo_root is not None
+                    and agent_cwd == cwd
+                    and _runner_accepts(runner, "source_repo_root")
+                ):
+                    runner_kwargs["source_repo_root"] = source_repo_root
                 lease_lock_obj = getattr(claim, "lock_file_obj", None)
                 if lease_lock_obj is not None and _runner_accepts(runner, "lease_fd"):
                     try:
@@ -5828,7 +5852,7 @@ def dispatch_run(
             if attempt_baseline is not None and not target_replaced:
                 try:
                     attempt_changed_paths = direct_operation_journal.observed_changed_paths_since(
-                        cwd, attempt_baseline
+                        cwd, attempt_baseline, **_repo_root_kwargs(source_repo_root)
                     )
                 except Exception as exc:
                     _operation_hook(
@@ -5839,7 +5863,7 @@ def dispatch_run(
                     )
 
             scope_state, scope_violations = direct_operation_journal.validate_write_scope(
-                repo_root=cwd,
+                repo_root=source_repo_root or cwd,
                 write_paths=write_paths,
                 observed_changed_paths=attempt_changed_paths,
             )
@@ -6894,6 +6918,7 @@ def _run_background_operation(
             pre_effect_max_seconds=pre_effect_max_seconds,
             pre_effect_max_tool_events=pre_effect_max_tool_events,
             exclude_accounts=exclude_accounts,
+            source_repo_root=_recorded_repo_root(journal.read(operation_id)),
             **(
                 {"run_as_user": run_as_user, "operation_id": operation_id}
                 if run_as_user is not None
