@@ -227,6 +227,19 @@ def _settle_provider_group(
 _ASSIST_SETTLED_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 
 
+def _assist_flagged_for_reconcile(record: Mapping[str, Any]) -> bool:
+    """Display only, never a write guard: _assist_settled and _assist_held keep the flag alone,
+    so a late write to an old-shape settled record is still refused. Whether ``record`` holds
+    something for reconciliation: the flag is set, or the lease cleanup is
+    RECONCILIATION_REQUIRED and the lease is not released. A record written before #3244 (a
+    cancel whose lease release found no claim) has the second form without the flag (#3250,
+    #3276)."""
+    return bool(record.get("reconciliation_required")) or (
+        record.get("account_lease_cleanup_status") == "RECONCILIATION_REQUIRED"
+        and record.get("account_lease_released") is not True
+    )
+
+
 def _assist_settled(job: Mapping[str, Any]) -> bool:
     """Whether ``job`` is recorded as finished with nothing left to reconcile."""
     return job.get("status") in _ASSIST_SETTLED_STATUSES and not job.get("reconciliation_required")
@@ -253,7 +266,7 @@ _ASSIST_LIVE_STATUSES = frozenset({"SUBMITTED", "RUNNING"})
 
 
 def _assist_held(job: Mapping[str, Any]) -> bool:
-    """Whether ``job`` is recorded as needing reconciliation."""
+    """Whether ``job`` is recorded as needing reconciliation (write guard: the flag only)."""
     return job.get("status") == "UNKNOWN_REQUIRES_RECONCILE" or bool(
         job.get("reconciliation_required")
     )
@@ -700,7 +713,7 @@ class _AssistResponseMixin(_ResponseBase):
         """Project one Assisted job into current action and pending-count state."""
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
-        reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or bool(job.get("reconciliation_required"))
+        reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or _assist_flagged_for_reconcile(job)
         cleanup_settled = job.get("process_cleanup") is True and not job.get("cleanup_error")
         settled_failure = (
             status in {"FAILED", "CANCELLED"}
@@ -763,7 +776,7 @@ class _AssistResponseMixin(_ResponseBase):
             "probe_expires_at": job.get("probe_expires_at"),
             "authentication_evidence": job.get("authentication_evidence"),
             "durable_exit_marker": bool(job.get("durable_exit_marker", False)),
-            "reconciliation_required": bool(job.get("reconciliation_required", False)),
+            "reconciliation_required": _assist_flagged_for_reconcile(job),
             "uncertain_mutation": bool(job.get("uncertain_mutation", False)),
             "context_arm": job.get("context_arm"),
             "context_arm_applied": bool(job.get("context_arm_applied", False)),

@@ -174,6 +174,7 @@ from nexus.orchestrator.unified_mcp_gateway_parts.assist_probe import (
     _AssistProbeMixin as _AssistProbeMixin,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
+    _assist_flagged_for_reconcile,
     _assist_workspace_removable,
 )
 from nexus.orchestrator.unified_mcp_gateway_parts.assist_response import (
@@ -2710,13 +2711,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             current = self._assist_refresh(task_id) or assisted
             needs_reconcile = (
                 current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
-                or bool(current.get("reconciliation_required"))
-                # A record written before #3244 (a cancel whose lease release found no claim)
-                # holds the lease for reconciliation without the flag; it needs this too (#3250).
-                or (
-                    current.get("account_lease_cleanup_status") == "RECONCILIATION_REQUIRED"
-                    and current.get("account_lease_released") is not True
-                )
+                or _assist_flagged_for_reconcile(current)
             )
             if needs_reconcile and not _assist_workspace_removable(current):
                 # A provider group member may still run in the workspace and on the account:
