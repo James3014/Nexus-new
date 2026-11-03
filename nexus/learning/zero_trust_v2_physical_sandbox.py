@@ -99,16 +99,28 @@ def _profile_confines_writes(profile: str, *, workspace_dir: Path, tmp_dir: Path
     rules = [line.strip() for line in profile.splitlines() if line.strip()]
     # Written out here, independent of the profile generator, so a widened generator
     # cannot make its own output match.
+    # The deny and write-allow lines are literal too (no helper calls), so changing a
+    # helper changes the generator but not this expectation.
+    workspace_path = _sbpl_string(str(workspace_dir.resolve()))
+    tmp_path = _sbpl_string(str(tmp_dir.resolve()))
     expected = [
         "(version 1)",
         "(allow default)",
         "(deny network*)",
-        _extra_deny_rule(),
+        '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon")'
+        ' (global-name "com.apple.cfprefsd.agent"))',
         "(deny file-write*)",
         f'(allow file-read* (subpath "{_sbpl_string(str(workspace_dir.resolve()))}"))',
         f'(allow file-read* (subpath "{_sbpl_string(str(tmp_dir.resolve()))}"))',
-        _write_allow_rule(workspace_dir, tmp_dir),
+        f'(allow file-write* (subpath "{workspace_path}") (subpath "{tmp_path}")'
+        ' (literal "/dev/null"))',
     ]
+    # Order matters for the sandbox: the added deny must come after the default allow.
+    deny_line = expected[3]
+    if deny_line not in rules or "(allow default)" not in rules:
+        return False
+    if rules.index(deny_line) < rules.index("(allow default)"):
+        return False
     return rules == expected
 
 
