@@ -1156,3 +1156,96 @@ def test_abandoned_claim_then_release_of_the_same_task_is_a_lost_claim(box):
     ) == (False, "RECONCILIATION_REQUIRED"), later
     assert (claim.abandoned, claim.releases) == (1, 0)
     assert TASK not in (getattr(gateway, "_assist_released_leases", None) or {})
+
+
+# #3290: reconcile of a COMPLETED record whose only open item is the lease keeps the status
+# and the result; only the lease is reconciled.
+def _completed_with_lease(box, monkeypatch, receipt_result: str, **fields) -> dict:
+    from nexus.orchestrator import unified_mcp_gateway
+
+    class _Coordinator:
+        def __init__(self, manager) -> None:
+            pass
+
+        def reconcile_claim_receipt(self, **kwargs):
+            return {"result": receipt_result}
+
+    monkeypatch.setattr(unified_mcp_gateway, "CrossProcessLeaseCoordinator", _Coordinator)
+    monkeypatch.setattr(unified_mcp_gateway, "get_account_pool_manager", lambda: object())
+    monkeypatch.setattr(argv_command, "_live_group_members", lambda pgid: [])
+    workspace = box.root / "nexus-assist-t3290-completed"
+    workspace.mkdir()
+    record = _job(
+        box,
+        str(workspace),
+        status="COMPLETED",
+        result_summary="provider answer 3290",
+        finished_at="2026-11-03T00:00:00+00:00",
+        account_alias_hash="alias-3290",
+        account_lease_id_hash=LEASE,
+        account_lease_released=False,
+        **fields,
+    )
+    box.gateway._assist_write(record)
+    return record
+
+
+def _assert_completed_kept(reconciled: dict, stored: dict | None) -> None:
+    assert reconciled["status"] == "COMPLETED", reconciled
+    assert reconciled.get("blocker") != "ASSIST_PROVIDER_PROCESS_LOST", reconciled
+    assert stored is not None
+    assert stored["status"] == "COMPLETED", stored
+    assert stored.get("blocker") != "ASSIST_PROVIDER_PROCESS_LOST", stored
+    assert stored["result_summary"] == "provider answer 3290", stored
+    assert stored["finished_at"] == "2026-11-03T00:00:00+00:00", stored
+
+
+def test_reconcile_keeps_completed_and_releases_the_flagged_lease_3290(box, monkeypatch):
+    _completed_with_lease(
+        box,
+        monkeypatch,
+        "LEASE_RECEIPT_REMOVED",
+        reconciliation_required=True,
+        account_lease_cleanup_status="RECONCILIATION_REQUIRED",
+    )
+    reconciled = box.gateway._task_reconcile({"task_id": TASK})
+    _assert_completed_kept(reconciled, box.gateway._assist_read(TASK))
+    stored = box.gateway._assist_read(TASK)
+    assert stored is not None
+    assert stored["account_lease_cleanup_status"] == "RELEASED"
+    assert stored["account_lease_released"] is True
+    assert stored["reconciliation_required"] is False
+
+
+def test_reconcile_keeps_completed_and_releases_the_old_shape_lease_3290(box, monkeypatch):
+    _completed_with_lease(
+        box,
+        monkeypatch,
+        "ALREADY_ABSENT",
+        account_lease_cleanup_status="RECONCILIATION_REQUIRED",
+    )
+    reconciled = box.gateway._task_reconcile({"task_id": TASK})
+    _assert_completed_kept(reconciled, box.gateway._assist_read(TASK))
+    stored = box.gateway._assist_read(TASK)
+    assert stored is not None
+    assert stored["account_lease_cleanup_status"] == "RELEASED"
+    assert stored["account_lease_released"] is True
+    assert not stored.get("reconciliation_required")
+
+
+def test_reconcile_keeps_completed_when_the_lease_is_still_held_3290(box, monkeypatch):
+    _completed_with_lease(
+        box,
+        monkeypatch,
+        "LEASE_STILL_HELD",
+        reconciliation_required=True,
+        account_lease_cleanup_status="RECONCILIATION_REQUIRED",
+    )
+    reconciled = box.gateway._task_reconcile({"task_id": TASK})
+    stored = box.gateway._assist_read(TASK)
+    _assert_completed_kept(reconciled, stored)
+    assert stored is not None
+    assert stored["reconciliation_required"] is True
+    assert stored["account_lease_released"] is False
+    assert stored["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    assert reconciled["reconciliation_required"] is True
