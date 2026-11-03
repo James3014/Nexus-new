@@ -217,21 +217,23 @@ class WorkspaceManager:
         """將主工作區的 Staged 內容同步至沙盒。"""
         patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch"))
         try:
-            # 1. 在主工作區產出 Patch
-            with open(patch_file, "w") as f:
-                subprocess.run(
-                    ["git", "diff", "--staged"],
-                    cwd=self.project_root,
-                    stdout=f,
-                    check=True,
-                )
+            from nexus.core.hardened_git import run_hardened_git
+
+            # 1. 在主工作區產出 Patch（git 自己寫檔，內容原樣；逾時丟 TimeoutExpired）
+            diff = run_hardened_git(
+                Path(self.project_root), "diff", "--staged", f"--output={patch_file}"
+            )
+            if diff.returncode != 0:
+                raise RuntimeError(f"git diff --staged failed: {diff.stderr}")
 
             # 2. 在沙盒套用 Patch
             if patch_file.stat().st_size > 0:
-                subprocess.run(
-                    ["git", "apply", str(patch_file)], cwd=sandbox_path, check=True
-                )
-                subprocess.run(["git", "add", "."], cwd=sandbox_path, check=True)
+                applied = run_hardened_git(Path(sandbox_path), "apply", str(patch_file))
+                if applied.returncode != 0:
+                    raise RuntimeError(f"git apply failed: {applied.stderr}")
+                added = run_hardened_git(Path(sandbox_path), "add", ".")
+                if added.returncode != 0:
+                    raise RuntimeError(f"git add failed: {added.stderr}")
                 print("🔄 [Sync] Staged changes migrated to sandbox.")
             return True
         except Exception as e:

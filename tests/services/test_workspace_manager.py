@@ -195,3 +195,40 @@ def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
         WorkspaceManager(controller).lease(task_id="T790")
 
     assert f"not an independently registered worktree: {swarm}" in caplog.text
+
+
+def _sync_manager(project_root: Path, tmp_path: Path) -> WorkspaceManager:
+    return WorkspaceManager(project_root)
+
+
+def test_sync_staged_to_sandbox_runs_git_hardened(tmp_path, monkeypatch):
+    main = tmp_path / "main"
+    _init_repo(main)
+    sandbox = tmp_path / "sandbox"
+    _init_repo(sandbox)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmon.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+    hook.chmod(0o755)
+    _git(main, "config", "core.fsmonitor", str(hook))
+    (main / "tracked.txt").write_text("controller\nstaged change\n", encoding="utf-8")
+    _git(main, "add", "tracked.txt")
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+
+    assert _sync_manager(main, tmp_path).sync_staged_to_sandbox(sandbox) is True
+
+    assert not marker.exists()
+    assert "staged change" in (sandbox / "tracked.txt").read_text(encoding="utf-8")
+
+
+def test_sync_staged_to_sandbox_fails_closed_when_git_hangs(tmp_path, monkeypatch):
+    import nexus.core.hardened_git as hardened_git
+
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=1)
+
+    monkeypatch.setattr(hardened_git, "run_hardened_git", hang)
+    monkeypatch.setenv("NEXUS_SYNC_PATCH", str(tmp_path / "sync.patch"))
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    assert _sync_manager(tmp_path, tmp_path).sync_staged_to_sandbox(sandbox) is False
