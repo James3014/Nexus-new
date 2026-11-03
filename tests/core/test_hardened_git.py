@@ -981,9 +981,9 @@ def test_hard_linked_loose_objects_and_packs_stay_exempt(env):
     _git(env, "clone", "-q", "--local", str(work), str(packed))
     packs = list((packed / ".git" / "objects" / "pack").glob("*.pack"))
     assert packs and all(p.stat().st_nlink > 1 for p in packs)
-    # Auxiliary pack files (.rev, .bitmap) are not exempt; drop them from the clone.
-    for aux in (packed / ".git" / "objects" / "pack").iterdir():
-        if aux.suffix not in {".pack", ".idx"}:
+    # Auxiliary hard-linked files (.rev, objects/info/*) are not exempt; drop them.
+    for aux in (packed / ".git" / "objects").rglob("*"):
+        if aux.is_file() and aux.stat().st_nlink > 1 and aux.suffix not in {".pack", ".idx"}:
             aux.unlink()
 
     assert hardened_git.git_dir_is_self_contained(loose / ".git") is True
