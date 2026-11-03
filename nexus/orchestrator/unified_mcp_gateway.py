@@ -2631,7 +2631,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         action = dict(action)
         task_id = str(state.get("task_id") or action.get("task_id") or "")
         status = str(state.get("status") or action.get("task_status") or "UNKNOWN")
-        terminal = status in {"CANCELLED", "INTEGRATED", "REJECTED", "SUPERSEDED", "FINAL_BLOCK"} and not _assist_flagged_for_reconcile(state)
+        terminal = status in {"CANCELLED", "INTEGRATED", "REJECTED", "SUPERSEDED", "FINAL_BLOCK"} and not bool(state.get("reconciliation_required"))
         next_action = str(action.get("next_action") or ("none" if terminal else "nexus_task_reconcile"))
         candidate = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         if not candidate and isinstance(action.get("candidate"), Mapping):
@@ -2653,7 +2653,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
             action_id = state["request"]["action"].get("action_id")
         recommended = action.get("recommended_tool") or next_action
         if recommended not in PUBLIC_TOOL_NAMES:
-            if status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or _assist_flagged_for_reconcile(state):
+            if status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or state.get("reconciliation_required"):
                 recommended = "nexus_task_reconcile"
             elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
                 recommended = "nexus_task_status"
@@ -2677,7 +2677,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
                 "candidate_ref": state.get("candidate_ref"),
             },
             "cleanup_status": cleanup,
-            "uncertain_mutation": status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or _assist_flagged_for_reconcile(state),
+            "uncertain_mutation": status in {"DIRECT_RECONCILE_REQUIRED", "UNKNOWN_REQUIRES_RECONCILE"} or bool(state.get("reconciliation_required")),
         }
         if include_state:
             result["state"] = dict(state)

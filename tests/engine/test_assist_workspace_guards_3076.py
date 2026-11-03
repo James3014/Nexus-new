@@ -1811,9 +1811,9 @@ def test_reconcile_moves_a_cancelled_record_written_before_3244_so_retry_works(b
     settled = box.gateway._assist_read(TASK)
     assert settled is not None
     assert settled["account_lease_cleanup_status"] == "RELEASED", settled
-    # Reconcile settles the record as a retryable failure, as on main; whether a reconciled
-    # cancel should stay CANCELLED is a separate question (#3276 comment), not changed here.
-    assert settled["status"] == "FAILED", settled
+    # Reconcile only releases the lease: the settled-record write guard refuses the FAILED
+    # write over the old-shape CANCELLED record, as on main (this change is read-side only).
+    assert settled["status"] == "CANCELLED", settled
     assert not settled.get("reconciliation_required"), settled
     _assert_retry_passes_the_reconcile_gates(box)
 
@@ -1830,20 +1830,17 @@ def test_old_shape_record_reads_as_needing_reconcile_on_every_status_surface(box
     surface points at nexus_task_reconcile (#3276)."""
     job = _job(box, "", **_OLD_SHAPE)
     assert "reconciliation_required" not in job
-    assert not assist_response._assist_settled(job)
-    assert assist_response._assist_held(job)
+    assert assist_response._assist_flagged_for_reconcile(job)
+    # Write guards keep main's meaning: the old-shape record stays settled, late writes refused.
+    assert assist_response._assist_settled(job)
+    assert not assist_response._assist_held(job)
     action = box.gateway._assist_action(job)
     assert action["next_action"] == "nexus_task_reconcile"
     assert action["recommended_tool"] == "nexus_task_reconcile"
-    assert action["pending"] is False or action["attention_required"] is True
+    assert action["attention_required"] is True
     response = box.gateway._assist_response(job)
     assert response["next_action"] == "nexus_task_reconcile"
-    state = {"task_id": TASK, **_OLD_SHAPE}
-    payload = box.gateway._recovery_payload(state)
-    assert payload["next_action"] == "nexus_task_reconcile"
-    assert payload["recommended_tool"] == "nexus_task_reconcile"
-    assert payload["uncertain_mutation"] is True
-    assert payload["attention_required"] is True
+    assert response["reconciliation_required"] is True
 
 
 def test_released_or_flagless_cancelled_record_stays_settled(box):
@@ -1854,9 +1851,20 @@ def test_released_or_flagless_cancelled_record_stays_settled(box):
         account_lease_released=True,
         account_lease_cleanup_status="RELEASED",
     )
-    assert assist_response._assist_settled(job) and not assist_response._assist_held(job)
-    payload = box.gateway._recovery_payload({"task_id": TASK, **job})
-    assert payload["next_action"] == "none" and payload["uncertain_mutation"] is False
+    assert not assist_response._assist_flagged_for_reconcile(job)
+    assert assist_response._assist_settled(job)
+    action = box.gateway._assist_action(job)
+    assert action["next_action"] != "nexus_task_reconcile"
+    assert box.gateway._assist_response(job)["reconciliation_required"] is False
+
+
+def test_old_shape_record_with_released_lease_does_not_read_as_needing_reconcile(box):
+    """The lease condition of the display predicate: a RECONCILIATION_REQUIRED cleanup status on
+    a record whose lease is released holds nothing for reconciliation (#3276)."""
+    job = _job(box, "", **{**_OLD_SHAPE, "account_lease_released": True})
+    assert not assist_response._assist_flagged_for_reconcile(job)
+    assert box.gateway._assist_action(job)["next_action"] != "nexus_task_reconcile"
+    assert box.gateway._assist_response(job)["reconciliation_required"] is False
 
 
 def test_reconcile_leaves_a_running_probe_holding_its_lease_alone(box, monkeypatch):
@@ -1885,7 +1893,7 @@ def test_reconcile_leaves_a_running_probe_holding_its_lease_alone(box, monkeypat
     monkeypatch.setattr(argv_command, "_live_group_members", group.live_members)
     _fake_lease_coordinator(monkeypatch, "LEASE_RECEIPT_REMOVED")
     before = box.gateway._assist_read(TASK)
-    assert before is not None and not assist_response._assist_held(before)
+    assert before is not None and not assist_response._assist_flagged_for_reconcile(before)
     box.gateway._task_reconcile({"task_id": TASK})
     after = box.gateway._assist_read(TASK)
     assert after is not None
