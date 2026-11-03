@@ -7268,3 +7268,72 @@ def test_start_up_git_helper_runs_through_the_hardened_runner(tmp_path: Path) ->
     # control: a plain git status does run it
     subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True)
     assert marker.exists()
+
+
+def _linked_worktree_with_program_config(tmp_path: Path) -> tuple[Path, Path]:
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    subprocess.run(["git", "config", "filter.x.clean", "cat"], cwd=main, check=True)
+    return main, wt
+
+
+def test_linked_worktree_subdir_with_program_config_is_still_refused(tmp_path: Path) -> None:
+    """#3335: a subdirectory of a linked worktree stays a linked worktree when the shared
+    config names a program (the hardened runner refuses there)."""
+    _main, wt = _linked_worktree_with_program_config(tmp_path)
+
+    assert dispatch._is_linked_worktree(str(wt / "sub")) is True
+    with pytest.raises(dispatch.WorktreeFallbackError):
+        dispatch._resolve_cwd_for_dispatch(
+            requested_cwd=str(wt / "sub"), fallback_clone_path=None
+        )
+
+
+def test_run_git_does_not_raise_on_a_non_utf8_config_name(tmp_path: Path) -> None:
+    """#3335: a config subsection name that is not UTF-8 gives (1, '') instead of an
+    exception, and the linked-worktree check does not turn into an acceptance."""
+    repo = tmp_path / "repo"
+    _init_repo_with_sub(repo)
+    cfg = repo / ".git" / "config"
+    cfg.write_bytes(cfg.read_bytes() + b'[branch "\xff\xfe"]\n\tremote = origin\n')
+
+    assert dispatch._run_git("status", "--porcelain", cwd=str(repo)) == (1, "")
+
+    main = tmp_path / "main"
+    _init_repo_with_sub(main)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt)], cwd=main, check=True)
+    mcfg = main / ".git" / "config"
+    mcfg.write_bytes(mcfg.read_bytes() + b'[branch "\xff\xfe"]\n\tremote = origin\n')
+    assert dispatch._is_linked_worktree(str(wt / "sub")) is True
+
+
+def test_foreground_subdir_write_scope_resolves_against_the_top_level(
+    tmp_path: Path, pass_through_boundary
+) -> None:
+    """#3335: with cwd in a subdirectory, the foreground write scope is resolved against
+    the repository top level, so an absolute path under it is in scope."""
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "root"
+    sub = _init_repo_with_sub(root)
+
+    def runner(**_kwargs):
+        (root / "outside.txt").write_text("changed by worker\n", encoding="utf-8")
+        return 0, "done", "", False, 10
+
+    events: list[dict[str, object]] = []
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(sub),
+        mode="accept-edits",
+        write_paths=[str(root / "outside.txt")],
+        coordinator=_WriteScopeCoordinator(home),
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert not [e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"]

@@ -172,6 +172,7 @@ public_operation_view = _agy_operation_journal.public_operation_view
 new_operation_id = _agy_operation_journal.new_operation_id
 new_attempt_id = _agy_operation_journal.new_attempt_id
 direct_operation_journal = import_module("nexus.services.direct_operation_journal")
+_hardened_git = import_module("nexus.core.hardened_git")
 
 OPERATION_ROOT = Path(
     os.getenv(
@@ -3318,18 +3319,18 @@ def _run_git(*args: str, cwd: str) -> tuple[int, str]:
     Never raises."""
     try:
         if args and args[0] == "clone":
-            result = import_module("nexus.core.hardened_git").run_hardened_git(
+            result = _hardened_git.run_hardened_git(
                 Path(cwd), *args, timeout=15
             )
         else:
             repository = direct_operation_journal._enclosing_repository(cwd)
             if repository is None:
                 return 1, ""
-            result = import_module("nexus.core.hardened_git").run_hardened_git(
+            result = _hardened_git.run_hardened_git(
                 repository[0], *args, git_dir=repository[1], timeout=15
             )
         return result.returncode, result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return 1, ""
 
 
@@ -3351,12 +3352,14 @@ def _is_linked_worktree(cwd: str) -> bool:
     try:
         git_path = Path(cwd) / ".git"
         if not git_path.exists():
-            # May still be a git repo via parent discovery, but check via git
-            rc, toplevel = _run_git("rev-parse", "--show-toplevel", cwd=cwd)
-            if rc != 0:
-                return False
-            git_path = Path(toplevel) / ".git"
-            if not git_path.exists():
+            # Parent discovery in Python (not git): a repo whose config names
+            # a program makes the hardened runner refuse, which must not read
+            # as "not linked" (fail closed).
+            for parent in Path(cwd).resolve().parents:
+                if (parent / ".git").exists() or (parent / ".git").is_symlink():
+                    git_path = parent / ".git"
+                    break
+            else:
                 return False
 
         # A regular file at .git is the gitfile pointer used by linked worktrees.
@@ -3373,7 +3376,7 @@ def _is_linked_worktree(cwd: str) -> bool:
             return False
         worktree_git_dir = Path(match.group(1).strip()).expanduser()
         if not worktree_git_dir.is_absolute():
-            worktree_git_dir = (Path(cwd) / worktree_git_dir).resolve()
+            worktree_git_dir = (git_path.parent / worktree_git_dir).resolve()
 
         # The common config lives at <worktrees_dir>/../../config which is the
         # main repository's config.  Walk up from the per-worktree git dir.
@@ -4569,8 +4572,9 @@ def dispatch_run(
 ) -> int:
     _refuse_if_pool_stopped()
     if source_repo_root is None:
-        # Foreground: bind the root here the way the journal records it; the
-        # background supervisor passes the recorded one, kept as is.
+        # Foreground: bind the root here the way the journal records it. The
+        # background supervisor passes the recorded one, kept as is; when the
+        # record had none (None) the root is bound here as well.
         source_repo_root = _bind_repo_root(cwd)
     started_at = _monotonic()
     limits: dict[str, Any] = {}
