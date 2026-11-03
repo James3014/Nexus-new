@@ -1157,6 +1157,20 @@ class ControlledIntegrationManager:
                 post_apply_verified=post_apply_verified,
                 failure_reason=f"integration branch unreadable after integration: {exc}",
             ) from exc
+        if applied and final_head != staging_sha:
+            # The branch moved between the post-apply re-check and this read (a descendant
+            # of a post-apply command, or a concurrent writer); a receipt would otherwise
+            # name a commit nobody verified (#3228 V1).
+            raise IntegrationExecutionError(
+                stage="POST_APPLY_VERIFICATION",
+                branch_head_before=expected_head,
+                branch_head_after=final_head,
+                staging_commit_sha=staging_sha,
+                candidate_commit_sha=candidate_sha,
+                merge_performed=True,
+                post_apply_verified=post_apply_verified,
+                failure_reason="integration branch moved after apply, before the receipt",
+            )
         return IntegrationReceipt(
             schema="nexus.integration_receipt.v1", task_id=task_id,
             integration_branch=integration_branch,

@@ -539,3 +539,38 @@ def test_a_post_apply_command_that_writes_a_replacement_ref_is_refused(tmp_path:
             auth=auth,
         )
     assert git(root, "for-each-ref", "refs/replace/")  # what the command left behind
+
+
+def test_a_branch_moved_during_cleanup_is_reported_instead_of_receipted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """#3228 V1: the last read of the branch is compared to the applied commit, so a move in
+    the cleanup window (a straggler of a post-apply command, a concurrent writer) is a
+    classified failure, not a receipt naming an unverified commit."""
+    root, base, candidate = make_repo(tmp_path)
+    receipt = acceptance(candidate)
+    auth = authorization(root, base, candidate, receipt)
+    real_git = ControlledIntegrationManager._git.__func__
+    moved: dict[str, str] = {}
+
+    def git_moving_the_branch_during_cleanup(cls, args, cwd):
+        result = real_git(cls, args, cwd)
+        if list(args[:2]) == ["worktree", "remove"] and not moved:
+            git(root, "commit", "--allow-empty", "-m", "moved after apply")
+            moved["head"] = _integration_head(root)
+        return result
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_git", classmethod(git_moving_the_branch_during_cleanup)
+    )
+    with pytest.raises(IntegrationExecutionError, match="moved after apply") as reported:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert reported.value.merge_performed is True
+    assert reported.value.stage == "POST_APPLY_VERIFICATION"
+    assert reported.value.branch_head_after == moved["head"]
+    assert reported.value.staging_commit_sha not in (None, moved["head"])
