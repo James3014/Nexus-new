@@ -562,3 +562,65 @@ def test_codex_candidate_with_an_untracked_file_link_is_protocol_invalid(
     assert receipt["forbidden_commands"] == []
     assert receipt["protocol_valid"] is False
     assert receipt["status"] == "INVALID"
+
+
+def _tracked_repo(sandbox: Path) -> Path:
+    source = sandbox / "tsource"
+    source.mkdir()
+    _git(source, "init", "-q")
+    (source / "f.txt").write_text("a\n", encoding="utf-8")
+    (source / "g.txt").write_text("b\n", encoding="utf-8")
+    _git(source, "add", "f.txt", "g.txt")
+    _git(source, "commit", "-qm", "base")
+    return source
+
+
+def test_seal_refuses_a_tracked_file_replaced_by_a_hard_link(sandbox: Path) -> None:
+    source = _tracked_repo(sandbox)
+    outside = sandbox / "outside.txt"
+    outside.write_text("OUTSIDE-SECRET\n", encoding="utf-8")
+    (source / "f.txt").unlink()
+    os.link(outside, source / "f.txt")
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert sealing["refused_untracked_files"] == ["f.txt"]
+    assert sealing["scope_valid"] is False
+
+
+def test_seal_refuses_a_tracked_file_replaced_by_a_symlink(sandbox: Path) -> None:
+    source = _tracked_repo(sandbox)
+    outside = sandbox / "outside.txt"
+    outside.write_text("OUTSIDE-SECRET\n", encoding="utf-8")
+    (source / "f.txt").unlink()
+    (source / "f.txt").symlink_to(outside)
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert sealing["refused_untracked_files"] == ["f.txt"]
+    assert sealing["scope_valid"] is False
+
+
+def test_seal_still_seals_a_plain_tracked_edit_and_a_deletion(sandbox: Path) -> None:
+    source = _tracked_repo(sandbox)
+    (source / "f.txt").write_text("edited\n", encoding="utf-8")
+    (source / "g.txt").unlink()
+
+    sealing = live.seal_shadow_candidate(source)
+
+    assert sealing["changed_files"] == ["f.txt", "g.txt"]
+    assert sealing["refused_untracked_files"] == []
+    assert sealing["scope_valid"] is True
+
+
+def test_seal_refuses_when_head_moved_off_the_revision(sandbox: Path) -> None:
+    source = _tracked_repo(sandbox)
+    revision = _git(source, "rev-parse", "HEAD").strip()
+    (source / "f.txt").write_text("edited\n", encoding="utf-8")
+    _git(source, "add", "f.txt")
+    _git(source, "commit", "-qm", "agent moved HEAD")
+
+    with pytest.raises(RuntimeError, match="shadow_candidate_head_moved"):
+        live.seal_shadow_candidate(source, revision=revision)
+    sealing = live.seal_shadow_candidate(source, revision=_git(source, "rev-parse", "HEAD").strip())
+    assert sealing["scope_valid"] is True

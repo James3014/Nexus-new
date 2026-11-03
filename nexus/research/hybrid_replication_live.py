@@ -1090,7 +1090,9 @@ def _run_codex_candidate(
                 result = {}
                 parse_error = f"{type(exc).__name__}:{exc}"
 
-            sealing = seal_shadow_candidate(source, git_dir=_shadow_git_dir(source))
+            sealing = seal_shadow_candidate(
+                source, git_dir=_shadow_git_dir(source), revision=revision
+            )
             changed_files = sealing["changed_files"]
             oversized_untracked = sealing["oversized_untracked_files"]
             refused_untracked = sealing["refused_untracked_files"]
@@ -1408,6 +1410,7 @@ def seal_shadow_candidate(
     git_dir: Path | None = None,
     allowed_paths: Sequence[str] | None = None,
     max_file_size: int = 5_000_000,
+    revision: str | None = None,
 ) -> dict[str, Any]:
     """Seal the agent's changes in ``source``. Git is pinned to ``git_dir`` (a shadow git dir
     the harness created beside ``source``; default: the git dir inside ``source``) and runs
@@ -1419,6 +1422,11 @@ def seal_shadow_candidate(
     pin: dict[str, Any] = {"git_dir": git_dir, "separate_git_dir": separate}
     if repository_config_can_start_a_program(source, **pin):
         raise RuntimeError("shadow_candidate_config_refused")
+    if revision is not None:
+        # The diff below is against HEAD: HEAD must still be the revision the agent was given.
+        head = run_hardened_git(source, "rev-parse", "HEAD", **pin)
+        if head.returncode != 0 or head.stdout.strip() != revision:
+            raise RuntimeError("shadow_candidate_head_moved")
     tracked = run_hardened_git(source, "diff", "--name-only", "-z", "HEAD", **pin)
     untracked = run_hardened_git(source, "ls-files", "--others", "--exclude-standard", "-z", **pin)
     if tracked.returncode != 0 or untracked.returncode != 0:
@@ -1436,6 +1444,15 @@ def seal_shadow_candidate(
     untracked_rows: list[dict[str, Any]] = []
     oversized_untracked: list[str] = []
     refused_untracked: list[str] = []
+    for rel in tracked_paths:
+        if not os.path.lexists(source / rel):
+            continue  # a deleted tracked file carries no bytes
+        try:
+            # Same rule as untracked: a changed tracked path that is now a link, a hard link
+            # or not a regular file would seal bytes from outside the copy (#3305).
+            read_bytes_in_root(source, rel)
+        except PathContainmentError:
+            refused_untracked.append(rel)
     for rel in untracked_paths:
         file_path = source / rel
         if file_path.is_symlink() and file_path.is_dir():
@@ -1914,7 +1931,10 @@ def _run_agy_candidate(
                 )
             )
             sealing = seal_shadow_candidate(
-                source, git_dir=_shadow_git_dir(source), allowed_paths=allowed_paths
+                source,
+                git_dir=_shadow_git_dir(source),
+                allowed_paths=allowed_paths,
+                revision=revision,
             )
             extra_checks = None
             if not sealing["scope_valid"]:
