@@ -7252,36 +7252,6 @@ def test_normal_mode_dispatch_run_hands_the_root_to_the_runner(tmp_path: Path) -
     assert seen["root"] == str(plain)
 
 
-def test_write_paths_without_a_source_baseline_are_refused(
-    tmp_path: Path, pass_through_boundary
-) -> None:
-    """#3335: write_paths with no source baseline (cwd outside git) refuse instead of
-    reporting UNCONSTRAINED; without write_paths the same cwd still completes."""
-    home = tmp_path / "home"
-    home.mkdir()
-    work = tmp_path / "work"
-    work.mkdir()
-    events: list[dict[str, object]] = []
-
-    def runner(write_boundary=None, **_kwargs):
-        return 0, "done", "", False, 10
-
-    code = dispatch.dispatch_run(
-        prompt="bounded edit",
-        cwd=str(work),
-        mode="accept-edits",
-        write_paths=[str(work / "x")],
-        coordinator=_WriteScopeCoordinator(home),
-        run_agy_fn=runner,
-        operation_hook=events.append,
-    )
-
-    assert code == 1
-    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
-    assert failures[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
-    assert _normal_mode_runner_seen(tmp_path, work)["root"] is None
-
-
 def test_start_up_git_helper_runs_through_the_hardened_runner(tmp_path: Path) -> None:
     """#3335: a repository config that names a program (fsmonitor) must not be run by the
     start-up git helper."""

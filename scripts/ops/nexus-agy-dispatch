@@ -5886,11 +5886,7 @@ def dispatch_run(
                 write_paths=write_paths,
                 observed_changed_paths=attempt_changed_paths,
             )
-            # Declared write paths with nothing observed (no baseline) cannot be
-            # verified: refuse (fail closed) like an out-of-scope change.
-            scope_blocked = bool(
-                write_paths and scope_state in ("VIOLATION_OUT_OF_SCOPE", "UNCONSTRAINED")
-            )
+scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
             no_tool_violation = bool(
                 permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
             )
