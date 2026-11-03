@@ -237,6 +237,7 @@ def run_bounded_swarm(
             # does not run at all and the worker stays unverified (it cannot win).
             record["verify_result"] = NOT_EXECUTED_NO_BARRIER
             return {**record, "passed": False, "score": 0.0}
+        confined: lane.Confinement | None = None
         try:
             confined = lane.confinement(
                 sandbox=wt.parent / f"sandbox_{_safe(strategy['name'])}",
@@ -251,6 +252,8 @@ def run_bounded_swarm(
             all_passed = run.returncode == 0
         except subprocess.TimeoutExpired:
             record["verify_exit_codes"] = [None]
+            if confined is not None:
+                record["isolation"] = confined.describe()  # root restorations (#3266)
         except lane.SandboxError as exc:
             record.update(verify_result=f"not_executed:sandbox_error:{exc}"[:120])
             return {**record, "passed": False, "score": 0.0}

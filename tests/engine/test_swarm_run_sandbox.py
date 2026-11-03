@@ -133,3 +133,32 @@ def test_verify_script_runs_confined_when_a_barrier_exists(
     assert [w["verify_result"] for w in workers] == ["pass", "pass"]
     assert all(w["isolation"]["barrier"] == "macos_sandbox_exec" for w in workers)
     assert all(w["verify_exit_codes"] == [0] for w in workers)
+
+
+def test_timed_out_verify_record_carries_root_restorations(
+    tmp_path: Path, stub_worker: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3266: a verify run that times out after changing its root still records the restore."""
+    monkeypatch.setattr(lane, "os_sandbox_available", lambda: True)
+
+    def fake_confinement(*, sandbox: Path, **_kw: Any) -> lane.Confinement:
+        sandbox.mkdir(parents=True, exist_ok=True)
+        os.chmod(sandbox, 0o750)
+        return lane.Confinement(profile="(version 1)", env={}, roots=(sandbox,))
+
+    def fake_run_confined(argv, *, confine_roots, **_kw):
+        os.chmod(confine_roots[0], 0o000)
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    monkeypatch.setattr(lane, "confinement", fake_confinement)
+    monkeypatch.setattr(lane, "run_confined", fake_run_confined)
+    report = swarm_run.run_bounded_swarm(
+        workspace_root=_repo(tmp_path),
+        task_id="t",
+        task="fix",
+        target_file="calc.py",
+        verify_script="repro.py",
+    )
+    workers = report["workers"]
+    assert all(w["verify_exit_codes"] == [None] for w in workers)
+    assert all(len(w["isolation"]["root_restorations"]) == 1 for w in workers)
