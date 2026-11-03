@@ -1039,6 +1039,8 @@ def test_fifo_head_is_not_a_repository_and_does_not_block(tmp_path: Path) -> Non
     head = root / ".git" / "HEAD"
     head.unlink()
     os.mkfifo(head)
+    holder = os.open(head, os.O_RDWR)
+    os.write(holder, b"ref: refs/heads/main\n")
     result: list[bool] = []
     worker = threading.Thread(
         target=lambda: result.append(direct_journal._is_repository_dir(root / ".git")),
@@ -1046,6 +1048,7 @@ def test_fifo_head_is_not_a_repository_and_does_not_block(tmp_path: Path) -> Non
     )
     worker.start()
     worker.join(timeout=5)
+    os.close(holder)
 
     assert not worker.is_alive()
     assert result == [False]
