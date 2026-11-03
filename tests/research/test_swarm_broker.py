@@ -2021,3 +2021,40 @@ def test_recovery_leaves_a_young_or_linked_registration_lock_alone(tmp_path: Pat
     assert outside.exists() and (git_dir / "HEAD.lock").is_symlink()
     assert not index_lock.exists()
     assert (sandbox / "SENTINEL").exists()
+
+
+# #3231: the reset covers a tracked file hidden by an index flag, and a nested repository.
+
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_release_resets_a_tracked_file_hidden_by_an_index_flag(tmp_path: Path, monkeypatch, flag):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    _git(swarm, "update-index", flag, "tracked.txt")
+    (swarm / "tracked.txt").write_text("lease edit\n", encoding="utf-8")
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert (swarm / "tracked.txt").read_text(encoding="utf-8") == "controller\n"
+    assert _git(swarm, "ls-files", "-v", "tracked.txt").startswith("H ")
+    assert _git(swarm, "status", "--porcelain") == ""
+    assert (sandbox / "SENTINEL").exists()
+
+
+def test_release_removes_a_nested_repository_left_by_the_lease(tmp_path: Path, monkeypatch):
+    sandbox = _sentinel_cwd(tmp_path, monkeypatch)
+    controller, swarm = _registered_swarm(tmp_path)
+    nest = swarm / "nest"
+    nest.mkdir()
+    _git(nest, "init", "-q")
+    (nest / "payload.txt").write_text("carried over\n", encoding="utf-8")
+    broker = SwarmBroker(controller)
+
+    broker.release(swarm)
+
+    assert not (swarm / ".swarm_lock").exists()
+    assert not nest.exists()
+    assert not (swarm / "candidate.txt").exists()
+    assert (sandbox / "SENTINEL").exists()
