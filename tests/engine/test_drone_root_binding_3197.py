@@ -558,13 +558,46 @@ def _deep_locked_tree(private: Path, depth: int) -> None:
 def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path, monkeypatch):
     # A confined command may nest directories far past the recursion limit and lock the
     # innermost one; the private area must be gone, removed outright, not set aside (#3238).
-    # Host-side only. A small open-descriptor budget makes the move-up branch run for real.
+    # Host-side only. A small open-descriptor budget makes the move-up branch run for real, and
+    # a soft open-file limit far below the depth makes it the only way through: a walk that
+    # kept one descriptor per level would run out and set the area aside.
+    resource = pytest.importorskip("resource")
     monkeypatch.setattr(mos, "_WALK_MAX_OPEN", 4)
     private = tmp_path / "private"
     _deep_locked_tree(private, 1500)
 
-    mos._remove_private_dir(str(private))  # returns: nothing was set aside
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (len(os.listdir("/dev/fd")) + 64, hard))
+    try:
+        mos._remove_private_dir(str(private))  # returns: nothing was set aside
+    finally:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
 
+    assert not private.exists()
+    assert list(tmp_path.glob("private.stale-*")) == []
+
+
+def test_a_first_removal_that_overflows_the_stack_falls_through_to_the_walk_3238(
+    tmp_path, monkeypatch
+):
+    # Before 3.14 the first rmtree of a deep tree raises RecursionError; whatever the
+    # interpreter, that must lead to the walk and a clean removal, not escape (#3238).
+    private = tmp_path / "private"
+    _deep_locked_tree(private, 3)
+    real_rmtree = mos.shutil.rmtree
+    calls = []
+
+    def rmtree_overflows_once(path, *a, **k):
+        calls.append(path)
+        if len(calls) == 1:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(mos.shutil, "rmtree", rmtree_overflows_once)
+
+    mos._remove_private_dir(str(private))
+
+    assert len(calls) == 2
     assert not private.exists()
     assert list(tmp_path.glob("private.stale-*")) == []
 
@@ -576,11 +609,26 @@ def test_deep_tree_cleanup_moves_past_a_taken_move_name_3238(tmp_path, monkeypat
     monkeypatch.setattr(mos, "_move_token", lambda: "fixed")
     private = tmp_path / "private"
     _deep_locked_tree(private, 40)
-    (private / mos._move_name("fixed", 1)).write_text("taken by the command")
-    (private / mos._move_name("fixed", 2)).mkdir()
-    (private / mos._move_name("fixed", 2) / "keep").write_text("also taken")
+    # The occupiers are locked, non-empty directories, so the first plain removal cannot
+    # delete them whatever order it lists entries in: both names are still taken when the
+    # walk needs them.
+    for n in (1, 2):
+        taken = private / mos._move_name("fixed", n)
+        taken.mkdir()
+        (taken / "keep").write_text("taken by the command")
+        taken.chmod(0o500)
+    renamed_to = []
+    real_rename = mos.os.rename
+
+    def recording_rename(src, dst, *a, **k):
+        renamed_to.append(dst)
+        return real_rename(src, dst, *a, **k)
+
+    monkeypatch.setattr(mos.os, "rename", recording_rename)
 
     mos._remove_private_dir(str(private))
+
+    assert renamed_to[0] == mos._move_name("fixed", 3)
 
     assert not private.exists()
     assert list(tmp_path.glob("private.stale-*")) == []
