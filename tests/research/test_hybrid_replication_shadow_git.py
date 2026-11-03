@@ -945,3 +945,39 @@ def test_sealed_diff_carries_a_change_whose_stat_the_agent_copied_into_the_index
 
     diff = _sealed_diff(receipt)
     assert "-a" in diff and "+b" in diff
+
+
+def test_seal_lists_a_new_file_the_agent_ignored_with_its_own_ignore_file(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / ".gitignore").write_text("hidden.txt\n", encoding="utf-8")
+        (cwd / "hidden.txt").write_text("new\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    paths = [row["path"] for row in receipt["untracked_files"]]
+    assert "hidden.txt" in paths
+    assert "hidden.txt" in receipt["changed_files"]
+
+
+def test_seal_lists_new_files_when_the_ignore_file_ignores_itself(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / ".gitignore").write_text(".gitignore\n*.dat\n", encoding="utf-8")
+        (cwd / "hidden.dat").write_text("new\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+
+    receipt, _ = live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+    paths = [row["path"] for row in receipt["untracked_files"]]
+    assert "hidden.dat" in paths
+    assert ".gitignore" in paths
