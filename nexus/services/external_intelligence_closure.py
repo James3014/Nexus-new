@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -59,6 +60,7 @@ EXECUTABLE_TASK_CARD_STATUSES = frozenset({
     "ACTIVE",
     "APPROVED_IN_PROGRESS",
 })
+_LOG = logging.getLogger(__name__)
 _SESSION_PREFIX = "ses_"
 _HEX40 = frozenset("0123456789abcdef")
 _HEX64 = _HEX40
@@ -2557,6 +2559,15 @@ def _run_pytest_verifier(
     return run
 
 
+def _remove_run_dir(run_dir: Path) -> str | None:
+    """Remove a base-run scratch directory the verifier wrote to; a tree that stays is
+    logged (and returned) instead of being ignored (#3281)."""
+    error = remove_untrusted_tree_quietly(run_dir)
+    if error is not None:
+        _LOG.warning("verifier base-run scratch not removed: %s", error)
+    return error
+
+
 def _base_skipped_nodes(
     invocation: _PytestInvocation,
     *,
@@ -2586,7 +2597,7 @@ def _base_skipped_nodes(
             root_writable=False,
         )
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        run_dir_error = _remove_run_dir(run_dir)
     info = {
         "ran": True,
         "returncode": run.returncode,
@@ -2594,6 +2605,8 @@ def _base_skipped_nodes(
         "sandboxed": bool(run.sandbox.get("sandboxed")),
         "skipped": sorted(run.skipped_names)[:_INTEGRITY_FINDINGS_LIMIT],
     }
+    if run_dir_error is not None:
+        info["cleanup_error"] = run_dir_error
     if not run.witness.get("complete") or run.witness.get("error") == VERIFIER_WITNESS_TAMPERED:
         info["error"] = VERIFIER_BASE_RUN_FAILED
         return None, info
@@ -2692,7 +2705,7 @@ def _base_declared_nodes_missing(
                 root_writable=False,
             )
         finally:
-            shutil.rmtree(run_dir, ignore_errors=True)
+            _remove_run_dir(run_dir)
 
     # A token missing at base right after an unknown long option (``--full-trace
     # tests/test_new.py``) is first dropped as a candidate-added target (#2948). That is

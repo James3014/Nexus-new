@@ -237,12 +237,14 @@ def remove_untrusted_tree(path: str | os.PathLike[str]) -> None:
 def remove_untrusted_tree_quietly(path: str | os.PathLike[str]) -> str | None:
     """``remove_untrusted_tree`` for callers that must not raise (cleanup in a ``finally`` of a
     best-effort path): returns ``None`` when the tree is gone, else the error text
-    (``tree_not_removed:<name>``) for the caller to log or put in its result."""
+    (``tree_not_removed:<name>``) for the caller to log or put in its result. Any ``Exception``
+    (a path that makes ``os`` raise ``ValueError``/``TypeError``) becomes that text too, so a
+    ``finally`` never loses its result; ``KeyboardInterrupt``/``SystemExit`` still propagate."""
 
     try:
         remove_untrusted_tree(path)
     except UntrustedTreeNotRemoved as exc:
         return str(exc)
-    except (OSError, RecursionError) as exc:
+    except Exception as exc:  # not to raise: OSError, RecursionError, ValueError, ...
         return f"tree_not_removed:{type(exc).__name__}"
     return None

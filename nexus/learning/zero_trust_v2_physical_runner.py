@@ -59,10 +59,25 @@ def run_zero_trust_v2_physical_row(
     baseline_after_hash = (
         baseline_after["sandbox_attestation"]["artifact_hash"] if baseline_after else sandbox_attestation["artifact_hash"]
     )
+    # Any probe whose root could not be removed fails the cleanup attestation (#3281).
+    teardown_status = (
+        "PASS"
+        if all(
+            attestation.get("teardown_status") == "PASS"
+            for attestation in (
+                sandbox_attestation,
+                baseline_before["sandbox_attestation"] if baseline_before else None,
+                baseline_after["sandbox_attestation"] if baseline_after else None,
+            )
+            if attestation is not None
+        )
+        else "FAIL"
+    )
     clean_contract = build_baseline_sandwich(
         baseline_before_hash=baseline_before_hash,
         skill_arm_hash=sandbox_attestation["artifact_hash"],
         baseline_after_hash=baseline_after_hash,
+        teardown_status=teardown_status,
     )
     receipt = build_runtime_signed_receipt(
         run_id=run_id,
