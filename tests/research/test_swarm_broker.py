@@ -2652,3 +2652,41 @@ def test_unstarted_lease_mark_is_not_written_into_a_replaced_lock_file(tmp_path:
     assert broker.acquire(timeout_sec=0.05) is None
     assert (swarm / ".swarm_lock").read_bytes() == b"other holder\n"
     assert (sandbox / "SENTINEL").exists()
+
+
+def _first_start_fails_then_recovers(tmp_path: Path, monkeypatch, drop_unstarted_mark: bool):
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    real_run = subprocess.run
+
+    def failing_update_ref(cmd, *args, **kwargs):
+        if cmd[0] == "git" and "update-ref" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "error: update-ref refused\n")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", failing_update_ref)
+    assert SwarmBroker(controller).acquire(timeout_sec=0.05) is None
+    monkeypatch.setattr(subprocess, "run", real_run)
+    if drop_unstarted_mark:
+        # A lock marked like any other failed release, as by `mark_stale_lease`.
+        (swarm / ".swarm_lock").write_bytes(b"release_failed\n")
+    return controller, swarm
+
+
+def test_first_lease_start_failure_is_recovered_without_a_lease_base(tmp_path: Path, monkeypatch):
+    controller, swarm = _first_start_fails_then_recovers(tmp_path, monkeypatch, False)
+
+    broker = SwarmBroker(controller)
+    assert broker.recover_failed_releases() == [swarm]
+    assert broker.acquire(timeout_sec=0.05) == swarm
+
+
+def test_handed_out_lease_without_a_base_stays_locked_after_recovery(tmp_path: Path, monkeypatch):
+    controller, swarm = _first_start_fails_then_recovers(tmp_path, monkeypatch, True)
+
+    broker = SwarmBroker(controller)
+    assert broker.recover_failed_releases() == []
+    assert broker.locked_swarms() == [(swarm, "release_failed")]

@@ -165,3 +165,24 @@ def test_legacy_reuse_releases_the_swarm_when_its_checkout_fails(tmp_path, monke
 
     assert seen
     assert not (swarm / ".swarm_lock").exists()
+
+
+def test_legacy_reuse_error_names_the_swarm_path_when_it_is_not_registered(
+    tmp_path, monkeypatch, caplog
+):
+    from nexus.research.swarm_broker import SwarmBroker
+
+    controller = tmp_path / "controller"
+    head = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), head)
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("NEXUS_ALLOW_LEGACY_SWARM_REUSE", "1")
+    monkeypatch.setattr(WorkspaceManager, "_sync_brain_to_path", lambda self, path: None)
+    monkeypatch.setattr(SwarmBroker, "is_independently_registered_worktree", lambda s, p: False)
+
+    with caplog.at_level("WARNING"):
+        WorkspaceManager(controller).lease(task_id="T790")
+
+    assert f"not an independently registered worktree: {swarm}" in caplog.text
+    assert not (swarm / ".swarm_lock").exists()

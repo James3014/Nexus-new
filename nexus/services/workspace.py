@@ -110,11 +110,13 @@ class WorkspaceManager:
                 if swarm_path:
                     print(f"🐝 [Swarm-Reuse] Leasing existing sandbox: {swarm_path.name}")
                     if not broker.is_independently_registered_worktree(swarm_path):
+                        message = (
+                            "Swarm sandbox is not an independently registered worktree: "
+                            f"{swarm_path}"
+                        )
                         broker.release(swarm_path)
                         swarm_path = None
-                        raise WorkspacePermissionError(
-                            f"Swarm sandbox is not an independently registered worktree: {swarm_path}"
-                        )
+                        raise WorkspacePermissionError(message)
 
                     base_head = run_hardened_git(self.project_root, "rev-parse", "HEAD")
                     if base_head.returncode != 0:
