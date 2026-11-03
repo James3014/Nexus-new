@@ -20,10 +20,10 @@ cannot win. The workspace itself is never modified.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import shlex
-import shutil
 import stat
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
@@ -32,7 +32,10 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine import sandboxed_lane as lane
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.verifiers.contracts import EvidenceRef, FailureTag, VerifierVerdict
+
+logger = logging.getLogger(__name__)
 
 VERIFIER_NAME = "patch_execution"
 # The only pytest config a verify run reads: written by the verifier next to (not inside) the
@@ -412,7 +415,14 @@ class PatchExecutionVerifier:
         ):
             raise lane.SandboxError("sandbox_outside_workspace")
         if sandbox.exists():
-            shutil.rmtree(sandbox)
+            # The previous round's commands wrote here; a locked leaf must not fail this run.
+            # A tree that cannot go is set aside by the cleanup, which frees the path, and
+            # reported (#3281).
+            leftover = remove_untrusted_tree_quietly(sandbox)
+            if leftover:
+                logger.warning("previous verification sandbox not removed: %s", leftover)
+                if sandbox.exists():
+                    raise lane.SandboxError(leftover)
         sandbox.mkdir(parents=True)
         (sandbox / "home").mkdir()
         (sandbox / "tmp").mkdir()

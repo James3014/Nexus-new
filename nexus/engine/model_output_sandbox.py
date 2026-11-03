@@ -29,15 +29,11 @@ There is no unconfined fallback: without an OS barrier (non-macOS, or
 
 from __future__ import annotations
 
-import ctypes
 import errno
-import functools
 import os
 import re
-import secrets
 import shutil
 import stat
-import struct
 import subprocess  # nosec B404 - argv lists only, never a shell
 import sys
 import tempfile
@@ -61,6 +57,7 @@ from nexus.engine.sandboxed_lane import (
     in_tree,
     trusted_executable,
 )
+from nexus.engine.untrusted_tree_cleanup import UntrustedTreeNotRemoved, remove_untrusted_tree
 
 # Binaries here need no extra read root (system paths are already readable or not wanted).
 _SYSTEM_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/System/")
@@ -76,6 +73,7 @@ _DENIED_HOME_SUBTREES = (
 )
 
 __all__ = [
+    "PrivateAreaNotRemoved",
     "SandboxError",
     "argument_file_roots",
     "denied_subtrees",
@@ -289,204 +287,29 @@ def _restore_root_metadata(path: Path, recorded: os.stat_result) -> bool:
     return _same_dir(_root_entry(path), recorded)
 
 
-# setattrlistat(2) on macOS: set one attribute of the entry ``name`` in an open directory,
-# never following a link there (FSOPT_NOFOLLOW).
-_ATTR_BIT_MAP_COUNT = 5
-_ATTR_CMN_FLAGS = 0x00040000
-_ATTR_CMN_EXTENDED_SECURITY = 0x00400000
-_FSOPT_NOFOLLOW = 0x1
-_KAUTH_FILESEC_MAGIC = 0x012CC16D
-_KAUTH_FILESEC_NOACL = 0xFFFFFFFF
-_DIR_NOFOLLOW = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+class PrivateAreaNotRemoved(SandboxError):
+    """The run's private ``home``/``tmp`` could not be removed after the run (#3267).
+
+    Unlike a plain ``SandboxError`` the command may have run: ``run_model_argv`` and
+    ``run_model_command_string`` set ``result`` to the finished ``CompletedProcess`` and
+    ``interrupted_by`` to the exception that ended the run instead (``subprocess.TimeoutExpired``,
+    ``FileNotFoundError``, …); both are ``None`` when nothing ran or the block was used directly.
+    The error is a ``SandboxError`` so an existing ``except SandboxError`` still catches it;
+    catch this type first to tell "ran, then cleanup failed" from "did not run"."""
+
+    result: subprocess.CompletedProcess | None = None
+    interrupted_by: BaseException | None = None
 
 
-@functools.cache
-def _libc() -> ctypes.CDLL:
-    return ctypes.CDLL(None, use_errno=True)
-
-
-def _setattr_at(dir_fd: int, name: str, attribute: int, payload: bytes) -> None:
-    attrlist = struct.pack("=HHIIIII", _ATTR_BIT_MAP_COUNT, 0, attribute, 0, 0, 0, 0)
-    _libc().setattrlistat(  # result ignored: removal is retried and raises if still refused
-        ctypes.c_int(dir_fd),
-        os.fsencode(name),
-        ctypes.create_string_buffer(attrlist, len(attrlist)),
-        ctypes.create_string_buffer(payload, len(payload)),
-        ctypes.c_size_t(len(payload)),
-        ctypes.c_uint32(_FSOPT_NOFOLLOW),
-    )
-
-
-def _chmod_at_by_handle(dir_fd: int, name: str, mode: int) -> None:
-    """chmod the entry itself through an ``O_PATH | O_NOFOLLOW`` handle (Linux); a link there
-    is left alone."""
-
-    o_path = getattr(os, "O_PATH", 0)
-    if not o_path or not os.path.isdir("/proc/self/fd"):
-        return
-    try:
-        fd = os.open(name, o_path | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
-    except OSError:
-        return
-    try:
-        if not stat.S_ISLNK(os.fstat(fd).st_mode):
-            os.chmod(f"/proc/self/fd/{fd}", mode)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
-def _make_removable_at(dir_fd: int, name: str, *, is_dir: bool) -> None:
-    """Undo what a confined command may have set on the entry ``name`` of the open directory
-    ``dir_fd`` so the host can delete it: user flags first (they block the rest), then the
-    mode, then any ACL. Every change names the entry relative to ``dir_fd`` and never follows a
-    link there: a link swapped in after the caller looked is changed itself, not its target."""
-
-    if sys.platform == "darwin":
-        _setattr_at(dir_fd, name, _ATTR_CMN_FLAGS, struct.pack("=I", 0))
-    mode = 0o700 if is_dir else 0o600
-    try:
-        os.chmod(name, mode, dir_fd=dir_fd, follow_symlinks=False)
-    except (NotImplementedError, ValueError):
-        # Linux: no fchmodat without following; CPython raises one or the other.
-        _chmod_at_by_handle(dir_fd, name, mode)
-    except OSError:
-        pass
-    if sys.platform == "darwin":
-        no_acl = struct.pack(
-            "=I16s16sII", _KAUTH_FILESEC_MAGIC, bytes(16), bytes(16), _KAUTH_FILESEC_NOACL, 0
-        )
-        # attrreference_t (data right after it), then a filesec that says "no ACL".
-        _setattr_at(
-            dir_fd,
-            name,
-            _ATTR_CMN_EXTENDED_SECURITY,
-            struct.pack("=iI", 8, len(no_acl)) + no_acl,
-        )
-
-
-# Most directory descriptors the removal walk holds open at once; a deeper subtree is moved up to
-# the top and walked from there, so nesting depth never costs recursion or descriptors (#3238).
-_WALK_MAX_OPEN = 128
-# A deep subtree is renamed up to the top of the private area under a name no command could
-# have planned for (a per-call token) with a few numbered retries past a taken name.
-_MOVE_NAME_TRIES = 8
-
-
-def _move_token() -> str:
-    return secrets.token_hex(4)
-
-
-def _move_name(token: str, n: int) -> str:
-    return f".up-{token}-{n}"
-
-
-def _make_tree_removable(dir_fd: int) -> None:
-    """``_make_removable_at`` for every entry below the open directory ``dir_fd``, top down.
-    Directories are entered only by ``O_NOFOLLOW`` opens relative to their parent's descriptor,
-    so no path through a component swapped in during the walk is ever used (#3197). The walk is
-    iterative and holds at most ``_WALK_MAX_OPEN`` descriptors: a subtree nested deeper is
-    renamed up into ``dir_fd`` and walked from there (#3238)."""
-
-    # Each frame: (descriptor, names still to visit). The first frame is the caller's own.
-    stack: list[tuple[int, list[str]]] = []
-
-    def frame(fd: int) -> tuple[int, list[str]]:
-        with os.scandir(fd) as entries:
-            return fd, [entry.name for entry in entries]
-
-    stack.append(frame(dir_fd))
-    moved = 0
-    token = _move_token()
-    try:
-        while stack:
-            fd, names = stack[-1]
-            if not names:
-                stack.pop()
-                if fd != dir_fd:
-                    os.close(fd)
-                continue
-            name = names.pop()
-            try:
-                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-            except OSError:
-                continue
-            if stat.S_ISLNK(info.st_mode):
-                continue
-            is_dir = stat.S_ISDIR(info.st_mode)
-            _make_removable_at(fd, name, is_dir=is_dir)
-            if not is_dir:
-                continue
-            if len(stack) >= _WALK_MAX_OPEN and fd != dir_fd:
-                up = None
-                for _try in range(_MOVE_NAME_TRIES):
-                    moved += 1
-                    candidate = _move_name(token, moved)
-                    try:
-                        os.stat(candidate, dir_fd=dir_fd, follow_symlinks=False)
-                    except FileNotFoundError:
-                        pass
-                    else:
-                        continue  # the command left something under that name: next number
-                    try:
-                        os.rename(name, candidate, src_dir_fd=fd, dst_dir_fd=dir_fd)
-                    except OSError:
-                        continue
-                    up = candidate
-                    break
-                if up is None:
-                    continue  # removal below reports it
-                stack[0][1].append(up)
-                continue
-            try:
-                child = os.open(name, _DIR_NOFOLLOW, dir_fd=fd)
-            except OSError:
-                continue  # now a link, or still unreadable: removal below reports it
-            try:
-                stack.append(frame(child))
-            except OSError:
-                os.close(child)
-    finally:
-        for fd, _ in stack:
-            if fd != dir_fd:
-                os.close(fd)
-
-
+# The run's private area is removed by the shared untrusted-tree cleanup (#3238, #3281).
 def _remove_private_dir(private: str) -> None:
-    """Remove the run's private ``home``/``tmp``. Model code wrote there and may have left
-    entries the plain removal refuses (flags, mode or ACL entries); those are made removable
-    entry by entry, top down, by directory descriptor and without following any link, and
-    removal is tried again. A dir that still cannot be removed raises."""
+    """Remove the run's private ``home``/``tmp``, where model code wrote. A dir that still
+    cannot be removed is set aside and raises ``PrivateAreaNotRemoved`` (a ``SandboxError``)."""
 
-    # Before 3.14 ``rmtree`` recurses once per directory level, so a very deep tree raises
-    # RecursionError here even when nothing is locked; the walk below flattens it.
     try:
-        shutil.rmtree(private)
-        return
-    except (OSError, RecursionError):
-        pass
-    parent = os.open(os.path.dirname(private), _DIR_NOFOLLOW)
-    try:
-        _make_removable_at(parent, os.path.basename(private), is_dir=True)
-        root = os.open(os.path.basename(private), _DIR_NOFOLLOW, dir_fd=parent)
-    finally:
-        os.close(parent)
-    try:
-        _make_tree_removable(root)
-    finally:
-        os.close(root)
-    try:
-        shutil.rmtree(private)
-    except (OSError, RecursionError) as exc:
-        # Do not leave it quietly under its own name: set it aside and say so (#3238). Only
-        # the name goes into the error: it ends up in receipts.
-        aside = f"{private}.stale-{os.getpid()}"
-        try:
-            os.rename(private, aside)
-        except OSError:
-            aside = private
-        raise SandboxError(f"private_area_not_removed:{os.path.basename(aside)}") from exc
+        remove_untrusted_tree(private)
+    except UntrustedTreeNotRemoved as exc:
+        raise PrivateAreaNotRemoved(f"private_area_not_removed:{exc.aside_name}") from exc
 
 
 # The device files every profile lets a command write besides its roots.
@@ -539,7 +362,8 @@ def model_sandbox(
     (``SandboxError("work_dir_replaced")`` otherwise). When the block ends, each root's own flags
     and mode are put back (its extended attributes are not); a root that is no longer the bound
     directory raises ``SandboxError(…_replaced)``. Raises SandboxError when no OS barrier exists
-    or a root is unsafe (fail closed)."""
+    or a root is unsafe (fail closed). A private area that cannot be removed when the block ends
+    raises ``PrivateAreaNotRemoved`` (a ``SandboxError``; the command may have run, #3267)."""
 
     work, work_info = _bind_root(work_dir, "work_dir")
     bound_extra = [_bind_root(path, "writable_dir") for path in writable]
@@ -608,7 +432,9 @@ def run_model_argv(
     """``subprocess.run(argv, cwd=work_dir)`` inside the model sandbox (no shell), its process
     group killed afterwards.
 
-    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran. A program that
+    ``subprocess.TimeoutExpired`` propagates; SandboxError means nothing ran, except its subclass
+    ``PrivateAreaNotRemoved``: the command ran (or timed out) and only the private-area cleanup
+    failed, with the outcome on ``.result`` / ``.interrupted_by`` (#3267). A program that
     does not exist raises FileNotFoundError, as ``subprocess.run`` would, rather than surfacing
     as sandbox-exec's own exit status."""
 
@@ -627,20 +453,34 @@ def run_model_argv(
         if found:
             command[0] = found
             grant = interpreter_readable_roots(found)
-    with model_sandbox(work_dir, readable=(*readable, *grant), writable=writable) as (prefix, env):
-        run_env = {**env, **(extra_env or {})}
-        # Raised after the barrier check, so a missing barrier is reported first.
-        if not found or not os.path.exists(found):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
-        # Nothing the command started outlives it in its process group (#3017).
-        return run_reaping_process_group(
-            [*prefix, *command],
-            cwd=str(_granted_work_dir(work_dir)),
-            env=run_env,
-            capture_output=True,
-            text=text,
-            timeout=timeout,
-        )
+    result: subprocess.CompletedProcess | None = None
+    ended_by: BaseException | None = None
+    try:
+        with model_sandbox(work_dir, readable=(*readable, *grant), writable=writable) as (
+            prefix,
+            env,
+        ):
+            run_env = {**env, **(extra_env or {})}
+            # Raised after the barrier check, so a missing barrier is reported first.
+            if not found or not os.path.exists(found):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
+            try:
+                # Nothing the command started outlives it in its process group (#3017).
+                result = run_reaping_process_group(
+                    [*prefix, *command],
+                    cwd=str(_granted_work_dir(work_dir)),
+                    env=run_env,
+                    capture_output=True,
+                    text=text,
+                    timeout=timeout,
+                )
+            except BaseException as exc:
+                ended_by = exc
+                raise
+    except PrivateAreaNotRemoved as exc:
+        exc.result, exc.interrupted_by = result, ended_by
+        raise
+    return result
 
 
 def run_model_command_string(
@@ -650,12 +490,23 @@ def run_model_command_string(
     the work dir path the sandbox granted."""
 
     readable = _command_readable_roots(command, Path(work_dir).resolve())
-    with model_sandbox(work_dir, readable=readable) as (prefix, env):
-        return run_command_string(
-            command,
-            cwd=_granted_work_dir(work_dir),
-            env=env,
-            timeout=timeout,
-            argv_prefix=prefix,
-            reap_process_group=True,
-        )
+    result: subprocess.CompletedProcess[str] | None = None
+    ended_by: BaseException | None = None
+    try:
+        with model_sandbox(work_dir, readable=readable) as (prefix, env):
+            try:
+                result = run_command_string(
+                    command,
+                    cwd=_granted_work_dir(work_dir),
+                    env=env,
+                    timeout=timeout,
+                    argv_prefix=prefix,
+                    reap_process_group=True,
+                )
+            except BaseException as exc:
+                ended_by = exc
+                raise
+    except PrivateAreaNotRemoved as exc:
+        exc.result, exc.interrupted_by = result, ended_by
+        raise
+    return result

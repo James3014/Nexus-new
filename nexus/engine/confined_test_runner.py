@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.sandboxed_lane import SandboxError, confinement, copy_tree_no_symlinks, in_tree
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 # Hidden verifier tests that must never be copied, named in argv, or read by a candidate run.
 HIDDEN_TEST_BASENAMES: tuple[str, ...] = ("test_hidden.py",)
@@ -240,7 +241,11 @@ def run_confined_test(
         return result
     finally:
         result["duration_sec"] = round(time.monotonic() - start, 4)
-        shutil.rmtree(sandbox_dir, ignore_errors=True)
+        # The candidate's command wrote here: removed by descriptor, and a leftover is reported
+        # in the result instead of staying behind unseen (#3281).
+        cleanup_error = remove_untrusted_tree_quietly(sandbox_dir)
+        if cleanup_error:
+            result["cleanup_error"] = cleanup_error
 
 
 DIR_COPY_PYTEST_CONFIG = ".nexus-confined-pytest.ini"
@@ -262,6 +267,7 @@ def run_pytest_dir_copy(
 
     source = Path(source_dir).resolve()
     staging = Path(tempfile.mkdtemp(prefix="nexus-confined-dir-")).resolve()
+    outcome: dict[str, Any] | None = None
     try:
         for entry in sorted(source.iterdir()):
             if entry.name.startswith(".") or entry.is_symlink() or not entry.is_file():
@@ -281,12 +287,15 @@ def run_pytest_dir_copy(
             "--",
             Path(test_name).name,
         ]
-        return run_confined_test(
+        outcome = run_confined_test(
             staging,
             command=command,
             forbidden_paths=forbidden_paths,
             forbidden_names=(),
             timeout_sec=timeout_sec,
         )
+        return outcome
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        cleanup_error = remove_untrusted_tree_quietly(staging)
+        if cleanup_error and outcome is not None:
+            outcome["cleanup_error"] = cleanup_error
