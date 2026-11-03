@@ -235,3 +235,61 @@ def test_agy_reaper_removal_failure_is_logged(tmp_path, monkeypatch, caplog):
         assert agy_worker_account.reap_orphaned_worker_run(receipt) is True
     assert seen
     assert "AGY_WORKER_RUN_ROOT_REMOVE_FAILED" in caplog.text
+
+
+def _set_aside(path):
+    """What the shared cleanup does with a tree it cannot remove: rename, report."""
+    aside = Path(f"{path}.stale-{os.getpid()}")
+    os.rename(path, aside)
+    return f"tree_not_removed:{aside.name}"
+
+
+def test_agy_worker_boundary_set_aside_run_root_is_leftover_and_receipt_says_not_removed(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(agy_worker_account.KEEP_RUN_ROOT_ENV, raising=False)
+    monkeypatch.setattr(cli_worker, "release_run", lambda tag: None)
+    monkeypatch.setattr(agy_worker_account, "remove_untrusted_tree_quietly", _set_aside)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    boundary = _bare_boundary(agy_worker_account.AgyWorkerAccountBoundary, run_root, tmp_path)
+    boundary.leftover_run_root = None
+    boundary._run_root_remove_error = None
+    del boundary._emit_cleanup_receipt  # use the real receipt writer, captured below
+    boundary.receipt_context = {"operation_id": "o", "attempt": 1}
+    boundary._receipt_events = {"WORKER_SWEEP", "WORKER_LAUNCH"}
+    boundary._credentials_scrubbed = False
+    boundary.worker_failure = None
+    emitted = {}
+    boundary._emit_receipt = lambda event, **fields: emitted.update({event: fields})
+    boundary.cleanup()
+    assert boundary.leftover_run_root == str(run_root)
+    assert emitted["WORKER_CLEANUP"]["run_root_removed"] is False
+
+
+def test_agy_orphan_gc_retries_a_set_aside_root_and_does_not_report_a_failed_removal(
+    tmp_path, monkeypatch
+):
+    runs = _gc_setup(tmp_path, monkeypatch, deep=False)
+    root = runs / ("b" * 32)
+    later = time.time() + 10**6
+    monkeypatch.setattr(agy_worker_account, "remove_untrusted_tree_quietly", _set_aside)
+    removed = agy_worker_account.gc_unreferenced_worker_run_roots(set(), runs_dir=runs, now=later)
+    aside = runs / f"{root.name}.stale-{os.getpid()}"
+    assert removed == [] and aside.is_dir() and not root.exists()
+    monkeypatch.undo()
+    monkeypatch.setattr(agy_worker_account, "_worker_user_has_no_process", lambda *a, **k: True)
+    monkeypatch.setattr(agy_worker_account, "sweep_run_root", lambda *a, **k: "CLEAN")
+    removed = agy_worker_account.gc_unreferenced_worker_run_roots(set(), runs_dir=runs, now=later)
+    assert removed == [str(aside)] and not aside.exists()
+
+
+def test_agy_orphan_gc_ignores_other_stale_looking_names(tmp_path, monkeypatch):
+    runs = _gc_setup(tmp_path, monkeypatch, deep=False)
+    for name in (("b" * 32) + ".stale-x", ("b" * 31) + ".stale-1", ("b" * 32) + ".stale-"):
+        (runs / name).mkdir()
+        os.utime(runs / name, (1, 1))
+    removed = agy_worker_account.gc_unreferenced_worker_run_roots(
+        set(), runs_dir=runs, now=time.time() + 10**6, limit=10
+    )
+    assert removed == [str(runs / ("b" * 32))]

@@ -321,6 +321,16 @@ PS_TIMEOUT_SECONDS = 10.0
 _RUN_TAG_DIGITS = frozenset("0123456789abcdef")
 
 
+def _is_run_root_name(name: str) -> bool:
+    """A 32-hex run tag, or ``<run tag>.stale-<pid>``: the exact name the shared cleanup
+    gives a run root it could not remove (#3281), so a later pass retries it."""
+
+    tag, dot, pid = name.partition(".stale-")
+    if dot and not (pid.isascii() and pid.isdigit()):
+        return False
+    return len(tag) == 32 and set(tag) <= _RUN_TAG_DIGITS
+
+
 def _worker_user_has_no_process(user: str, run_command: Callable[..., Any]) -> bool:
     """True only when ``ps`` positively reports that ``user`` owns no process.
 
@@ -373,7 +383,7 @@ def gc_unreferenced_worker_run_roots(
         candidates = []
         with os.scandir(runs_dir) as entries:
             for entry in entries:
-                if len(entry.name) != 32 or not set(entry.name) <= _RUN_TAG_DIGITS:
+                if not _is_run_root_name(entry.name):
                     continue
                 root = runs_dir_resolved / entry.name
                 info = root.lstat()
@@ -391,7 +401,11 @@ def gc_unreferenced_worker_run_roots(
             # must stop the pass rather than be swept.
             if not _worker_user_has_no_process(WORKER_USER, run_command):
                 break
-            if sweep_run_root(root, run_command=run_command) != "CLEAN":
+            # A ``.stale-<pid>`` root was swept before it was set aside; the wrapper only
+            # knows run tags, so it is not swept again.
+            if ".stale-" not in root.name and (
+                sweep_run_root(root, run_command=run_command) != "CLEAN"
+            ):
                 continue
             current = root.lstat()
             if (
@@ -403,7 +417,7 @@ def gc_unreferenced_worker_run_roots(
             remove_error = remove_untrusted_tree_quietly(root)
             if remove_error is not None:
                 _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_REMOVE_FAILED %s", remove_error)
-            if os.path.lexists(root):
+            if remove_error is not None or os.path.lexists(root):
                 _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_LEFTOVER root=%s", root)
             else:
                 _LOG.warning("AGY_WORKER_ORPHAN_RUN_ROOT_REMOVED root=%s", root)
@@ -520,7 +534,7 @@ def reap_orphaned_worker_run(
         remove_error = remove_untrusted_tree_quietly(root)
         if remove_error is not None:
             _LOG.warning("AGY_WORKER_RUN_ROOT_REMOVE_FAILED %s", remove_error)
-        if os.path.lexists(root):
+        if remove_error is not None or os.path.lexists(root):
             _LOG.warning("AGY_WORKER_RUN_ROOT_LEFTOVER_AFTER_CLEAN_SWEEP root=%s", root)
         return True
     except Exception:
@@ -1253,6 +1267,9 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
     workdir_identity: tuple[int, int] = (-1, -1)
     worker_failure: Optional[str] = None
     leftover_run_root: Optional[str] = None
+    # Error text of the last run-root removal (None: removed or not tried); the set-aside
+    # ``.stale-<pid>`` name hides a failure from a path check.
+    _run_root_remove_error: Optional[str] = field(default=None, repr=False)
     run_command: Callable[..., Any] = field(default=subprocess.run, repr=False)
     # sha256 of the reference wrapper that prepare_worker_account_boundary
     # verified against the installed copy (receipt field only).
@@ -1368,7 +1385,8 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
         failure = self.worker_failure
         self._emit_receipt(
             "WORKER_CLEANUP",
-            run_root_removed=not os.path.lexists(self.run_root),
+            run_root_removed=self._run_root_remove_error is None
+            and not os.path.lexists(self.run_root),
             credentials_scrubbed=self._credentials_scrubbed,
             # kind:reason only; later segments may name worker-chosen files
             worker_failure=":".join(failure.split(":", 2)[:2]) if failure else None,
@@ -1541,10 +1559,12 @@ class AgyWorkerAccountBoundary(AgyDispatchBoundary):
                 # run's processes gone with the per-run wrapper sweep instead of
                 # the coarse "the worker account owns no process" check.
                 if not (self._possibly_launched and self._swept is not True):
-                    remove_error = remove_untrusted_tree_quietly(self.run_root)
-                    if remove_error is not None:
-                        _LOG.warning("AGY_WORKER_RUN_ROOT_REMOVE_FAILED %s", remove_error)
-                if os.path.lexists(self.run_root):
+                    self._run_root_remove_error = remove_untrusted_tree_quietly(self.run_root)
+                    if self._run_root_remove_error is not None:
+                        _LOG.warning(
+                            "AGY_WORKER_RUN_ROOT_REMOVE_FAILED %s", self._run_root_remove_error
+                        )
+                if self._run_root_remove_error is not None or os.path.lexists(self.run_root):
                     self.leftover_run_root = str(self.run_root)
                     sys.stderr.write(
                         f"nexus-agy-dispatch: worker run dir left behind: {self.run_root}\n"
