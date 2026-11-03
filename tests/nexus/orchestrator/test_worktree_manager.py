@@ -2380,3 +2380,132 @@ def test_salvage_refuses_a_target_registered_with_another_controller(
         manager.create_salvage_snapshot(contract, lease, "attempt-1")
 
     assert (_controller_git_state(controller), _controller_git_state(other)) == before
+
+
+# ---------------------------------------------------------------------------
+# #3148: an unbound Target outside the Target root, and the workspace inventory
+# ---------------------------------------------------------------------------
+
+
+def _add_outside_worktree(sh2_repo, name):
+    wt = sh2_repo["controller"].parent / name
+    _git(sh2_repo["controller"], "worktree", "add", "-q", "--detach", str(wt))
+    return wt
+
+
+def test_unbound_target_outside_root_with_a_forged_git_file_is_refused(sh2_repo, sentinel_cwd):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    outside = sh2_repo["controller"].parent / "outside-target"
+    outside.mkdir()
+    (outside / ".git").write_text(f"gitdir: {controller / '.git'}\n", encoding="utf-8")
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager._status_bytes(outside)
+
+    assert _controller_git_state(controller) == before
+
+
+def test_unbound_outside_root_calls_that_are_not_targets_are_unchanged(sh2_repo, sentinel_cwd):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    assert manager._run_git(["rev-parse", "HEAD"], cwd=controller)
+    outside = _add_outside_worktree(sh2_repo, "outside-ok")
+    assert manager._status_bytes(outside) == b""
+
+
+def test_unbound_target_outside_root_does_not_run_a_repository_named_program(
+    sh2_repo, sentinel_cwd
+):
+    outside = _add_outside_worktree(sh2_repo, "outside-filter")
+    marker = outside.parent / "filter-ran"
+    script = outside.parent / "filter.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    script.chmod(0o755)
+    (outside / ".gitattributes").write_text("*.txt filter=evil\n", encoding="utf-8")
+    _git(outside, "config", "filter.evil.clean", str(script))
+    (outside / "src" / "allowed.txt").write_text("changed\n", encoding="utf-8")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+
+    with pytest.raises(RuntimeError):
+        manager._status_bytes(outside)
+
+    assert not marker.exists()
+
+
+def test_inventory_marks_one_broken_worktree_and_keeps_the_rest(sh2_repo, sentinel_cwd):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    good = _add_outside_worktree(sh2_repo, "inv-good")
+    bad = _add_outside_worktree(sh2_repo, "inv-bad")
+    (bad / ".git").write_text(f"gitdir: {controller.parent / 'missing-gitdir'}\n", encoding="utf-8")
+
+    inventory = manager.get_workspace_inventory(controller_root=controller)
+
+    entries = {w.path: w for w in inventory.worktrees}
+    assert entries[str(bad.resolve())].evidence_unavailable is True
+    assert entries[str(bad.resolve())].classification == "KEEP_DIRTY_OR_UNKNOWN"
+    assert entries[str(bad.resolve())].is_dirty is True
+    assert entries[str(bad.resolve())].disposition == "OWNER_DECISION_REQUIRED"
+    assert entries[str(good.resolve())].evidence_unavailable is False
+    assert entries[str(good.resolve())].is_dirty is False
+    assert entries[str(controller.resolve())].classification == "KEEP_CONTROLLER"
+
+
+def test_inventory_reads_worktrees_bound_to_its_controller(sh2_repo, sentinel_cwd, tmp_path):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", str(controller), str(other))
+    foreign = tmp_path / "foreign-wt"
+    _git(other, "worktree", "add", "-q", "--detach", str(foreign))
+    registration = next((other / ".git" / "worktrees").iterdir())
+    listed = _add_outside_worktree(sh2_repo, "inv-listed")
+    # Point the listed worktree at another repository's registration: valid on its own,
+    # but not this Controller's.
+    (listed / ".git").write_text(f"gitdir: {registration}\n", encoding="utf-8")
+    (registration / "gitdir").write_text(f"{listed / '.git'}\n", encoding="utf-8")
+
+    inventory = manager.get_workspace_inventory(controller_root=controller)
+
+    entries = {w.path: w for w in inventory.worktrees}
+    assert entries[str(listed.resolve())].evidence_unavailable is True
+    assert entries[str(listed.resolve())].blocker_reason == "status_evidence_unavailable"
+    assert entries[str(listed.resolve())].is_dirty is True
+    assert entries[str(listed.resolve())].disposition == "OWNER_DECISION_REQUIRED"
+
+
+def test_direct_completion_audit_blocks_when_one_worktree_status_is_unreadable(
+    sh2_repo, sentinel_cwd
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    bad = _add_outside_worktree(sh2_repo, "audit-bad")
+    (bad / ".git").write_text(f"gitdir: {controller.parent / 'missing-gitdir'}\n", encoding="utf-8")
+
+    audit = manager.audit_direct_completion(
+        controller_root=controller,
+        expected_head=_git(controller, "rev-parse", "HEAD"),
+        expected_branch="main",
+        allowed_files=["src/allowed.txt"],
+        task_states={},
+    )
+
+    assert f"owner_decision_required:{bad.resolve()}" in audit["blockers"], audit
+
+
+def test_unbound_target_outside_root_with_a_git_symlink_to_a_directory_is_refused(
+    sh2_repo, sentinel_cwd
+):
+    controller = sh2_repo["controller"]
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    outside = sh2_repo["controller"].parent / "outside-symlink"
+    outside.mkdir()
+    (outside / ".git").symlink_to(controller / ".git", target_is_directory=True)
+    before = _controller_git_state(controller)
+
+    with pytest.raises(RuntimeError, match="TARGET_GITDIR_UNTRUSTED"):
+        manager._status_bytes(outside)
+
+    assert _controller_git_state(controller) == before
