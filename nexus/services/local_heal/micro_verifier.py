@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ast
 import os
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
@@ -20,6 +19,7 @@ from nexus.engine.model_output_sandbox import (
     interpreter_readable_roots,
     run_model_argv,
 )
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
 from nexus.services.local_heal.repo_read import read_repo_text
 from nexus.services.local_heal.scratch_copy import copy_repo_entries
@@ -484,24 +484,32 @@ def micro_verify_in_scratch_copy(
             classifications=["env_blocked", "verifier_unavailable"],
         )
 
+    result: MicroVerifyResult | None = None
     try:
         try:
             copy_repo_entries(Path(repo_dir), Path(scratch_dir))
         except Exception as e:
-            return MicroVerifyResult(
+            result = MicroVerifyResult(
                 passed=False,
                 syntax_ok=False,
                 error_message="ENV_BLOCKED",
                 details=f"scratch copy failed: {e}",
                 classifications=["env_blocked", "verifier_unavailable"],
             )
-
-        return MicroVerifier.verify(
-            patch_content=patch_content,
-            repo_dir=scratch_dir,
-            patched_files=patched_files,
-            verifier_env_metadata=verifier_env_metadata,
-            env_taxonomy=env_taxonomy,
-        )
+        else:
+            result = MicroVerifier.verify(
+                patch_content=patch_content,
+                repo_dir=scratch_dir,
+                patched_files=patched_files,
+                verifier_env_metadata=verifier_env_metadata,
+                env_taxonomy=env_taxonomy,
+            )
     finally:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+        # The patched tests ran in this copy: a command may have locked entries (#3281).
+        cleanup_error = remove_untrusted_tree_quietly(scratch_dir)
+    assert result is not None
+    if cleanup_error is not None:
+        # Recorded, not raised: the verdict stands, the leftover is named.
+        result.details = f"{result.details}; scratch cleanup failed: {cleanup_error}".lstrip("; ")
+        result.classifications = [*result.classifications, "scratch_cleanup_failed"]
+    return result

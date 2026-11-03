@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from nexus.core.contained_write import drop_escaping_links
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 logger = logging.getLogger(__name__)
 
@@ -359,4 +360,6 @@ COPY . .
         if temp_root.is_symlink():
             logger.error("Refusing to remove symlinked sandbox temp root: %s", temp_root)
             return
-        shutil.rmtree(temp_root, ignore_errors=True)
+        # The verification run wrote into this tree: it may have locked entries (#3281).
+        if (error := remove_untrusted_tree_quietly(temp_root)) is not None:
+            logger.error("Sandbox temp root not removed: %s", error)

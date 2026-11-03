@@ -61,6 +61,7 @@ import pytest
 
 import nexus.orchestrator.runtime_coordination_bridge as bridge_module
 import nexus.orchestrator.self_hosted_task_service as service_module
+import nexus.orchestrator.self_hosted_task_service_parts.finalize_runtime as finalize_part
 from nexus.orchestrator.ambient_core import AmbientCoreVerdictBlocked
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt, VerifierEvidence
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
@@ -505,6 +506,7 @@ class _ProbeEnv:
         self.evidence: tuple[Any, ...] = (_evidence("pytest -q", exit_code=1),)
         self.failures: list[str] = []
         self.verifier_error: Optional[BaseException] = None
+        self.remove_result: Optional[str] = None  # what remove_untrusted_tree_quietly returns
         self.nothing_ran: Optional[str] = None
         env = self
 
@@ -513,8 +515,9 @@ class _ProbeEnv:
             env.scratch.mkdir()
             return str(env.scratch)
 
-        def rmtree(path: Any, ignore_errors: bool = False) -> None:
-            env.log.append(("rmtree", Path(path), ignore_errors))
+        def rmtree(path: Any) -> Optional[str]:
+            env.log.append(("rmtree", Path(path)))
+            return env.remove_result
 
         class Verifier:
             @staticmethod
@@ -541,7 +544,7 @@ class _ProbeEnv:
             return env.nothing_ran
 
         monkeypatch.setattr(service_module, "tempfile", SimpleNamespace(mkdtemp=mkdtemp))
-        monkeypatch.setattr(service_module, "shutil", SimpleNamespace(rmtree=rmtree))
+        monkeypatch.setattr(finalize_part, "remove_untrusted_tree_quietly", rmtree)
         monkeypatch.setattr(service_module, "CandidateVerifier", Verifier)
         monkeypatch.setattr(service_module, "_base_run_collected_nothing", nothing)
         self.controller = tmp_path / "ctl"
@@ -576,7 +579,7 @@ def test_probe_without_commands_fails_closed_and_removes_scratch(probe) -> None:
             "base_exit_codes": [],
             "required": True,
         }
-        assert probe.log == [("mkdtemp", "nexus-f2p-base-"), ("rmtree", probe.scratch, True)]
+        assert probe.log == [("mkdtemp", "nexus-f2p-base-"), ("rmtree", probe.scratch)]
 
 
 def test_probe_verified_call_order_and_arguments(probe) -> None:
@@ -599,7 +602,7 @@ def test_probe_verified_call_order_and_arguments(probe) -> None:
         ("manifest", ("pytest -q", "make t")),
         ("nothing_ran", 2, checkout),
         ("git", ("worktree", "remove", "--force", str(checkout)), root),
-        ("rmtree", probe.scratch, True),
+        ("rmtree", probe.scratch),
         ("git", ("worktree", "prune"), root),
     ]
 
@@ -697,6 +700,14 @@ def test_probe_removal_failure_overrides_verified(probe) -> None:
     assert [entry[0] for entry in probe.log][-2:] == ["rmtree", "git"]  # prune still runs
 
 
+def test_probe_untrusted_tree_removal_failure_overrides_verified(probe) -> None:
+    probe.remove_result = "tree_not_removed:f2p-scratch.stale-1"
+    out = probe.run()
+    assert out["status"] == "BASE_NOT_PHYSICAL_FAIL"
+    assert out["cleanup_error"] == "tree_not_removed:f2p-scratch.stale-1"
+    assert [entry[0] for entry in probe.log][-2:] == ["rmtree", "git"]  # prune still runs
+
+
 def test_probe_prune_failure_is_ignored(probe) -> None:
     manager = _Manager(probe.log, fail={"worktree:prune": RuntimeError("nope")})
     out = probe.run(manager)
@@ -754,9 +765,9 @@ def test_late_names_in_the_probe(probe, monkeypatch) -> None:
     )
     removed: list[Any] = []
     monkeypatch.setattr(
-        service_module,
-        "shutil",
-        SimpleNamespace(rmtree=lambda p, ignore_errors: removed.append(Path(p))),
+        finalize_part,
+        "remove_untrusted_tree_quietly",
+        lambda p: removed.append(Path(p)),
     )
     probe.run()
     assert removed == [late_scratch]

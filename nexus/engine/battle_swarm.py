@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import logging
 import concurrent.futures
@@ -7,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 
 from nexus.core.hardened_git import repository_config_can_start_a_program, run_hardened_git
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ class BattleSwarm:
         if worktree_path.exists():
             self._git_quietly("worktree", "remove", "-f", str(worktree_path))
             if worktree_path.exists():
-                shutil.rmtree(worktree_path, ignore_errors=True)
+                # An earlier run's worker wrote here: it may have locked entries (#3281).
+                if (error := remove_untrusted_tree_quietly(worktree_path)) is not None:
+                    logger.error(f"Old worktree for {strategy_name} not removed: {error}")
             
         try:
             for args in (("branch", "-f", branch_name, "HEAD"), ("worktree", "add", str(worktree_path), branch_name)):
