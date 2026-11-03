@@ -7336,5 +7336,5 @@ def test_foreground_subdir_write_scope_resolves_against_the_top_level(
         operation_hook=events.append,
     )
 
-    assert code == 0
+    assert code == 0, events
     assert not [e for e in events if e.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"]
