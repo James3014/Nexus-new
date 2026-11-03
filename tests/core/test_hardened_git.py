@@ -886,7 +886,9 @@ def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp
     assert shown.returncode == 0 and shown.stdout.strip() == "recorded"
 
 
-def test_both_git_argv_builders_share_one_caller_key_list():
+def test_both_git_argv_builders_allow_the_same_caller_keys():
+    # Two copies on purpose: nexus.core does not import the orchestrator module, which the
+    # host runtime snapshot does not carry (#3257). They must not drift apart.
     from nexus.orchestrator import measure_external_target as external
 
-    assert hardened_git.CALLER_CONFIG_KEYS is external.CALLER_CONFIG_KEYS
+    assert hardened_git._CALLER_CONFIG_KEYS == external._CALLER_CONFIG_KEYS

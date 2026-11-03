@@ -13,8 +13,6 @@ import threading
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
-from nexus.orchestrator.measure_external_target import CALLER_CONFIG_KEYS
-
 GIT_TIMEOUT_S = 120.0
 # Command-line config outranks repository config: hooks and fsmonitor are switched off,
 # submodules (whose own config is not checked) are not recursed into, and a commit is not
@@ -35,6 +33,14 @@ _GIT_OVERRIDES = (
 # any other option ahead of the subcommand (``--config-env``, ``-C``, ``--exec-path`` ...),
 # is refused. Keys are matched as git does, ignoring case.
 _PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in _GIT_OVERRIDES[1::2])
+_CALLER_CONFIG_KEYS = frozenset({
+    "user.name",
+    "user.email",
+    "author.name",
+    "author.email",
+    "committer.name",
+    "committer.email",
+})
 # Subcommand options that keep repository-named programs from running even if the config
 # check below missed them: no external diff or textconv driver, no signature verification
 # (log.showSignature runs gpg.program), no commit hooks, and no descent into a populated
@@ -89,13 +95,13 @@ def _caller_config_end(args: Tuple[str, ...]) -> int:
 
 def _refused_caller_option(args: Tuple[str, ...]) -> Optional[str]:
     """The first option ahead of the subcommand the caller may not pass (see
-    ``CALLER_CONFIG_KEYS``), named without its value; None when there is none."""
+    ``_CALLER_CONFIG_KEYS``), named without its value; None when there is none."""
     at = 0
     while at < len(args) and args[at].startswith("-"):
         if args[at] != "-c" or at + 1 >= len(args):
             return args[at].split("=", 1)[0]
         key = args[at + 1].split("=", 1)[0].lower()
-        if key not in CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
+        if key not in _CALLER_CONFIG_KEYS and key not in _PINNED_CONFIG_KEYS:
             return f"-c {key}"
         at += 2
     return None
@@ -207,7 +213,8 @@ def config_names_a_repository_program(names: List[str]) -> bool:
     remotes (a missing object is fetched, which can start a transport program), and
     ``diff.submodule`` (a diff or log then descends into a populated submodule and reads its
     config, which the runner's ``--ignore-submodules=all`` only prevents while no caller flag
-    behind it turns submodules back on, #3227). Harmless keys such as ``diff.algorithm`` are
+    behind it turns submodules back on, #3227), and one status-format setting that does the same
+    for ``status`` (#3257). Harmless keys such as ``diff.algorithm`` are
     not refused."""
     for name in (raw.lower() for raw in names):
         if name.startswith(("filter.", "gpg.", "hook.", "include.", "includeif.")):
