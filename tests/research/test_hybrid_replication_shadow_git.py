@@ -624,3 +624,59 @@ def test_seal_refuses_when_head_moved_off_the_revision(sandbox: Path) -> None:
         live.seal_shadow_candidate(source, revision=revision)
     sealing = live.seal_shadow_candidate(source, revision=_git(source, "rev-parse", "HEAD").strip())
     assert sealing["scope_valid"] is True
+
+
+def _candidate_with_shadow_change(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, tamper: Any
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / "f.txt").write_text("changed by agent\n", encoding="utf-8")
+        if tamper is not None:
+            tamper(live._shadow_git_dir(cwd))
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    return live._run_agy_candidate(repo=repo, revision=revision, prompt="edit", binding={})
+
+
+def test_seal_is_refused_when_a_new_file_appears_in_the_shadow_git_dir(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        (git_dir / "planted").write_text("x", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_is_refused_when_a_ref_in_the_shadow_git_dir_is_rewritten(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def tamper(git_dir: Path) -> None:
+        (git_dir / "refs" / "heads" / "other").write_text("0" * 40 + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="shadow_git_dir_changed"):
+        _candidate_with_shadow_change(sandbox, monkeypatch, tamper)
+
+
+def test_seal_still_proceeds_when_the_shadow_git_dir_is_untouched(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt, _ = _candidate_with_shadow_change(sandbox, monkeypatch, None)
+
+    assert receipt["changed_files"] == ["f.txt"]
+
+
+def test_plan_mode_counts_a_changed_shadow_git_dir_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (live._shadow_git_dir(cwd) / "planted").write_text("x", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True

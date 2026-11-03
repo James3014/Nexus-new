@@ -1054,6 +1054,7 @@ def _run_codex_candidate(
         # Isolated clone (not a worktree): a worktree shares the parent's refs and
         # object store, so the agent could read branches that postdate the revision.
         _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
@@ -1091,7 +1092,10 @@ def _run_codex_candidate(
                 parse_error = f"{type(exc).__name__}:{exc}"
 
             sealing = seal_shadow_candidate(
-                source, git_dir=_shadow_git_dir(source), revision=revision
+                source,
+                git_dir=_shadow_git_dir(source),
+                revision=revision,
+                git_dir_digest=shadow_digest,
             )
             changed_files = sealing["changed_files"]
             oversized_untracked = sealing["oversized_untracked_files"]
@@ -1411,6 +1415,7 @@ def seal_shadow_candidate(
     allowed_paths: Sequence[str] | None = None,
     max_file_size: int = 5_000_000,
     revision: str | None = None,
+    git_dir_digest: str | None = None,
 ) -> dict[str, Any]:
     """Seal the agent's changes in ``source``. Git is pinned to ``git_dir`` (a shadow git dir
     the harness created beside ``source``; default: the git dir inside ``source``) and runs
@@ -1420,6 +1425,10 @@ def seal_shadow_candidate(
     if git_dir is None:
         raise RuntimeError("shadow_candidate_status_failed")
     pin: dict[str, Any] = {"git_dir": git_dir, "separate_git_dir": separate}
+    if git_dir_digest is not None and _shadow_git_dir_digest(git_dir) != git_dir_digest:
+        # Anything that changed the shadow git dir since before dispatch (including a link
+        # made, written through and removed) is refused before git reads it.
+        raise RuntimeError("shadow_git_dir_changed")
     if repository_config_can_start_a_program(source, **pin):
         raise RuntimeError("shadow_candidate_config_refused")
     if revision is not None:
@@ -1723,6 +1732,39 @@ def _shadow_git_dir(source: Path) -> Path:
     return source.parent / f"{source.name}.git"
 
 
+def _shadow_git_dir_digest(git_dir: Path) -> str:
+    """Digest of a shadow git dir: relative path, file type and content for every entry.
+    Under ``objects/`` only the name and size count (loose object and pack names are
+    content hashes). Compared before and after dispatch, it sees edits that a
+    point-in-time link check cannot."""
+    digest = hashlib.sha256()
+
+    def add(*parts: str) -> None:
+        for part in parts:
+            digest.update(part.encode("utf-8", "surrogateescape"))
+            digest.update(b"\0")
+
+    for current, dirs, files in os.walk(git_dir, followlinks=False):
+        dirs.sort()
+        base = Path(current)
+        for name in sorted(dirs + files):
+            path = base / name
+            rel = path.relative_to(git_dir).as_posix()
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                add(rel, "link", os.readlink(path))
+            elif stat.S_ISDIR(info.st_mode):
+                add(rel, "dir")
+            elif stat.S_ISREG(info.st_mode):
+                if rel.startswith("objects/"):
+                    add(rel, "file", str(info.st_size))
+                else:
+                    add(rel, "file", _sha256_file(path))
+            else:
+                add(rel, "other")
+    return digest.hexdigest()
+
+
 def _prepare_shadow_checkout(
     *,
     repo: Path,
@@ -1849,6 +1891,7 @@ def _run_agy_b_fallback(
         prospective_guard=prospective_guard,
         effect_slot="b-fallback",
     ) as source:
+        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1865,7 +1908,8 @@ def _run_agy_b_fallback(
             )
             git_dir = _shadow_git_dir(source)
             # A git dir that now names a program, or a status that fails, counts as mutated.
-            mutated = repository_config_can_start_a_program(
+            mutated = _shadow_git_dir_digest(git_dir) != shadow_digest
+            mutated = mutated or repository_config_can_start_a_program(
                 source, git_dir=git_dir, separate_git_dir=True
             )
             if not mutated:
@@ -1916,6 +1960,7 @@ def _run_agy_candidate(
         prospective_guard=prospective_guard,
         effect_slot="c",
     ) as source:
+        shadow_digest = _shadow_git_dir_digest(_shadow_git_dir(source))
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1935,6 +1980,7 @@ def _run_agy_candidate(
                 git_dir=_shadow_git_dir(source),
                 allowed_paths=allowed_paths,
                 revision=revision,
+                git_dir_digest=shadow_digest,
             )
             extra_checks = None
             if not sealing["scope_valid"]:
