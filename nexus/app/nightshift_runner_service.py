@@ -1426,7 +1426,8 @@ class AutoResearchNightShift:
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
         git there is not trusted or the commit did not land."""
-        if self._workpath_git(workpath, "add", ".") is None:
+        added = self._workpath_git(workpath, "add", ".")
+        if added is None or added.returncode != 0:
             return False
         committed = self._workpath_git(
             workpath,
