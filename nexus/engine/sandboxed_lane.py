@@ -704,8 +704,10 @@ class Confinement:
             except OSError:
                 continue
             self._root_metadata[root] = (stat.S_IMODE(info.st_mode), getattr(info, "st_flags", 0))
-        # Roots whose mode or flags a command changed and that were restored.
+        # Roots whose mode or flags a command changed and that were restored, and the ones
+        # whose restore failed (with the error), so a caller can tell the two apart.
         self.root_restorations: list[str] = []
+        self.root_restore_failures: list[str] = []
 
     def restore_root_metadata(self) -> None:
         for root, (mode, flags) in self._root_metadata.items():
@@ -713,11 +715,13 @@ class Confinement:
                 info = os.lstat(root)
                 if stat.S_IMODE(info.st_mode) == mode and getattr(info, "st_flags", 0) == flags:
                     continue
+                # Flags first: an immutable flag also refuses the chmod that follows.
                 chflags = getattr(os, "chflags", None)  # BSD/macOS only
                 if chflags is not None:
                     chflags(root, flags)
                 os.chmod(root, mode)
-            except OSError:
+            except OSError as exc:
+                self.root_restore_failures.append(f"{root}: {type(exc).__name__}: {exc}")
                 continue
             if str(root) not in self.root_restorations:
                 self.root_restorations.append(str(root))
