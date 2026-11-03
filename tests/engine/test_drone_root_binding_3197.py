@@ -25,6 +25,7 @@ import nexus.core.contained_write as cw
 import nexus.core.drone_engine as drone_engine
 import nexus.engine.model_output_sandbox as mos
 import nexus.engine.sandboxed_lane as lane
+import nexus.engine.untrusted_tree_cleanup as utc
 from nexus.core.contained_write import root_identity
 from nexus.core.drone_engine import DroneToolBox
 from nexus.engine.sandboxed_lane import os_sandbox_available, sbpl_path
@@ -498,7 +499,7 @@ def test_cleanup_never_acts_through_an_entry_swapped_for_a_link_during_the_walk(
     (blocked / "f").write_text("x", encoding="utf-8")
     os.chmod(blocked, 0o500)  # the first plain removal fails here, so the walk runs
     target, link_to = ("d1", outside) if swapped == "directory" else ("f", victim)
-    real = mos._make_removable_at
+    real = utc._make_removable_at
     swaps: list[str] = []
 
     def swap_after_look(dir_fd, name, *, is_dir):
@@ -508,7 +509,7 @@ def test_cleanup_never_acts_through_an_entry_swapped_for_a_link_during_the_walk(
             swaps.append(name)
         return real(dir_fd, name, is_dir=is_dir)
 
-    monkeypatch.setattr(mos, "_make_removable_at", swap_after_look)
+    monkeypatch.setattr(utc, "_make_removable_at", swap_after_look)
 
     mos._remove_private_dir(str(private))
 
@@ -562,7 +563,7 @@ def test_removing_a_very_deep_private_tree_with_a_locked_leaf_3238(tmp_path, mon
     # a soft open-file limit far below the depth makes it the only way through: a walk that
     # kept one descriptor per level would run out and set the area aside.
     resource = pytest.importorskip("resource")
-    monkeypatch.setattr(mos, "_WALK_MAX_OPEN", 4)
+    monkeypatch.setattr(utc, "_WALK_MAX_OPEN", 4)
     private = tmp_path / "private"
     _deep_locked_tree(private, 1500)
 
@@ -605,15 +606,15 @@ def test_a_first_removal_that_overflows_the_stack_falls_through_to_the_walk_3238
 def test_deep_tree_cleanup_moves_past_a_taken_move_name_3238(tmp_path, monkeypatch):
     # The command can leave entries under any name, including the one the walk would use to
     # move a deep subtree up; the walk takes the next number instead of giving up (#3238).
-    monkeypatch.setattr(mos, "_WALK_MAX_OPEN", 4)
-    monkeypatch.setattr(mos, "_move_token", lambda: "fixed")
+    monkeypatch.setattr(utc, "_WALK_MAX_OPEN", 4)
+    monkeypatch.setattr(utc, "_move_token", lambda: "fixed")
     private = tmp_path / "private"
     _deep_locked_tree(private, 40)
     # The occupiers are locked, non-empty directories, so the first plain removal cannot
     # delete them whatever order it lists entries in: both names are still taken when the
     # walk needs them.
     for n in (1, 2):
-        taken = private / mos._move_name("fixed", n)
+        taken = private / utc._move_name("fixed", n)
         taken.mkdir()
         (taken / "keep").write_text("taken by the command")
         taken.chmod(0o500)
@@ -628,7 +629,7 @@ def test_deep_tree_cleanup_moves_past_a_taken_move_name_3238(tmp_path, monkeypat
 
     mos._remove_private_dir(str(private))
 
-    assert renamed_to[0] == mos._move_name("fixed", 3)
+    assert renamed_to[0] == utc._move_name("fixed", 3)
 
     assert not private.exists()
     assert list(tmp_path.glob("private.stale-*")) == []
@@ -650,6 +651,36 @@ def test_private_area_that_still_cannot_be_removed_is_set_aside_and_reported_323
     try:
         with pytest.raises(mos.SandboxError, match=f"^private_area_not_removed:{aside.name}$"):
             mos._remove_private_dir(str(private))
+        assert not private.exists() and aside.is_dir()
+    finally:
+        monkeypatch.undo()
+        if aside.exists():
+            real_rmtree(aside)
+
+
+def test_a_second_removal_that_overflows_the_stack_is_set_aside_and_reported_3238(
+    tmp_path, monkeypatch
+):
+    # Both rmtree calls overflow the stack (a tree the walk cannot flatten): the area is set
+    # aside under its stale name and reported, with no RecursionError escaping (#3281).
+    private = tmp_path / "private"
+    private.mkdir()
+    (private / "leftover").write_text("x")
+    real_rmtree = mos.shutil.rmtree
+    calls = []
+
+    def rmtree_overflows(path, *a, **k):
+        calls.append(path)
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(mos.shutil, "rmtree", rmtree_overflows)
+    aside = tmp_path / f"private.stale-{os.getpid()}"
+    try:
+        with pytest.raises(
+            mos.PrivateAreaNotRemoved, match=f"^private_area_not_removed:{aside.name}$"
+        ):
+            mos._remove_private_dir(str(private))
+        assert len(calls) == 2
         assert not private.exists() and aside.is_dir()
     finally:
         monkeypatch.undo()

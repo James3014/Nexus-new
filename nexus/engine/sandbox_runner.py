@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.contained_write import PathContainmentError, read_bytes_in_root
 from nexus.core.state_root import persistent_state_root
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 logger = logging.getLogger(__name__)
 
@@ -784,7 +785,9 @@ socket.socket.connect = _guarded_socket_connect
             return self._write_result(run_dir, result_payload, run_dir_identity)
         finally:
             if cleanup:
-                shutil.rmtree(scratch_dir, ignore_errors=True)
+                leftover = remove_untrusted_tree_quietly(scratch_dir)
+                if leftover:
+                    logger.warning("sandbox scratch dir not removed: %s", leftover)
 
     def _collect_runtime_signals(self, target_dir: Path) -> tuple[List[str], int]:
         """Read runtime event log and derive executed phases + phantom triggers."""
@@ -896,4 +899,6 @@ socket.socket.connect = _guarded_socket_connect
             )
         finally:
             # 4. 清理: the report is built above; nothing reads the clone afterwards.
-            shutil.rmtree(scratch_dir, ignore_errors=True)
+            leftover = remove_untrusted_tree_quietly(scratch_dir)
+            if leftover:
+                logger.warning("challenge scratch dir not removed: %s", leftover)

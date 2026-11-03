@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
 from nexus.core.contained_write import PathContainmentError, write_text_in_root
+from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 from nexus.research.flow.rlm_trace import safe_trace_slug
+
+logger = logging.getLogger(__name__)
 
 
 def candidate_summary_has_swarm_evidence(summary: dict[str, Any]) -> bool:
@@ -262,10 +265,10 @@ def ultra_review_gate_evidence(
         gate_passed, failures = evaluate_report(payload, check_artifacts=True)
         sandbox_path = payload.get("sandbox_path")
         if sandbox_path:
-            try:
-                shutil.rmtree(Path(str(sandbox_path)) / "worktree")
-            except OSError:
-                pass
+            # The dry-run checks ran commands in this worktree (#3281).
+            leftover = remove_untrusted_tree_quietly(Path(str(sandbox_path)) / "worktree")
+            if leftover:
+                logger.warning("route-gate sandbox worktree not removed: %s", leftover)
         return {
             "recommended": True,
             "invoked": True,

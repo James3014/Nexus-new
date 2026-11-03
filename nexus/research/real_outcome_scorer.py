@@ -1300,12 +1300,9 @@ def clean_scratch_tmp(tmp: Path, keep: Iterable[str] = ()) -> list[str]:
             if entry.name in keep and entry.is_file(follow_symlinks=False):
                 continue
             if entry.is_dir(follow_symlinks=False):
-                shutil.rmtree(path, ignore_errors=True)
-                if os.path.lexists(path):
-                    _make_tree_writable(path)
-                    shutil.rmtree(path, ignore_errors=True)
-                if os.path.lexists(path):
-                    errors.append(f"rmtree:{entry.name}"[:300])
+                leftover = _remove_untrusted_tree_quietly(path)
+                if leftover:
+                    errors.append(f"rmtree:{entry.name}:{leftover}"[:300])
             else:
                 path.unlink()
         except OSError as exc:
@@ -1328,6 +1325,15 @@ def _chmod_dir_no_follow(path: str) -> None:
             os.chmod(path, 0o700)
     except (OSError, NotImplementedError):
         pass
+
+
+def _remove_untrusted_tree_quietly(path: Path) -> str | None:
+    """Remove a tree a scored test wrote to (iterative, locked entries made removable); the
+    error text when it could not be removed, else None (#3281). Imported late like the other
+    ``nexus.engine`` helpers here."""
+    from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
+
+    return remove_untrusted_tree_quietly(path)
 
 
 def _make_tree_writable(root: Path) -> None:
@@ -2933,7 +2939,9 @@ def _score_task(
         elif not ctx.keep_trees:
             for wt in wts.values():
                 repo.remove_worktree(wt)
-            shutil.rmtree(trees_dir, ignore_errors=True)
+            leftover = _remove_untrusted_tree_quietly(trees_dir)
+            if leftover:
+                timing["trees_cleanup_error"] = leftover
         # A6: TMPDIR and HOME are emptied after every task (also with keep_trees), so a
         # leaky test cannot fill the disk across tasks. Their sizes before are recorded.
         tmp_bytes, home_bytes, errors = ctx.runner.clean_tmp()
@@ -2959,10 +2967,9 @@ def _retire_os_scoring(
     timing["reaped_pids"] = [*runner.reaped_pids, *runner.reap_survivors(prefixes)]
     timing["reap_reclaimed_bytes"] = runner.reclaimed_bytes
     if trees_trash is not None:
-        shutil.rmtree(trees_trash, ignore_errors=True)
-        if os.path.lexists(trees_trash):
-            _make_tree_writable(trees_trash)
-            shutil.rmtree(trees_trash, ignore_errors=True)
+        leftover = _remove_untrusted_tree_quietly(trees_trash)
+        if leftover:
+            timing["trees_cleanup_error"] = leftover
         repo.git("worktree", "prune", check=False)
 
 
