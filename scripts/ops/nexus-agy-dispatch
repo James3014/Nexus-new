@@ -5899,6 +5899,9 @@ def dispatch_run(
                 observed_changed_paths=attempt_changed_paths,
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+            no_tool_violation = bool(
+                permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
+            )
             # #3335: declared write paths need an observation to check against.
             # No baseline or no read-back (``None``) is refused, not reported as
             # UNCONSTRAINED.  No write_paths keeps the cwd-outside-git behaviour.
@@ -5908,9 +5911,8 @@ def dispatch_run(
                 and code == 0
                 and not timed_out
                 and not target_replaced
-            )
-            no_tool_violation = bool(
-                permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
+                and not permission_blocked
+                and not no_tool_violation
             )
             no_tool_refused_calls = 0
             # Without a source observation (``None``: cwd outside git, or the
