@@ -1720,6 +1720,7 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # #3335
     target = work / "target.py"
     coordinator = _WriteScopeCoordinator(home)
     settings = home / ".gemini" / "antigravity-cli" / "settings.json"
@@ -4662,6 +4663,7 @@ def test_permission_profile_preflight_and_journal_projection(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # #3335
     target = work / "target.py"
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
