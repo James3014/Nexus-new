@@ -65,6 +65,9 @@ def zero_trust_v2_candidate_key(row: Mapping[str, Any]) -> tuple[str, str]:
     )
 
 
+_IDENTITY_FIELDS = ("capability_id", "source_skill_id", "row_id", "arm_id")
+
+
 def verified_zero_trust_v2_proof(
     row: Mapping[str, Any], *, signing_secret: str | None
 ) -> tuple[dict[str, Any] | None, list[str]]:
@@ -82,6 +85,10 @@ def verified_zero_trust_v2_proof(
     if not receipt_ok:
         return None, ["receipt_not_verified"]
     inputs = row["receipt_signature_inputs"]
+    # A validly signed receipt without the identity fields is one bad row, not a failed report
+    # (#3372).
+    if any(field not in inputs for field in _IDENTITY_FIELDS):
+        return None, ["receipt_identity_missing"]
     arm_type = str(row.get("arm_type") or "")
     bound = (
         str(inputs.get("row_id") or "") == str(row.get("row_id") or "")
@@ -109,6 +116,13 @@ def verified_zero_trust_v2_proof(
         return None, ["receipt_kind_unknown"]
     return {
         "key": (str(inputs["capability_id"]), str(inputs["source_skill_id"])),
+        # One problem's evidence, whatever round or signature it came from (#3362).
+        "identity": (
+            str(inputs["capability_id"]),
+            str(inputs["source_skill_id"]),
+            str(inputs.get("row_id") or ""),
+            str(inputs.get("arm_id") or ""),
+        ),
         "kind": kind,
         "proof_id": str(row.get("receipt_signature")),
         "row_id": row.get("row_id"),
@@ -124,32 +138,58 @@ def _new_counts() -> dict[str, Any]:
         "rejected_rows": 0,
         "rejected_row_refs": [],
         "duplicate_proof_count": 0,
+        "duplicate_identity_count": 0,
+        "duplicate_identity_row_refs": [],
         "unsigned_count_mismatch_row_refs": [],
     }
+
+
+def _mismatch_value(row: Mapping[str, Any]) -> int | None:
+    """The unsigned ``v2_trust_mismatch_count`` as a non-negative int (absent is 0), or None
+    when it is out of range or not an integer (#3362)."""
+    value = row.get("v2_trust_mismatch_count")
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def derive_zero_trust_v2_signed_counts(
     rows: Iterable[Mapping[str, Any]], *, signing_secret: str | None
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Per candidate, the v2 evidence and negative-control counts derived only from verified,
-    de-duplicated signed receipts: each proof counts once, whatever the row columns say (#3355).
-    Shared by the accumulation report and the promotion evaluator."""
+    de-duplicated signed receipts: each proof counts once, whatever the row columns say (#3355),
+    and each signed identity (capability, source skill, row, arm) counts once across rounds and
+    signatures; the merged repeats are listed, not dropped silently (#3362). Shared by the
+    accumulation report and the promotion evaluator."""
     by_key: dict[tuple[str, str], dict[str, Any]] = {}
     seen: set[str] = set()
+    seen_identities: set[tuple[str, str, str, str]] = set()
     for row in rows:
         if not isinstance(row, Mapping):
             continue
         proof, _reasons = verified_zero_trust_v2_proof(row, signing_secret=signing_secret)
-        if proof is None:
+        mismatch = _mismatch_value(row)
+        if proof is None or mismatch is None:
             item = by_key.setdefault(zero_trust_v2_candidate_key(row), _new_counts())
             item["rejected_rows"] += 1
             item["rejected_row_refs"].append(row.get("row_id"))
             continue
         item = by_key.setdefault(proof["key"], _new_counts())
+        # Not signed; it can only block, and the producer always writes 0. Out-of-range values
+        # reject the row above, so a negative value cannot cancel another row's mismatch; a
+        # repeat still adds its mismatch, so merging repeats can only block more (#3362).
+        item["v2_trust_mismatch_count"] += mismatch
         if proof["proof_id"] in seen:
             item["duplicate_proof_count"] += 1
             continue
         seen.add(proof["proof_id"])
+        if proof["identity"] in seen_identities:
+            item["duplicate_identity_count"] += 1
+            item["duplicate_identity_row_refs"].append(proof["row_id"])
+            continue
+        seen_identities.add(proof["identity"])
         item["row_refs"].append(proof["row_id"])
         credited_v2 = 1 if proof["kind"] == V2_EVIDENCE_KIND else 0
         if proof["kind"] == NEGATIVE_CONTROL_BLOCK_KIND:
@@ -159,8 +199,6 @@ def derive_zero_trust_v2_signed_counts(
         item["v2_evidence_count"] += credited_v2
         if int(row.get("v2_evidence_count") or 0) != credited_v2:
             item["unsigned_count_mismatch_row_refs"].append(proof["row_id"])
-        # Not signed; it can only block, and the producer always writes 0.
-        item["v2_trust_mismatch_count"] += int(row.get("v2_trust_mismatch_count") or 0)
     return by_key
 
 
@@ -176,7 +214,8 @@ def evaluate_zero_trust_v2_promotion_candidate(
     reasons: list[str] = []
     security_contract_version = str(row.get("security_contract_version") or "")
     promotion_credit_source = str(row.get("promotion_credit_source") or "")
-    v2_trust_mismatch_count = int(row.get("v2_trust_mismatch_count") or 0)
+    own_mismatch = _mismatch_value(row)
+    v2_trust_mismatch_count = own_mismatch if own_mismatch is not None else -1
     secret_reasons = _secret_reasons(row, signing_secret=signing_secret)
     proofs = [
         row,
@@ -211,7 +250,7 @@ def evaluate_zero_trust_v2_promotion_candidate(
     claimed = row if secret_reasons else counts
     if int(claimed.get("v2_evidence_count") or 0) < min_v2_evidence_count:
         reasons.append("insufficient_v2_evidence")
-    if v2_trust_mismatch_count != 0:
+    if v2_trust_mismatch_count != 0 or int(counts["v2_trust_mismatch_count"]) != 0:
         reasons.append("v2_trust_mismatch_nonzero")
     if int(claimed.get("negative_control_blocked_count") or 0) < 1:
         reasons.append("missing_negative_control_block")
@@ -220,9 +259,13 @@ def evaluate_zero_trust_v2_promotion_candidate(
     if not row.get("receipt_signature"):
         reasons.append("missing_receipt_signature")
     elif not secret_reasons:
-        _proof, proof_reasons = verified_zero_trust_v2_proof(row, signing_secret=signing_secret)
+        own_proof, proof_reasons = verified_zero_trust_v2_proof(row, signing_secret=signing_secret)
         if any(reason.startswith("receipt_") for reason in proof_reasons):
             reasons.append("receipt_not_verified")
+        # The row's own receipt must itself be v2 evidence; attached proofs cannot stand in
+        # (#3362). A row whose proof failed is already blocked by the reasons above.
+        if own_proof is not None and own_proof["kind"] != V2_EVIDENCE_KIND:
+            reasons.append("row_receipt_not_v2_evidence")
     if _get_path(row, "sandbox_attestation", "status") != "PASS":
         reasons.append("sandbox_attestation_not_pass")
     reasons.extend(zero_trust_v2_signature_reasons(row, signing_secret=signing_secret))

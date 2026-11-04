@@ -4,6 +4,7 @@ from nexus.learning.zero_trust_v2_promotion import (
     BLOCKED,
     DIAGNOSTIC_ONLY,
     READY_FOR_MANUAL_APPLY,
+    derive_zero_trust_v2_signed_counts,
     evaluate_zero_trust_v2_promotion_candidate,
 )
 from nexus.learning.zero_trust_v2_receipts import build_runtime_signed_receipt
@@ -252,3 +253,108 @@ def test_3355_complete_signed_row_with_min_one_is_ready() -> None:
 
     assert verdict["status"] == READY_FOR_MANUAL_APPLY
     assert verdict["v2_evidence_count"] == 1
+
+
+def test_3362_row_whose_own_receipt_is_no_credit_is_not_ready() -> None:
+    row = _complete_v2_row()
+    row.update(_receipt(row, "no_credit"))
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert "row_receipt_not_v2_evidence" in verdict["reasons"]
+
+
+def test_3362_row_without_signed_kind_is_not_ready() -> None:
+    row = _complete_v2_row()
+    row.update(
+        build_runtime_signed_receipt(
+            run_id="run-1",
+            row_id=row["row_id"],
+            arm_id=row["arm_type"],
+            capability_id=row["capability_id"],
+            skill_id=row["skill_id"],
+            source_skill_id=row["skill_id"],
+            artifact_hash=row["sandbox_attestation"]["artifact_hash"],
+            raw_observation={},
+            secret=SECRET,
+        )
+    )
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert "row_receipt_not_v2_evidence" in verdict["reasons"]
+
+
+def test_3362_unknown_evidence_kind_is_refused_with_no_credit() -> None:
+    row = _complete_v2_row()
+    row.update(_receipt(row, "v2_evidence_plus"))
+    row["signed_proofs"] = [_proof_row("row-neg", "wrong_or_quarantined_skill_v2")]
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(
+        row, min_v2_evidence_count=1, signing_secret=SECRET
+    )
+
+    assert verdict["status"] == BLOCKED
+    assert verdict["v2_evidence_count"] == 0
+    assert "receipt_not_verified" in verdict["reasons"]
+    counts = derive_zero_trust_v2_signed_counts([row], signing_secret=SECRET)[
+        ("repair_loop", "candidate-repair")
+    ]
+    assert counts["rejected_row_refs"] == ["row-main"]
+    assert counts["row_refs"] == []
+
+
+def test_3362_same_identity_from_other_rounds_counts_once_at_promotion() -> None:
+    row = _complete_v2_row()
+    resigned = [
+        {key: value for key, value in row.items() if key != "signed_proofs"}
+        | build_runtime_signed_receipt(
+            run_id=run_id,
+            row_id=row["row_id"],
+            arm_id=row["arm_type"],
+            capability_id=row["capability_id"],
+            skill_id=row["skill_id"],
+            source_skill_id=row["skill_id"],
+            evidence_kind="v2_evidence",
+            artifact_hash=row["sandbox_attestation"]["artifact_hash"],
+            raw_observation={},
+            secret=SECRET,
+        )
+        for run_id in ("run-2", "run-3")
+    ]
+    row["signed_proofs"] = [*resigned, _proof_row("row-neg", "wrong_or_quarantined_skill_v2")]
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert verdict["v2_evidence_count"] == 1
+    assert "insufficient_v2_evidence" in verdict["reasons"]
+
+
+def test_3362_negative_mismatch_on_row_blocks_promotion() -> None:
+    row = _complete_v2_row()
+    row["v2_trust_mismatch_count"] = -1
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert "v2_trust_mismatch_nonzero" in verdict["reasons"]
+
+
+def test_3362_complete_row_with_distinct_proofs_is_still_ready() -> None:
+    verdict = evaluate_zero_trust_v2_promotion_candidate(_complete_v2_row(), signing_secret=SECRET)
+
+    assert verdict["status"] == READY_FOR_MANUAL_APPLY
+    assert verdict["v2_evidence_count"] == 4
+
+
+def test_3362_mismatch_on_attached_proof_blocks_promotion() -> None:
+    row = _complete_v2_row()
+    row["signed_proofs"][0] = {**row["signed_proofs"][0], "v2_trust_mismatch_count": 1}
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert "v2_trust_mismatch_nonzero" in verdict["reasons"]

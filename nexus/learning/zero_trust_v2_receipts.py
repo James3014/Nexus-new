@@ -5,6 +5,10 @@ import hmac
 import json
 from typing import Any, Mapping
 
+# Fixed purpose inside the signed content, so a value signed as another kind with the same
+# key cannot verify as a receipt (#3362).
+RECEIPT_SIGNATURE_PURPOSE = "nexus.zero_trust_v2.runtime_receipt"
+
 
 def canonical_json_hash(value: Mapping[str, Any]) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -36,6 +40,7 @@ def build_runtime_signed_receipt(
         "skill_id": skill_id,
         "artifact_hash": artifact_hash,
         "raw_observation_hash": raw_observation_hash,
+        "signature_purpose": RECEIPT_SIGNATURE_PURPOSE,
     }
     if source_skill_id is not None:
         signature_inputs["source_skill_id"] = source_skill_id
@@ -59,6 +64,8 @@ def verify_runtime_signed_receipt(receipt: Mapping[str, Any], *, secret: str) ->
         return False
     inputs = receipt.get("receipt_signature_inputs")
     if not isinstance(inputs, Mapping):
+        return False
+    if inputs.get("signature_purpose") != RECEIPT_SIGNATURE_PURPOSE:
         return False
     receipt_hash = str(inputs.get("receipt_hash") or "")
     if not receipt_hash:

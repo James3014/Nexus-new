@@ -324,3 +324,120 @@ def test_3355_promotion_evaluator_edited_counts_not_credited() -> None:
 
     assert verdict["status"] != "READY_FOR_MANUAL_APPLY", verdict
     assert verdict["v2_evidence_count"] == 1
+
+
+def _resigned(row: dict, run_id: str) -> dict:
+    """The same row signed again under another round, as a later run would (#3362)."""
+    return {
+        **row,
+        **build_runtime_signed_receipt(
+            run_id=run_id,
+            row_id=row["row_id"],
+            arm_id=row["arm_type"],
+            capability_id=row["capability_id"],
+            skill_id=row["skill_id"],
+            source_skill_id=row["source_skill_id"],
+            evidence_kind="v2_evidence",
+            artifact_hash=row["sandbox_attestation"]["artifact_hash"],
+            raw_observation={},
+            secret=_PROD_SECRET,
+        ),
+    }
+
+
+def test_3362_same_row_signed_in_three_rounds_counts_once() -> None:
+    first = _signed_row("a")
+    rows = [first, _resigned(first, "run-2"), _resigned(first, "run-3"), _negative_row("neg")]
+    assert len({row["receipt_signature"] for row in rows}) == 4
+
+    candidate = _accumulate_rows(rows)
+
+    assert candidate["status"] == "BLOCKED"
+    assert candidate["v2_evidence_count"] == 1
+    assert candidate["duplicate_identity_count"] == 2
+    assert candidate["duplicate_identity_row_refs"] == ["a", "a"]
+    assert candidate["duplicate_proof_count"] == 0
+
+
+def test_3362_distinct_rows_across_rounds_still_reach_ready() -> None:
+    rows = [
+        _signed_row("a"),
+        _resigned(_signed_row("b"), "run-2"),
+        _resigned(_signed_row("c"), "run-3"),
+        _negative_row("neg"),
+    ]
+
+    candidate = _accumulate_rows(rows)
+
+    assert candidate["status"] == "READY_FOR_MANUAL_APPLY"
+    assert candidate["v2_evidence_count"] == 3
+    assert candidate["duplicate_identity_count"] == 0
+
+
+def test_3362_negative_mismatch_value_is_refused_not_summed() -> None:
+    rows = [
+        _signed_row("a", v2_trust_mismatch_count=1),
+        _signed_row("b", v2_trust_mismatch_count=-1),
+        _signed_row("c"),
+        _signed_row("d"),
+        _negative_row("neg"),
+    ]
+
+    candidate = _accumulate_rows(rows)
+
+    assert candidate["status"] == "BLOCKED"
+    assert candidate["v2_trust_mismatch_count"] == 1
+    assert candidate["rejected_row_refs"] == ["b"]
+
+
+def test_3362_non_integer_mismatch_value_is_refused() -> None:
+    for value in ("0", 0.5, True):
+        candidate = _accumulate_rows([
+            _signed_row("a", v2_trust_mismatch_count=value),
+            _negative_row("neg"),
+        ])
+        assert candidate["rejected_row_refs"] == ["a"], value
+        assert candidate["v2_evidence_count"] == 0, value
+
+
+def test_3362_repeated_row_still_adds_its_mismatch() -> None:
+    first = _signed_row("a")
+    base = [_signed_row("b"), _signed_row("c"), _negative_row("neg")]
+    for repeat in (
+        {**first, "v2_trust_mismatch_count": 1},
+        {**_resigned(first, "run-2"), "v2_trust_mismatch_count": 1},
+    ):
+        candidate = _accumulate_rows([first, repeat, *base])
+        assert candidate["v2_evidence_count"] == 3
+        assert candidate["v2_trust_mismatch_count"] == 1
+        assert candidate["status"] == "BLOCKED"
+
+
+def test_3372_signed_receipt_without_identity_fields_rejects_only_that_row() -> None:
+    bare = {
+        "row_id": "bare",
+        "capability_id": "codeintel",
+        "skill_id": "",
+        "arm_type": "candidate_skill_v2",
+        **build_runtime_signed_receipt(
+            run_id="run-1",
+            row_id="bare",
+            arm_id="candidate_skill_v2",
+            capability_id="codeintel",
+            skill_id="",
+            artifact_hash="",
+            raw_observation={},
+            secret=_PROD_SECRET,
+        ),
+    }
+
+    report = build_zero_trust_v2_evidence_accumulation(
+        physical_evidence={"rows": [bare, _signed_row("ok")]}, signing_secret=_PROD_SECRET
+    )
+
+    assert report["status"] == "PASS"
+    by_skill = {candidate["skill_id"]: candidate for candidate in report["candidates"]}
+    assert by_skill[""]["rejected_row_refs"] == ["bare"]
+    assert by_skill[""]["v2_evidence_count"] == 0
+    assert by_skill["code-skill"]["row_refs"] == ["ok"]
+    assert by_skill["code-skill"]["v2_evidence_count"] == 1
