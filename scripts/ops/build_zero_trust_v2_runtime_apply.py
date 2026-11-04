@@ -78,11 +78,9 @@ def _summary(report: Mapping[str, Any]) -> Mapping[str, Any]:
     return summary if isinstance(summary, Mapping) else {}
 
 
-def _clean_receipt_refs(m45_m52: Mapping[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+def _clean_receipt_refs(run_results: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
     refs: dict[tuple[str, str], dict[str, Any]] = {}
-    for item in m45_m52.get("m45_behavior_run_results", []) or []:
-        if not isinstance(item, Mapping):
-            continue
+    for item in run_results:
         capability_id = str(item.get("capability_id") or "")
         skill_id = str(item.get("skill_id") or "")
         if not capability_id or not skill_id:
@@ -146,13 +144,25 @@ def build_zero_trust_v2_runtime_apply_artifacts(
     ready_by_capability = {str(item.get("capability_id") or ""): item for item in ready}
     current_primary = current_overlay.get("primary_skill_by_capability")
     current_primary = current_primary if isinstance(current_primary, Mapping) else {}
-    receipt_refs = _clean_receipt_refs(m45_m52)
+    from scripts.ops.build_zero_trust_v2_m45_m52_completion import reverify_m45_behavior_run_results
+
+    # Counts are re-derived from the evidence bundles; the earlier report's numbers can only
+    # lower them (#3366).
+    receipt_refs = _clean_receipt_refs(reverify_m45_behavior_run_results(dict(m45_m52)))
+    clean_count = min(
+        int(_summary(m45_m52).get("m45_clean_v2_receipt_count") or 0),
+        sum(int(row["clean_v2_receipt_count"]) for row in receipt_refs.values()),
+    )
+    ready_capability_count = min(
+        int(_summary(m45_m52).get("m51_v2_ready_capability_count") or 0),
+        len({key[0] for key, row in receipt_refs.items() if int(row["clean_v2_receipt_count"]) >= 3}),
+    )
     blockers: list[str] = []
     if current_overlay.get("status") != "PASS":
         blockers.append("current_runtime_overlay_not_pass")
-    if int(_summary(m45_m52).get("m45_clean_v2_receipt_count") or 0) < 102:
+    if clean_count < 102:
         blockers.append("clean_v2_receipt_count_lt_102")
-    if int(_summary(m45_m52).get("m51_v2_ready_capability_count") or 0) < 34:
+    if ready_capability_count < 34:
         blockers.append("v2_ready_capability_count_lt_34")
     if len(ready_by_capability) != 34:
         blockers.append(f"ready_for_manual_apply_count_not_34:{len(ready_by_capability)}")
