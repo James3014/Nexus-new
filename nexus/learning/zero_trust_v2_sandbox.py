@@ -8,6 +8,13 @@ from nexus.learning.zero_trust_v2_receipts import canonical_json_hash
 
 
 APPROVED_PROMOTION_SANDBOX_MODES = {"macos_sandbox", "linux_cgroup"}
+# Fixed purpose wrapped around the body before signing, so a value signed as another kind with
+# the same key (a runtime receipt, say) cannot verify as an attestation (#3362).
+ATTESTATION_SIGNATURE_PURPOSE = "nexus.zero_trust_v2.sandbox_attestation"
+
+
+def sandbox_attestation_signed_content(attestation_body: Mapping[str, Any]) -> dict[str, Any]:
+    return {"signature_purpose": ATTESTATION_SIGNATURE_PURPOSE, "body": dict(attestation_body)}
 
 
 def sandbox_attestation_signature(
@@ -16,7 +23,7 @@ def sandbox_attestation_signature(
     """HMAC-SHA256, keyed by the runner's secret, over the canonical hash of the attestation
     body (every field but ``signature``); the runner signs with it and a validator that knows
     the secret checks it (#3229)."""
-    digest = canonical_json_hash(dict(attestation_body))
+    digest = canonical_json_hash(sandbox_attestation_signed_content(attestation_body))
     return hmac.new(
         signing_secret.encode("utf-8"), digest.encode("utf-8"), hashlib.sha256
     ).hexdigest()

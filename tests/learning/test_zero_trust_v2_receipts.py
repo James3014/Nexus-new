@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from nexus.learning.zero_trust_v2_receipts import (
     build_runtime_signed_receipt,
+    canonical_json_hash,
     stamp_runtime_signed_behavior_bundle,
     verify_runtime_signed_receipt,
+)
+from nexus.learning.zero_trust_v2_sandbox import (
+    sandbox_attestation_signature,
+    sandbox_attestation_signed_content,
+    validate_sandbox_attestation,
 )
 
 
@@ -86,3 +92,72 @@ def test_stamp_runtime_signed_behavior_bundle_exports_verifiable_receipt() -> No
     assert receipt["receipt_provenance"] == "runtime_signed"
     assert verify_runtime_signed_receipt(receipt, secret="test-secret") is True
     assert "test-secret" not in str(stamped)
+
+
+_PURPOSE_SECRET = "purpose-test-secret-3362"
+
+
+def _attestation_body() -> dict:
+    return {
+        "issuer": "nexus.runner",
+        "sandbox_mode": "macos_sandbox",
+        "status": "PASS",
+        "network_disabled": True,
+        "workspace_isolated": True,
+        "tmp_isolated": True,
+        "teardown_status": "PASS",
+        "artifact_hash": "a" * 64,
+    }
+
+
+def test_3362_attestation_signature_does_not_verify_as_receipt() -> None:
+    body = _attestation_body()
+    signature = sandbox_attestation_signature(attestation_body=body, signing_secret=_PURPOSE_SECRET)
+    for signed in (body, sandbox_attestation_signed_content(body)):
+        inputs = {**signed, "receipt_hash": canonical_json_hash(signed)}
+        receipt = {
+            "receipt_provenance": "runtime_signed",
+            "receipt_signature": signature,
+            "receipt_signature_algorithm": "hmac-sha256",
+            "receipt_signature_inputs": inputs,
+        }
+        assert verify_runtime_signed_receipt(receipt, secret=_PURPOSE_SECRET) is False
+
+
+def test_3362_receipt_signature_does_not_verify_as_attestation() -> None:
+    receipt = build_runtime_signed_receipt(
+        run_id="run-1",
+        row_id="row-1",
+        arm_id="candidate_skill_v2",
+        capability_id="cap",
+        skill_id="skill",
+        artifact_hash="a" * 64,
+        raw_observation={},
+        secret=_PURPOSE_SECRET,
+    )
+    body = {
+        key: value
+        for key, value in receipt["receipt_signature_inputs"].items()
+        if key != "receipt_hash"
+    }
+    attestation = {**body, "signature": receipt["receipt_signature"]}
+
+    verdict = validate_sandbox_attestation(attestation, signing_secret=_PURPOSE_SECRET)
+
+    assert "invalid_sandbox_signature" in verdict["reasons"]
+    assert verify_runtime_signed_receipt(receipt, secret=_PURPOSE_SECRET) is True
+
+
+def test_3362_each_kind_still_verifies_in_its_own_position() -> None:
+    body = _attestation_body()
+    attestation = {
+        **body,
+        "signature": sandbox_attestation_signature(
+            attestation_body=body, signing_secret=_PURPOSE_SECRET
+        ),
+    }
+
+    assert (
+        validate_sandbox_attestation(attestation, signing_secret=_PURPOSE_SECRET)["status"]
+        == "PASS"
+    )

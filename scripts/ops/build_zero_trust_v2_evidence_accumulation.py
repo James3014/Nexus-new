@@ -56,6 +56,8 @@ def build_zero_trust_v2_evidence_accumulation(
                 "signature_rejected_row_count": item["rejected_rows"],
                 "rejected_row_refs": item["rejected_row_refs"],
                 "duplicate_proof_count": item["duplicate_proof_count"],
+                "duplicate_identity_count": item["duplicate_identity_count"],
+                "duplicate_identity_row_refs": item["duplicate_identity_row_refs"],
                 "unsigned_count_mismatch_row_refs": item["unsigned_count_mismatch_row_refs"],
             }
         )
