@@ -56,6 +56,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from nexus.core.hardened_git import read_git_pointer_file
+
 MEASUREMENT_CLAUDE_ENV = "NEXUS_MEASUREMENT_CLAUDE_WORKER"
 MEASUREMENT_CLAUDE_BIN_ENV = "NEXUS_MEASUREMENT_CLAUDE_BIN"
 MEASUREMENT_CLAUDE_VERSION_ENV = "NEXUS_MEASUREMENT_CLAUDE_VERSION"
@@ -381,16 +383,16 @@ def require_gitdir_in_measurement_root(
 def _linked_common_gitdir(target: Path) -> Optional[Path]:
     dot_git = target / ".git"
     try:
-        line = dot_git.read_text(encoding="utf-8").strip()
-    except OSError:
+        line = read_git_pointer_file(dot_git).strip()
+    except (OSError, ValueError):
         return None
     if not line.startswith("gitdir:"):
         return None
     gitdir = Path(line.split(":", 1)[1].strip())
     gitdir = Path(os.path.realpath(gitdir if gitdir.is_absolute() else target / gitdir))
     try:
-        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
-    except OSError:
+        common = read_git_pointer_file(gitdir / "commondir").strip()
+    except (OSError, ValueError):
         return None
     return Path(os.path.realpath(Path(common) if os.path.isabs(common) else gitdir / common))
 
@@ -411,8 +413,8 @@ def worktree_git_dirs(target: Path, controller_root: Optional[Path | str] = None
     if not dot_git.is_file() or dot_git.is_symlink():
         return []
     try:
-        line = dot_git.read_text(encoding="utf-8").strip()
-    except OSError:
+        line = read_git_pointer_file(dot_git).strip()
+    except (OSError, ValueError):
         return []
     if not line.startswith("gitdir:"):
         return []
@@ -422,10 +424,10 @@ def worktree_git_dirs(target: Path, controller_root: Optional[Path | str] = None
     gitdir = Path(os.path.realpath(gitdir))
     roots = [gitdir]
     try:
-        common = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        common = read_git_pointer_file(gitdir / "commondir").strip()
         common_dir = Path(common) if os.path.isabs(common) else gitdir / common
         roots.append(Path(os.path.realpath(common_dir)))
-    except OSError:
+    except (OSError, ValueError):
         pass
     return [
         root

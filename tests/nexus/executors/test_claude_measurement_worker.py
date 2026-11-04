@@ -12,6 +12,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1022,3 +1023,104 @@ def test_a_worktree_of_a_controller_outside_the_measurement_root_fails_the_run(
 def test_a_standalone_target_needs_no_measurement_root(tmp_path):
     _contract, lease = _lease(tmp_path)
     cmw.require_gitdir_in_measurement_root(Path(lease.target_worktree), {})
+
+
+# --- git pointer files are read through the bounded reader (#3357) ---
+
+
+def _pointer_call_returns_within(seconds: float, call):
+    box: list = []
+    thread = threading.Thread(target=lambda: box.append(call()), daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), "a git pointer read blocked on a non-regular file"
+    return box[0]
+
+
+def _linked_registration(lease) -> Path:
+    text = (Path(lease.target_worktree) / ".git").read_text(encoding="utf-8")
+    return Path(text.strip()[len("gitdir:") :].strip())
+
+
+def _fifo_in_place_of(path: Path) -> int:
+    data = path.read_bytes()
+    path.unlink()
+    os.mkfifo(path)
+    fd = os.open(path, os.O_RDWR)
+    os.write(fd, data)
+    return fd
+
+
+def test_linked_common_gitdir_refuses_a_commondir_that_is_a_named_pipe_promptly(tmp_path):
+    _contract, lease = _linked_worktree_lease(tmp_path)
+    fd = _fifo_in_place_of(_linked_registration(lease) / "commondir")
+    try:
+        found = _pointer_call_returns_within(
+            5, lambda: cmw._linked_common_gitdir(Path(lease.target_worktree))
+        )
+    finally:
+        os.close(fd)
+    assert found is None
+
+
+def test_linked_common_gitdir_refuses_oversized_pointers(tmp_path):
+    _contract, lease = _linked_worktree_lease(tmp_path)
+    target = Path(lease.target_worktree)
+    assert cmw._linked_common_gitdir(target) is not None
+    commondir = _linked_registration(lease) / "commondir"
+    original = commondir.read_text(encoding="utf-8")
+    commondir.write_text(original.strip() + " " * 5000, encoding="utf-8")
+    assert cmw._linked_common_gitdir(target) is None
+    commondir.write_text(original, encoding="utf-8")
+    dot_git = target / ".git"
+    dot_git.write_text(dot_git.read_text(encoding="utf-8").strip() + " " * 5000, encoding="utf-8")
+    assert cmw._linked_common_gitdir(target) is None
+
+
+def test_linked_common_gitdir_refuses_a_dot_git_file_that_is_not_utf8(tmp_path):
+    _contract, lease = _linked_worktree_lease(tmp_path)
+    (Path(lease.target_worktree) / ".git").write_bytes(b"gitdir: \xff\xfe\n")
+    assert cmw._linked_common_gitdir(Path(lease.target_worktree)) is None
+
+
+def test_measurement_root_check_refuses_an_oversized_commondir(tmp_path, monkeypatch):
+    _contract, lease = _linked_worktree_lease(tmp_path)
+    commondir = _linked_registration(lease) / "commondir"
+    commondir.write_text(commondir.read_text(encoding="utf-8").strip() + " " * 5000)
+    with pytest.raises(cmw.WorktreeGitdirOutsideMeasurementRoot):
+        cmw.require_gitdir_in_measurement_root(
+            Path(lease.target_worktree), {cmw.MEASURE_EXTERNAL_TARGET_ROOT_ENV: str(tmp_path)}
+        )
+
+
+def test_worktree_git_dirs_do_not_admit_the_common_dir_of_a_pipe_or_oversized_pointer(tmp_path):
+    contract, lease = _linked_worktree_lease(tmp_path)
+    target = Path(lease.target_worktree)
+    common = Path(os.path.realpath(Path(contract.controller_repo_root) / ".git"))
+    assert common in cmw.worktree_git_dirs(target, contract.controller_repo_root)
+    commondir = _linked_registration(lease) / "commondir"
+    original = commondir.read_text(encoding="utf-8")
+    commondir.write_text(original.strip() + " " * 5000, encoding="utf-8")
+    assert common not in cmw.worktree_git_dirs(target, contract.controller_repo_root)
+    commondir.unlink()
+    os.mkfifo(commondir)
+    fd = os.open(commondir, os.O_RDWR)
+    os.write(fd, original.encode())
+    try:
+        dirs = _pointer_call_returns_within(
+            5, lambda: cmw.worktree_git_dirs(target, contract.controller_repo_root)
+        )
+    finally:
+        os.close(fd)
+    assert common not in dirs
+
+
+def test_worktree_git_dirs_refuse_an_oversized_or_non_utf8_dot_git(tmp_path):
+    contract, lease = _linked_worktree_lease(tmp_path)
+    target = Path(lease.target_worktree)
+    dot_git = target / ".git"
+    original = dot_git.read_text(encoding="utf-8")
+    dot_git.write_text(original.strip() + " " * 5000, encoding="utf-8")
+    assert cmw.worktree_git_dirs(target, contract.controller_repo_root) == []
+    dot_git.write_bytes(b"gitdir: \xff\xfe\n")
+    assert cmw.worktree_git_dirs(target, contract.controller_repo_root) == []

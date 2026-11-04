@@ -58,6 +58,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Optional
 
+from nexus.core.hardened_git import read_git_pointer_file
+
 MEASUREMENT_WORKTREE_DIFF_ENV = "NEXUS_MEASUREMENT_WORKTREE_DIFF"
 # Snapshot taken once at import (= process start); a variable set later must
 # not enable anything (#2742 pattern).
@@ -166,8 +168,8 @@ class TrustedTarget:
 
 def _read_gitdir_pointer(dotgit: Path) -> Optional[Path]:
     try:
-        text = dotgit.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):
+        text = read_git_pointer_file(dotgit).strip()
+    except (OSError, ValueError):
         return None
     if not text.startswith("gitdir:"):
         return None
@@ -177,9 +179,12 @@ def _read_gitdir_pointer(dotgit: Path) -> Optional[Path]:
 
 def _common_dir(gitdir: Path) -> Path:
     try:
-        text = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+        text = read_git_pointer_file(gitdir / "commondir").strip()
     except FileNotFoundError:
         return gitdir.resolve()
+    except (OSError, ValueError) as exc:
+        # Not a regular file, too large or not UTF-8: refuse rather than read it whole (#3357).
+        raise MeasurementDiffError("gitdir_untrusted") from exc
     return (gitdir / text).resolve()
 
 
@@ -189,7 +194,12 @@ def _repo_common_dir(root: Path) -> Optional[Path]:
         return dotgit.resolve()
     if dotgit.is_file():
         gitdir = _read_gitdir_pointer(dotgit)
-        return _common_dir(gitdir) if gitdir is not None else None
+        if gitdir is None:
+            return None
+        try:
+            return _common_dir(gitdir)
+        except MeasurementDiffError:
+            return None
     return None
 
 
@@ -222,8 +232,8 @@ def verify_target(worktree: str, controller_root: str) -> TrustedTarget:
     if _common_dir(gitdir) != common:
         raise MeasurementDiffError("gitdir_untrusted")
     try:
-        back = Path((gitdir / "gitdir").read_text(encoding="utf-8").strip())
-    except (OSError, UnicodeDecodeError) as exc:
+        back = Path(read_git_pointer_file(gitdir / "gitdir").strip())
+    except (OSError, ValueError) as exc:
         raise MeasurementDiffError("gitdir_untrusted") from exc
     # The registration must point back at this Target.
     if (gitdir / back).resolve() != dotgit:
