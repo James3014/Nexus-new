@@ -57,7 +57,11 @@ def build_runtime_signed_receipt(
     }
 
 
-def verify_runtime_signed_receipt(receipt: Mapping[str, Any], *, secret: str) -> bool:
+def verify_runtime_signed_receipt(
+    receipt: Mapping[str, Any], *, secret: str, expected: Mapping[str, Any] | None = None
+) -> bool:
+    """``expected`` (e.g. run_id, row_id, capability_id) binds the receipt to the item the
+    caller plans to credit: each given field must equal the signed input (#3366)."""
     if receipt.get("receipt_provenance") != "runtime_signed":
         return False
     if receipt.get("receipt_signature_algorithm") != "hmac-sha256":
@@ -74,8 +78,11 @@ def verify_runtime_signed_receipt(receipt: Mapping[str, Any], *, secret: str) ->
     signed_inputs = {key: value for key, value in inputs.items() if key != "receipt_hash"}
     if canonical_json_hash(signed_inputs) != receipt_hash:
         return False
-    expected = hmac.new(secret.encode("utf-8"), receipt_hash.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, str(receipt.get("receipt_signature") or ""))
+    for key, value in (expected or {}).items():
+        if key not in signed_inputs or signed_inputs[key] != value:
+            return False
+    signature = hmac.new(secret.encode("utf-8"), receipt_hash.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, str(receipt.get("receipt_signature") or ""))
 
 
 def stamp_runtime_signed_behavior_bundle(

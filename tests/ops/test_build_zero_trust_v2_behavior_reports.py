@@ -7,6 +7,37 @@ from scripts.ops.build_zero_trust_v2_manual_trial import build_zero_trust_v2_man
 from scripts.ops.build_zero_trust_v2_p0_rollout import build_zero_trust_v2_p0_rollout
 
 
+def _signed_bundle(directory, run_id: str, capability_id: str, skill_id: str) -> str:
+    """A bundle holding a receipt signed for (run_id, capability_id, skill_id) (#3366)."""
+    import json
+
+    from nexus.learning.zero_trust_v2_receipts import build_runtime_signed_receipt
+
+    path = directory / f"{run_id}.json"
+    receipt = build_runtime_signed_receipt(
+        run_id=run_id,
+        row_id=f"{run_id}:with_nexus",
+        arm_id="candidate_skill_v2",
+        capability_id=capability_id,
+        skill_id=skill_id,
+        artifact_hash=f"artifact-{run_id}",
+        raw_observation={"row_counts": {"eligible_with_nexus": 1}},
+        secret="test-secret",
+    )
+    path.write_text(
+        json.dumps(
+            {
+                "row_counts": {"eligible_with_nexus": 1, "infra_invalid_with_nexus": 0},
+                "rubric_contract": {"with_nexus": {"hard_fail_reasons": []}},
+                "zero_trust_v2_runtime_receipt": receipt,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+
 def test_behavior_evidence_blocks_missing_bundle() -> None:
     result = build_zero_trust_v2_behavior_evidence(
         backlog={
@@ -27,7 +58,8 @@ def test_behavior_evidence_blocks_missing_bundle() -> None:
     assert "EVIDENCE_BUNDLE_NOT_FOUND" in candidate["failed_security_contract_rules"]
 
 
-def test_behavior_evidence_imports_clean_m45_runtime_signed_receipts() -> None:
+def test_behavior_evidence_imports_clean_m45_runtime_signed_receipts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
     result = build_zero_trust_v2_behavior_evidence(
         backlog={"items": []},
         m45_m52={
@@ -36,7 +68,8 @@ def test_behavior_evidence_imports_clean_m45_runtime_signed_receipts() -> None:
                     "capability_id": "codeintel",
                     "skill_id": "code-skill",
                     "priority": "P1",
-                    "evidence_bundle": f"bundle-{index}.json",
+                    "run_id": f"run-{index}",
+                    "evidence_bundle": _signed_bundle(tmp_path, f"run-{index}", "codeintel", "code-skill"),
                     "clean_v2_receipt": True,
                     "runtime_signed_receipt_verified": True,
                     "eligible_behavior_rows": 1,
@@ -197,3 +230,62 @@ def test_p0_rollout_promotes_p0_and_p1_p2_after_manual_ack() -> None:
     assert result["summary"]["p0_rollout_complete"] is True
     assert result["summary"]["p1_p2_rollout_complete"] is True
     assert {item["rollout_status"] for item in result["items"]} == {"V2_PROMOTED_TO_DEFAULT_OVERLAY"}
+
+
+def _m45_runs(tmp_path, *, capability_for_run=None) -> list[dict]:
+    runs = []
+    for index in range(1, 4):
+        signed_capability = (capability_for_run or {}).get(index, "codeintel")
+        runs.append(
+            {
+                "run_id": f"run-{index}",
+                "capability_id": "codeintel",
+                "skill_id": "code-skill",
+                "priority": "P1",
+                "evidence_bundle": _signed_bundle(tmp_path, f"run-{index}", signed_capability, "code-skill"),
+                "clean_v2_receipt": True,
+                "runtime_signed_receipt_verified": True,
+                "eligible_behavior_rows": 1,
+                "blockers": [],
+            }
+        )
+    return runs
+
+
+def test_behavior_evidence_reverifies_flags_instead_of_trusting_them(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+    runs = _m45_runs(tmp_path)
+    runs[2]["evidence_bundle"] = str(tmp_path / "missing.json")
+
+    result = build_zero_trust_v2_behavior_evidence(backlog={"items": []}, m45_m52={"m45_behavior_run_results": runs})
+
+    candidate = result["candidates"][0]
+    assert candidate["status"] == "BLOCKED"
+    assert candidate["v2_behavior_evidence_count"] == 2
+    assert candidate["runtime_signed_receipt_verified_count"] == 2
+
+
+def test_behavior_evidence_refuses_receipt_signed_for_another_identity(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+    runs = _m45_runs(tmp_path, capability_for_run={2: "other_capability"})
+
+    result = build_zero_trust_v2_behavior_evidence(backlog={"items": []}, m45_m52={"m45_behavior_run_results": runs})
+
+    candidate = result["candidates"][0]
+    assert candidate["status"] == "BLOCKED"
+    assert candidate["v2_behavior_evidence_count"] == 2
+    assert "runtime_signed_v2_receipt_identity_mismatch" in candidate["failed_security_contract_rules"]
+
+
+def test_behavior_evidence_counts_a_copied_bundle_once(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+    runs = _m45_runs(tmp_path)
+    for item in runs:
+        item["run_id"] = "run-1"
+        item["evidence_bundle"] = runs[0]["evidence_bundle"]
+
+    result = build_zero_trust_v2_behavior_evidence(backlog={"items": []}, m45_m52={"m45_behavior_run_results": runs})
+
+    candidate = result["candidates"][0]
+    assert candidate["status"] == "BLOCKED"
+    assert candidate["v2_behavior_evidence_count"] == 1

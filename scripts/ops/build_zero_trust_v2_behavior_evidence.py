@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.learning.skill_fit_closure import read_json, write_json
+from scripts.ops.build_zero_trust_v2_m45_m52_completion import reverify_m45_behavior_run_results
 from nexus.learning.zero_trust_v2_behavior import build_behavior_runner_command_spec, extract_behavior_receipt_from_path
 
 
@@ -23,9 +24,8 @@ DEFAULT_OUTPUT = Path("docs/reports/NEXUS_ZERO_TRUST_V2_BEHAVIOR_EVIDENCE_2026-0
 
 def _behavior_evidence_from_m45(*, m45_m52: dict) -> dict:
     grouped: dict[tuple[str, str], dict] = {}
-    for item in m45_m52.get("m45_behavior_run_results", []) or []:
-        if not isinstance(item, dict):
-            continue
+    # Re-verified from the evidence bundles, not the earlier report's flags (#3366).
+    for item in reverify_m45_behavior_run_results(m45_m52):
         capability_id = str(item.get("capability_id") or "")
         skill_id = str(item.get("skill_id") or "")
         if not capability_id or not skill_id:

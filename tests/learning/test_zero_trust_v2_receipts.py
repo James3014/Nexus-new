@@ -161,3 +161,25 @@ def test_3362_each_kind_still_verifies_in_its_own_position() -> None:
         validate_sandbox_attestation(attestation, signing_secret=_PURPOSE_SECRET)["status"]
         == "PASS"
     )
+
+
+def test_verify_runtime_signed_receipt_binds_expected_identity() -> None:
+    receipt = build_runtime_signed_receipt(
+        run_id="run-a",
+        row_id="run-a:with_nexus",
+        arm_id="candidate_skill_v2",
+        capability_id="cap-a",
+        skill_id="skill-a",
+        artifact_hash="artifact",
+        raw_observation={"x": 1},
+        secret="s",
+    )
+
+    assert verify_runtime_signed_receipt(receipt, secret="s") is True
+    assert verify_runtime_signed_receipt(
+        receipt, secret="s", expected={"run_id": "run-a", "row_id": "run-a:with_nexus", "capability_id": "cap-a"}
+    ) is True
+    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"run_id": "run-b"}) is False
+    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"capability_id": "cap-b"}) is False
+    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"row_id": "run-b:with_nexus"}) is False
+    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"evidence_kind": "anything"}) is False

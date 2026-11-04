@@ -68,14 +68,31 @@ def _find_runtime_signed_receipt(bundle: dict[str, Any]) -> dict[str, Any] | Non
     return None
 
 
-def _runtime_signed_receipt_status(bundle: dict[str, Any]) -> tuple[bool, bool]:
+def _expected_receipt_identity(item: dict[str, Any]) -> dict[str, str]:
+    """The planned run (and capability/skill when the plan names them) the receipt must be signed for (#3366)."""
+    expected = {"run_id": str(item.get("run_id") or "")}
+    for key in ("capability_id", "skill_id"):
+        if str(item.get(key) or ""):
+            expected[key] = str(item.get(key))
+    return expected
+
+
+def _runtime_signed_receipt_status(
+    bundle: dict[str, Any], expected: dict[str, str]
+) -> tuple[bool, bool, bool, dict[str, Any] | None]:
+    """(present, signature verified, signed for the planned item, receipt)."""
     receipt = _find_runtime_signed_receipt(bundle)
     if receipt is None:
-        return False, False
+        return False, False, False, None
     secret = _load_signing_secret()
-    if not secret:
-        return True, False
-    return True, verify_runtime_signed_receipt(receipt, secret=secret)
+    if not secret or not verify_runtime_signed_receipt(receipt, secret=secret):
+        return True, False, False, receipt
+    return True, True, verify_runtime_signed_receipt(receipt, secret=secret, expected=expected), receipt
+
+
+def _signed_identity(receipt: dict[str, Any]) -> tuple[str, str, str, str]:
+    inputs = _as_dict(receipt.get("receipt_signature_inputs"))
+    return tuple(str(inputs.get(key) or "") for key in ("capability_id", "skill_id", "row_id", "arm_id"))  # type: ignore[return-value]
 
 
 def _slug_path(value: str) -> str:
@@ -105,7 +122,7 @@ def _full_matrix_run_plan(runner_matrix: dict[str, Any]) -> list[dict[str, Any]]
     return rows
 
 
-def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
+def _summarize_run(item: dict[str, Any], seen: dict[str, set[Any]]) -> dict[str, Any]:
     bundle_path = str(item.get("expected_evidence_bundle") or "")
     bundle = _read_bundle(bundle_path)
     if bundle is None:
@@ -125,16 +142,32 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
     rubric = _as_dict(_as_dict(bundle.get("rubric_contract")).get("with_nexus"))
     hard_failures = _flatten_strings(_as_list(rubric.get("hard_fail_reasons")))
     infra_reasons = _flatten_strings(_as_list(with_summary.get("infra_invalid_reasons")))
-    runtime_signed, runtime_signature_verified = _runtime_signed_receipt_status(bundle)
-    eligible_rows = int(row_counts.get("eligible_with_nexus") or 0)
+    runtime_signed, runtime_signature_verified, identity_bound, receipt = _runtime_signed_receipt_status(
+        bundle, _expected_receipt_identity(item)
+    )
+    # The unsigned count can only block, never credit; credit comes from the signed receipt (#3366).
+    unsigned_eligible_rows = int(row_counts.get("eligible_with_nexus") or 0)
     blockers = sorted(set([*hard_failures, *infra_reasons]))
+    duplicate = False
     if not runtime_signed:
         blockers.append("missing_runtime_signed_v2_receipt")
     elif not runtime_signature_verified:
         blockers.append("runtime_signed_v2_receipt_signature_unverified")
-    if eligible_rows <= 0:
+    elif not identity_bound:
+        blockers.append("runtime_signed_v2_receipt_identity_mismatch")
+    elif receipt is not None:
+        # Each signed receipt and each signed identity counts for one planned run only (#3366).
+        signature = str(receipt.get("receipt_signature") or "")
+        identity = _signed_identity(receipt)
+        duplicate = signature in seen["signatures"] or identity in seen["identities"]
+        seen["signatures"].add(signature)
+        seen["identities"].add(identity)
+        if duplicate:
+            blockers.append("duplicate_runtime_signed_v2_receipt")
+    eligible_rows = 1 if runtime_signature_verified and identity_bound and not duplicate else 0
+    if eligible_rows <= 0 or unsigned_eligible_rows <= 0:
         blockers.append("no_eligible_behavior_row")
-    clean = runtime_signed and runtime_signature_verified and eligible_rows > 0 and not blockers
+    clean = runtime_signed and runtime_signature_verified and identity_bound and eligible_rows > 0 and not blockers
 
     return {
         "run_id": str(item.get("run_id") or ""),
@@ -147,11 +180,49 @@ def _summarize_run(item: dict[str, Any]) -> dict[str, Any]:
         "clean_v2_receipt": clean,
         "runtime_signed_receipt_present": runtime_signed,
         "runtime_signed_receipt_verified": runtime_signature_verified,
+        "runtime_signed_receipt_identity_bound": identity_bound,
         "eligible_behavior_rows": eligible_rows,
+        "unsigned_eligible_behavior_rows": unsigned_eligible_rows,
         "infra_invalid_reasons": infra_reasons,
         "hard_fail_reasons": hard_failures,
         "blockers": sorted(set(blockers)),
     }
+
+
+def reverify_m45_behavior_run_results(m45_m52: dict[str, Any]) -> list[dict[str, Any]]:
+    """Re-open each run's evidence bundle and re-derive its result with the same binding and
+    de-duplication as the completion report, for reports that read it later (#3366). The
+    earlier report's flags, counts and blockers can only block a run, never credit it."""
+    seen: dict[str, set[Any]] = {"signatures": set(), "identities": set()}
+    results: list[dict[str, Any]] = []
+    for item in _as_list(m45_m52.get("m45_behavior_run_results")):
+        if not isinstance(item, dict):
+            continue
+        plan_item = {
+            "run_id": item.get("run_id"),
+            "run_index": item.get("run_index"),
+            "capability_id": item.get("capability_id"),
+            "skill_id": item.get("skill_id"),
+            "priority": item.get("priority"),
+            "expected_evidence_bundle": item.get("evidence_bundle"),
+        }
+        fresh = _summarize_run(plan_item, seen)
+        blockers = set(fresh.get("blockers") or []) | set(_flatten_strings(_as_list(item.get("blockers"))))
+        clean = fresh.get("clean_v2_receipt") is True and item.get("clean_v2_receipt") is True and not blockers
+        fresh["blockers"] = sorted(blockers)
+        fresh["clean_v2_receipt"] = clean
+        fresh["runtime_signed_receipt_verified"] = (
+            fresh.get("runtime_signed_receipt_verified") is True and item.get("runtime_signed_receipt_verified") is True
+        )
+        try:
+            prior_eligible = int(item.get("eligible_behavior_rows") or 0)
+        except (TypeError, ValueError):
+            prior_eligible = 0
+        fresh["eligible_behavior_rows"] = min(int(fresh.get("eligible_behavior_rows") or 0), prior_eligible)
+        if fresh["status"] == "CLEAN_V2_RECEIPT" and not clean:
+            fresh["status"] = "EXECUTED_BUT_BLOCKED"
+        results.append(fresh)
+    return results
 
 
 def build_zero_trust_v2_m45_m52_completion(*, m36_m44: dict[str, Any], runner_matrix: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -161,7 +232,8 @@ def build_zero_trust_v2_m45_m52_completion(*, m36_m44: dict[str, Any], runner_ma
         for item in _as_list(_as_dict(m36_m44.get("m38_signed_behavior_execution_gate")).get("run_plan"))
         if isinstance(item, dict)
     ]
-    run_results = [_summarize_run(item) for item in run_plan]
+    seen: dict[str, set[Any]] = {"signatures": set(), "identities": set()}
+    run_results = [_summarize_run(item, seen) for item in run_plan]
     status_counts = Counter(item["status"] for item in run_results)
     blocker_counts = Counter(blocker for item in run_results for blocker in item.get("blockers", []))
     executed_count = sum(1 for item in run_results if item["status"] != "NOT_EXECUTED")
