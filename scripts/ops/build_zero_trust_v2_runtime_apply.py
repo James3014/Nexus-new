@@ -14,7 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nexus.learning.zero_trust_v2_promotion import READY_FOR_MANUAL_APPLY
 from nexus.learning.skill_fit_closure import read_json, write_json
-from scripts.ops.build_zero_trust_v2_m45_m52_completion import reverify_m45_behavior_run_results
 
 
 DEFAULT_PROMOTION_REPORT = Path("docs/reports/NEXUS_ZERO_TRUST_V2_PROMOTION_CANDIDATES_2026-05-21.json")
@@ -145,6 +144,8 @@ def build_zero_trust_v2_runtime_apply_artifacts(
     ready_by_capability = {str(item.get("capability_id") or ""): item for item in ready}
     current_primary = current_overlay.get("primary_skill_by_capability")
     current_primary = current_primary if isinstance(current_primary, Mapping) else {}
+    from scripts.ops.build_zero_trust_v2_m45_m52_completion import reverify_m45_behavior_run_results
+
     # Counts are re-derived from the evidence bundles; the earlier report's numbers can only
     # lower them (#3366).
     receipt_refs = _clean_receipt_refs(reverify_m45_behavior_run_results(dict(m45_m52)))

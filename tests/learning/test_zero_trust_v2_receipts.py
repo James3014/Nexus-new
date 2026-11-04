@@ -176,10 +176,24 @@ def test_verify_runtime_signed_receipt_binds_expected_identity() -> None:
     )
 
     assert verify_runtime_signed_receipt(receipt, secret="s") is True
-    assert verify_runtime_signed_receipt(
-        receipt, secret="s", expected={"run_id": "run-a", "row_id": "run-a:with_nexus", "capability_id": "cap-a"}
-    ) is True
+    assert (
+        verify_runtime_signed_receipt(
+            receipt,
+            secret="s",
+            expected={"run_id": "run-a", "row_id": "run-a:with_nexus", "capability_id": "cap-a"},
+        )
+        is True
+    )
     assert verify_runtime_signed_receipt(receipt, secret="s", expected={"run_id": "run-b"}) is False
-    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"capability_id": "cap-b"}) is False
-    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"row_id": "run-b:with_nexus"}) is False
-    assert verify_runtime_signed_receipt(receipt, secret="s", expected={"evidence_kind": "anything"}) is False
+    assert (
+        verify_runtime_signed_receipt(receipt, secret="s", expected={"capability_id": "cap-b"})
+        is False
+    )
+    assert (
+        verify_runtime_signed_receipt(receipt, secret="s", expected={"row_id": "run-b:with_nexus"})
+        is False
+    )
+    assert (
+        verify_runtime_signed_receipt(receipt, secret="s", expected={"evidence_kind": "anything"})
+        is False
+    )
