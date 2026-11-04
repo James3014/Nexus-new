@@ -1814,7 +1814,13 @@ def _write_run_dir_file(path: Path, text: str) -> None:
     """Write a run-directory file whose target may already exist: type-checked first, then
     opened without following a link and without blocking on a special file."""
     _check_run_dir_target(path)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        # Remove only this name (a hard link's other names and target stay untouched), then
+        # create exclusively: a racing re-create fails closed, never retried.
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "wb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
@@ -1827,7 +1833,8 @@ def _read_run_dir_file(path: Path) -> str:
     _check_run_dir_target(path)
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise RuntimeError("run_dir_target_not_regular_file")
         return handle.read().decode("utf-8")
 

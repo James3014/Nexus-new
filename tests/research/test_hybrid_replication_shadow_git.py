@@ -1065,3 +1065,28 @@ def test_run_dir_targets_that_are_named_pipes_are_refused_promptly(tmp_path: Pat
     for name in ("write", "read"):
         assert isinstance(outcomes[name], RuntimeError)
         assert str(outcomes[name]) == "run_dir_target_not_regular_file"
+
+
+def test_run_dir_write_to_a_hard_linked_target_leaves_the_other_name_unchanged(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("OUTSIDE\n", encoding="utf-8")
+    target = tmp_path / "schema.json"
+    os.link(outside, target)
+
+    live._write_run_dir_file(target, "{}")
+
+    assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
+    assert target.read_text(encoding="utf-8") == "{}"
+    assert os.stat(target).st_nlink == 1
+
+
+def test_run_dir_read_of_a_hard_linked_target_is_refused(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    target = tmp_path / "last.json"
+    os.link(outside, target)
+
+    with pytest.raises(RuntimeError, match="run_dir_target_not_regular_file"):
+        live._read_run_dir_file(target)
