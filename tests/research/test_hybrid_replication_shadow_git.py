@@ -1017,6 +1017,8 @@ def test_plan_mode_counts_a_new_file_under_a_git_dir_exclude_rule_as_mutation(
     assert receipt["repository_mutated"] is True
 
 
+# On Linux only the exact name hides what is below it from status; the other variants are
+# listed by status already, so they are guards for filesystems that fold them onto it.
 @pytest.mark.parametrize("name", [".git", ".GIT", ".git ", "git~1"])
 def test_plan_mode_counts_a_new_file_under_a_git_reserved_name_as_mutation(
     sandbox: Path, monkeypatch: pytest.MonkeyPatch, name: str
@@ -1031,6 +1033,48 @@ def test_plan_mode_counts_a_new_file_under_a_git_reserved_name_as_mutation(
     receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
 
     assert receipt["repository_mutated"] is True
+
+
+@pytest.mark.parametrize("name", [".git", ".GIT", "git~1"])
+def test_plan_mode_counts_a_git_reserved_plain_file_below_the_root_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / "sub").mkdir()
+        (cwd / "sub" / name).write_text("gitdir: elsewhere\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
+
+
+def test_reserved_name_check_exempts_only_the_root_link_file(tmp_path: Path) -> None:
+    (tmp_path / ".git").write_text("gitdir: x\n", encoding="utf-8")
+    (tmp_path / "a").mkdir()
+    assert live._has_nested_git_reserved_name(tmp_path) is False
+    (tmp_path / ".git").unlink()
+    (tmp_path / ".git").mkdir()
+    assert live._has_nested_git_reserved_name(tmp_path) is True
+
+
+def test_reserved_name_check_refuses_a_root_link_that_is_a_symlink(tmp_path: Path) -> None:
+    (tmp_path / "t").write_text("x", encoding="utf-8")
+    (tmp_path / ".git").symlink_to(tmp_path / "t")
+    assert live._has_nested_git_reserved_name(tmp_path) is True
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads any dir")
+def test_reserved_name_check_fails_closed_on_an_unreadable_directory(tmp_path: Path) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        assert live._has_nested_git_reserved_name(tmp_path) is True
+    finally:
+        locked.chmod(0o700)
 
 
 def test_plan_mode_without_changes_is_not_mutated_by_the_reserved_name_check(

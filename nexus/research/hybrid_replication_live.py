@@ -2047,14 +2047,21 @@ def _is_git_reserved_name(name: str) -> bool:
 
 
 def _has_nested_git_reserved_name(source: Path) -> bool:
-    """Fail closed: any entry below ``source`` with a git-reserved name (the root's own
-    ``.git`` link file is the only one the harness makes). Unreadable directories count."""
+    """Fail closed: any entry below ``source`` with a git-reserved name. The only exemption is
+    the root's own ``.git`` link file (a plain file, not a link or directory), which the harness
+    makes. Unreadable directories count. On Linux most name variants are listed by status too;
+    this check is a guard for the ones status never looks below."""
     failed: list[OSError] = []
     for current, dirs, files in os.walk(source, followlinks=False, onerror=failed.append):
         at_root = Path(current) == source
-        for name in (*dirs, *files):
-            if _is_git_reserved_name(name) and not (at_root and name == ".git"):
-                return True
+        if any(_is_git_reserved_name(name) for name in dirs):
+            return True
+        for name in files:
+            if not _is_git_reserved_name(name):
+                continue
+            if at_root and name == ".git" and not os.path.islink(os.path.join(current, name)):
+                continue
+            return True
     return bool(failed)
 
 
