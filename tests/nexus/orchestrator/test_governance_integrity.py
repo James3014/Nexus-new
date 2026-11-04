@@ -44,8 +44,11 @@ def test_evidence_collector_reject_verified_on_failure(tmp_path):
     # One evidence failed
     task.add_evidence(Evidence(command="pytest", exit_code=1, output_summary="FAIL"))
     
-    with patch("subprocess.check_output") as mock_diff:
-        mock_diff.return_value = b"some diff"
+    mod = "nexus.orchestrator.evidence_collector"
+    with patch(f"{mod}.repository_git_dir", return_value=tmp_path), patch(
+        f"{mod}.repository_config_can_start_a_program", return_value=False
+    ), patch(f"{mod}.run_hardened_git") as mock_diff:
+        mock_diff.return_value = MagicMock(returncode=0, stdout="some diff")
         evidence_path = collector.generate_hallucination_evidence(task, "Done")
         
         with open(evidence_path, "r") as f:

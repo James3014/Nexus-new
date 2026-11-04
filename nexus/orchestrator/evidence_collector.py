@@ -2,6 +2,11 @@ import subprocess
 import json
 from pathlib import Path
 from typing import List, Dict, Any
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    repository_git_dir,
+    run_hardened_git,
+)
 from nexus.orchestrator.task_contract import Evidence, EvidenceRequirement, Task, TaskStatus
 from nexus.orchestrator.evidence_policy import build_temp_evidence_payload
 from nexus.orchestrator.evidence_policy import derive_claim_bundle
@@ -68,11 +73,22 @@ class EvidenceCollector:
         self.evidence_file.parent.mkdir(parents=True, exist_ok=True)
         
         # 1. Capture physical proof
+        # An agent writes the work tree, so its git config is not trusted: no diff (and so no
+        # proof, never a VERIFIED claim) unless the hardened runner can read it.
         diff = ""
         try:
-            diff = subprocess.check_output(["git", "diff", task.base_branch], cwd=task.working_dir).decode()
-        except Exception:
-            pass
+            work_tree = Path(task.working_dir or ".")
+            git_dir = repository_git_dir(work_tree)
+            if git_dir is not None and not repository_config_can_start_a_program(
+                work_tree, git_dir=git_dir
+            ):
+                result = run_hardened_git(
+                    work_tree, "diff", task.base_branch, "--", git_dir=git_dir
+                )
+                if result.returncode == 0:
+                    diff = result.stdout
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            diff = ""
         bundle = derive_claim_bundle(task, final_response, diff)
         
         with open(self.evidence_file, "w") as f:
