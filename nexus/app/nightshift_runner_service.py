@@ -1254,6 +1254,8 @@ class AutoResearchNightShift:
                         self.best_score = previous_best
                         self.no_improve_streak += 1
                         self._log_trace(round_id, "GIT_UNTRUSTED", outcome.score, outcome.summary)
+                        if not self._restore_work_tree(workpath):
+                            return self._restore_failed_result(round_id)
                         continue
 
                     self._log_trace(
@@ -1263,10 +1265,10 @@ class AutoResearchNightShift:
                         outcome.summary,
                     )
                 else:
-                    if self.git_enabled:
-                        self._workpath_git(workpath, "reset", "--hard", "HEAD")
                     self.no_improve_streak += 1
                     self._log_trace(round_id, outcome.status, outcome.score, outcome.summary)
+                    if self.git_enabled and not self._restore_work_tree(workpath):
+                        return self._restore_failed_result(round_id)
                     if outcome.status == "GENERATION_FAILED" and self._is_quota_or_capacity_error(
                         outcome.summary
                     ):
@@ -1422,6 +1424,30 @@ class AutoResearchNightShift:
             return run_hardened_git(root, *args, git_dir=git_dir)
         except subprocess.TimeoutExpired:
             return None
+
+    def _restore_work_tree(self, workpath: Path) -> bool:
+        """Put the work path back at the last promoted commit, untracked files included, so
+        nothing a refused or non-improving round left can ride into a later winning commit.
+        False when any step did not succeed."""
+        for args in (("reset", "--hard", self.base_commit), ("clean", "-fd")):
+            done = self._workpath_git(workpath, *args)
+            if done is None or done.returncode != 0:
+                print("🛑 [AutoResearch] Work path could not be restored; stopping the run.")
+                return False
+        return True
+
+    def _restore_failed_result(self, round_id: int) -> dict:
+        self._log_trace(
+            round_id, "RESTORE_FAILED", 0.0, "Work path restore failed; run stopped (fail closed)."
+        )
+        return {
+            "status": "FAILED",
+            "infra_blocked": True,
+            "task": self.task,
+            "target_file": self.resolved_target_file,
+            "best_score": self.best_score,
+            "reason": "workpath_restore_failed",
+        }
 
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
