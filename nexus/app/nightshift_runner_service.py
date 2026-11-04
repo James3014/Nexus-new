@@ -1220,9 +1220,12 @@ class AutoResearchNightShift:
 
         try:
             if self.git_enabled:
-                self.base_commit = subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=self.project_root, text=True
-                ).strip()
+                # Read from the work path (through the pinned, hardened call), not the project
+                # root, whose HEAD may have moved since the lease.
+                base = self._workpath_git(Path(workpath), "rev-parse", "HEAD")
+                if base is None or base.returncode != 0 or not base.stdout.strip():
+                    return self._restore_failed_result(0)
+                self.base_commit = base.stdout.strip()
             else:
                 self.base_commit = "benchmark-nongit"
 
@@ -1429,6 +1432,10 @@ class AutoResearchNightShift:
         """Put the work path back at the last promoted commit, untracked files included, so
         nothing a refused or non-improving round left can ride into a later winning commit.
         False when any step did not succeed."""
+        # Safety guard, as in _cleanup_worktree: never reset the project root itself.
+        if Path(workpath).resolve() == self.project_root.resolve():
+            print("🛑 [AutoResearch] Work path is the project root; not restoring it.")
+            return False
         for args in (("reset", "--hard", self.base_commit), ("clean", "-fd")):
             done = self._workpath_git(workpath, *args)
             if done is None or done.returncode != 0:
