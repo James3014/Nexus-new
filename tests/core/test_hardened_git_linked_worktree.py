@@ -199,3 +199,43 @@ def test_an_oversized_pointer_file_is_refused_not_read(env):
     with pytest.raises(OSError):
         hardened_git._read_pointer_file(pointer)
     assert hardened_git.linked_worktree_git_dir(worktree) is None
+
+
+@pytest.mark.parametrize("pointer", ["commondir", "gitdir"])
+def test_a_registration_pointer_that_is_a_named_pipe_with_no_writer_fails_closed_promptly(
+    env, pointer
+):
+    """No writer holds the pipe open, so a blocking open would never return."""
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    (registration / pointer).unlink()
+    os.mkfifo(registration / pointer)
+
+    assert _returns_within(5, lambda: hardened_git.linked_worktree_git_dir(worktree)) is None
+    result = _returns_within(
+        5, lambda: hardened_git.run_hardened_git(worktree, "status", git_dir=registration)
+    )
+    assert result.returncode == 128
+
+
+@pytest.mark.parametrize("pointer", ["commondir", "gitdir"])
+def test_a_registration_pointer_that_is_a_symlink_is_refused(env, pointer):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    link = registration / pointer
+    link.rename(registration / f"{pointer}.real")
+    os.symlink(f"{pointer}.real", link)
+
+    assert hardened_git.linked_worktree_git_dir(worktree) is None
+    assert hardened_git.run_hardened_git(worktree, "status", git_dir=registration).returncode == 128
+
+
+def test_a_pointer_file_of_exactly_the_size_limit_is_still_read(env):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    dotgit = worktree / ".git"
+    text = dotgit.read_text(encoding="utf-8")
+    dotgit.write_text(text + "\n" * (4096 - len(text.encode("utf-8"))), encoding="utf-8")
+    assert len(dotgit.read_bytes()) == 4096
+
+    assert hardened_git.linked_worktree_git_dir(worktree) == registration
