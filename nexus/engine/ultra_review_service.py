@@ -3044,11 +3044,9 @@ class UltraReviewService:
         is then swapped to it; ``_restore_checkout_git_file`` puts the original back and deletes
         the dir. Returns ``{"ok": False, ...}`` on any failure, leaving the checkout untouched."""
         try:
-            self._mirror_git_dir(checkout)
-            # Read again with the same bounded regular-file reader: the file may have been
-            # swapped since the check above (#3357).
-            original = read_git_pointer_file(checkout / ".git")
-        except (UltraReviewError, OSError, ValueError) as exc:
+            # The text restored later is the one validated here, never a second read (#3357).
+            _, original = self._mirror_git_pointer(checkout)
+        except (UltraReviewError, OSError) as exc:
             return {"ok": False, "detail": f"not_a_review_worktree:{exc}"}
         checkout_identity = _dir_identity(checkout)
         if checkout_identity is None:
@@ -3251,6 +3249,11 @@ class UltraReviewService:
         """The worktree git dir written by our own ``git worktree add``, validated: ``.git``
         must be a regular file (not a symlink/dir) naming a dir under this repo's
         ``worktrees/`` admin area."""
+        return self._mirror_git_pointer(execution_root)[0]
+
+    def _mirror_git_pointer(self, execution_root: Path) -> tuple[Path, str]:
+        """``_mirror_git_dir`` plus the exact ``.git`` text it validated, read once, so a caller
+        that later puts the file back restores what was checked (#3357)."""
 
         dot_git = execution_root / ".git"
         try:
@@ -3260,9 +3263,10 @@ class UltraReviewService:
         if not stat.S_ISREG(info.st_mode):
             raise UltraReviewError("mirror_git_dir_not_regular_file")
         try:
-            text = read_git_pointer_file(dot_git).strip()
+            raw = read_git_pointer_file(dot_git)
         except (OSError, ValueError) as exc:
             raise UltraReviewError("mirror_git_dir_unreadable") from exc
+        text = raw.strip()
         if not text.startswith("gitdir: "):
             raise UltraReviewError("mirror_git_dir_unparseable")
         git_dir = Path(text[len("gitdir: ") :])
@@ -3272,7 +3276,7 @@ class UltraReviewService:
         admin = Path(common).resolve() / "worktrees"
         if admin not in git_dir.resolve().parents:
             raise UltraReviewError("mirror_git_dir_outside_repository")
-        return git_dir.resolve()
+        return git_dir.resolve(), raw
 
     def _unsafe_patch_summary(self, diff_path: Path) -> list[str]:
         """``git apply --summary`` lines (git's parser) that create/delete/re-mode a symlink or
