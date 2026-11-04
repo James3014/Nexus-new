@@ -31,6 +31,15 @@ DISPATCH_PATH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
 os.environ["NEXUS_AGY_SNAPSHOT"] = str(ROOT)
 dispatch = SourceFileLoader("nexus_agy_dispatch_attestation_2314", str(DISPATCH_PATH)).load_module()
 
+
+@pytest.fixture(autouse=True)
+def _stub_source_observation(monkeypatch):
+    """These tests build a placeholder ``.git`` and exercise the write boundary, not
+    the source observation (#3335 refuses declared write paths without one)."""
+    journal = dispatch.direct_operation_journal
+    monkeypatch.setattr(journal, "capture_source_baseline", lambda *a, **k: {})
+    monkeypatch.setattr(journal, "observed_changed_paths_since", lambda *a, **k: [])
+
 MODEL = "gemini-3.8-flash-medium"
 GENUINE_CONVERSATION = "11111111-1111-4111-8111-111111111111"
 FORGED_CONVERSATION = "22222222-2222-4222-8222-222222222222"
