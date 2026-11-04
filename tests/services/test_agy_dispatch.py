@@ -7392,3 +7392,79 @@ def test_linked_worktree_check_is_not_stopped_by_a_git_dir_with_an_invalid_head(
     assert dispatch._is_linked_worktree(str(cwd)) is True
     with pytest.raises(dispatch.WorktreeFallbackError):
         dispatch._resolve_cwd_for_dispatch(requested_cwd=str(cwd), fallback_clone_path=None)
+
+
+def _scope_git_repo(tmp_path: Path) -> tuple[Path, Path]:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+    (work / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=work, check=True)
+    target = work / "target.txt"
+    target.write_text("before\n", encoding="utf-8")
+    return work, target
+
+
+def _run_scope_dispatch(tmp_path, work, target, write_paths):
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def mock_runner(write_boundary=None, **_kwargs):
+        target.write_text("after\n", encoding="utf-8")
+        return 0, "edited target successfully", "", False, 5
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=write_paths,
+        temp_command_permissions=False,
+        coordinator=coordinator,
+        run_agy_fn=mock_runner,
+        operation_hook=events.append,
+    )
+    return code, events
+
+
+def test_write_paths_without_source_baseline_refused(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    work, target = _scope_git_repo(tmp_path)
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
+    )
+    code, events = _run_scope_dispatch(tmp_path, work, target, [str(target)])
+    assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1]["failure_kind"] == "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+    assert failures[-1]["reconciliation_required"] is True
+
+
+def test_write_paths_with_missing_readback_refused(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    work, target = _scope_git_repo(tmp_path)
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "observed_changed_paths_since", lambda *a, **k: None
+    )
+    code, events = _run_scope_dispatch(tmp_path, work, target, [str(target)])
+    assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1]["failure_kind"] == "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+
+
+def test_no_write_paths_without_baseline_still_completes(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    work, target = _scope_git_repo(tmp_path)
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
+    )
+    code, events = _run_scope_dispatch(tmp_path, work, target, None)
+    assert code == 0
+    assert not any(e.get("failure_kind") for e in events)

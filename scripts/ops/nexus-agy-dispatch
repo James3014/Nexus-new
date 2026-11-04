@@ -5899,6 +5899,16 @@ def dispatch_run(
                 observed_changed_paths=attempt_changed_paths,
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+            # #3335: declared write paths need an observation to check against.
+            # No baseline or no read-back (``None``) is refused, not reported as
+            # UNCONSTRAINED.  No write_paths keeps the cwd-outside-git behaviour.
+            scope_unverifiable = bool(
+                write_paths
+                and attempt_changed_paths is None
+                and code == 0
+                and not timed_out
+                and not target_replaced
+            )
             no_tool_violation = bool(
                 permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
             )
@@ -5933,6 +5943,7 @@ def dispatch_run(
                 and not empty_output
                 and not permission_blocked
                 and not scope_blocked
+                and not scope_unverifiable
                 and not no_tool_violation
                 and not provider_terminal_quota
                 and not target_replaced
@@ -5959,7 +5970,7 @@ def dispatch_run(
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if (permission_blocked or scope_blocked or no_tool_violation)
+                if (permission_blocked or scope_blocked or scope_unverifiable or no_tool_violation)
                 else AccountFailureKind.QUOTA_EXHAUSTED
                 if provider_terminal_quota
                 else classify_failure(code, scanned_out, scanned_err, timed_out)
@@ -5999,6 +6010,10 @@ def dispatch_run(
                 else:
                     provider_effect_observed = None
                     reconciliation_required = True
+            elif scope_unverifiable:
+                last_kind = "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+                provider_effect_observed = None
+                reconciliation_required = True
             elif scope_blocked:
                 last_kind = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
                 provider_effect_observed = True
