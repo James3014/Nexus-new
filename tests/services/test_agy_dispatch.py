@@ -1684,6 +1684,8 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
+    # #3335: declared write paths need a git baseline to be checked against.
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
     coordinator = _WriteScopeCoordinator(home)
     settings = home / ".gemini" / "antigravity-cli" / "settings.json"
 
@@ -7421,7 +7423,7 @@ def _run_scope_dispatch(tmp_path, work, target, write_paths):
     code = dispatch.dispatch_run(
         prompt="edit target",
         cwd=str(work),
-        mode="accept-edits",
+        mode="accept-edits" if write_paths else "plan",
         write_paths=write_paths,
         temp_command_permissions=False,
         coordinator=coordinator,
