@@ -6,7 +6,12 @@ from typing import Any
 
 from nexus.learning.zero_trust_v2_clean_slate import build_baseline_sandwich
 from nexus.learning.zero_trust_v2_physical_sandbox import run_macos_sandbox_probe
-from nexus.learning.zero_trust_v2_promotion import evaluate_zero_trust_v2_promotion_candidate
+from nexus.learning.zero_trust_v2_promotion import (
+    NEGATIVE_CONTROL_BLOCK_KIND,
+    NO_CREDIT_KIND,
+    V2_EVIDENCE_KIND,
+    evaluate_zero_trust_v2_promotion_candidate,
+)
 from nexus.learning.zero_trust_v2_receipts import build_runtime_signed_receipt
 from nexus.learning.zero_trust_v2_sandbox import validate_sandbox_attestation
 
@@ -32,9 +37,24 @@ def run_zero_trust_v2_physical_row(
     enriched.setdefault("promotion_credit_source", "v2_only")
 
     if arm_type == "wrong_or_quarantined_skill_v2":
+        # The block is signed with the row identity, so readers count it from the receipt (#3355).
+        receipt = build_runtime_signed_receipt(
+            run_id=run_id,
+            row_id=str(row.get("row_id") or ""),
+            arm_id=arm_type,
+            capability_id=str(row.get("capability_id") or ""),
+            skill_id=str(row.get("skill_id") or ""),
+            source_skill_id=_arm_key(row)[1],
+            evidence_kind=NEGATIVE_CONTROL_BLOCK_KIND,
+            artifact_hash="",
+            raw_observation={"execution_status": "BLOCKED_BY_POLICY"},
+            secret=signing_secret,
+            observer_version="zero-trust-v2-physical-runner-v1",
+        )
         enriched.update(
             {
                 "execution_status": "BLOCKED_BY_POLICY",
+                **receipt,
                 "negative_control_blocked_count": 1,
                 "v2_evidence_count": 0,
             }
@@ -79,19 +99,21 @@ def run_zero_trust_v2_physical_row(
         baseline_after_hash=baseline_after_hash,
         teardown_status=teardown_status,
     )
+    evidence_pass = probe.get("promotion_eligible") is True and sandbox_verdict["status"] == "PASS"
+    credit_pass = evidence_pass and promotion_credit_allowed
     receipt = build_runtime_signed_receipt(
         run_id=run_id,
         row_id=str(row.get("row_id") or ""),
         arm_id=arm_type,
         capability_id=str(row.get("capability_id") or ""),
         skill_id=str(row.get("skill_id") or ""),
+        source_skill_id=_arm_key(row)[1],
+        evidence_kind=V2_EVIDENCE_KIND if credit_pass else NO_CREDIT_KIND,
         artifact_hash=sandbox_attestation["artifact_hash"],
         raw_observation=sandbox_attestation.get("raw_observation") or {},
         secret=signing_secret,
         observer_version="zero-trust-v2-physical-runner-v1",
     )
-    evidence_pass = probe.get("promotion_eligible") is True and sandbox_verdict["status"] == "PASS"
-    credit_pass = evidence_pass and promotion_credit_allowed
     enriched.update(
         {
             "execution_status": "PASS" if evidence_pass else "BLOCKED_BY_POLICY",
@@ -133,13 +155,15 @@ def run_zero_trust_v2_physical_rows(
         )
         for row in rows
     ]
-    negative_blocks: dict[tuple[str, str], int] = defaultdict(int)
+    negative_blocks: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in executed:
         if row.get("arm_type") == "wrong_or_quarantined_skill_v2" and row.get("execution_status") == "BLOCKED_BY_POLICY":
-            negative_blocks[_arm_key(row)] += 1
+            negative_blocks[_arm_key(row)].append(row)
     for row in executed:
         if row.get("arm_type") in {"candidate_skill_v2", "shadow_candidate_v2"}:
-            row["negative_control_blocked_count"] = negative_blocks.get(_arm_key(row), 0)
+            # Informational only; the evaluator counts the signed proofs attached below (#3355).
+            row["negative_control_blocked_count"] = len(negative_blocks.get(_arm_key(row), []))
+            row["signed_proofs"] = [dict(proof) for proof in negative_blocks.get(_arm_key(row), [])]
             row["promotion_evaluation"] = evaluate_zero_trust_v2_promotion_candidate(
                 row, min_v2_evidence_count=1, signing_secret=signing_secret
             )

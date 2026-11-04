@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.learning.skill_fit_closure import read_json, write_json
-from nexus.learning.zero_trust_v2_promotion import zero_trust_v2_signature_reasons  # noqa: E402
+from nexus.learning.zero_trust_v2_promotion import derive_zero_trust_v2_signed_counts  # noqa: E402
 from nexus.learning.zero_trust_v2_signing_secret import (  # noqa: E402
     SECRET_ENV,
     SECRET_FILE_ENV,
@@ -31,22 +31,12 @@ def build_zero_trust_v2_evidence_accumulation(
     *, physical_evidence: dict, min_v2_evidence_count: int = 3, signing_secret: str | None = None
 ) -> dict:
     rows = [row for row in physical_evidence.get("rows", []) or [] if isinstance(row, dict)]
-    by_candidate: dict[tuple[str, str], dict] = defaultdict(lambda: {"v2_evidence_count": 0, "v2_trust_mismatch_count": 0, "negative_control_blocked_count": 0, "rows": [], "rejected_rows": 0})
-    for row in rows:
-        if row.get("arm_type") not in {"candidate_skill_v2", "shadow_candidate_v2", "wrong_or_quarantined_skill_v2"}:
-            continue
-        key = (str(row.get("capability_id") or ""), str(row.get("source_skill_id") or row.get("skill_id") or ""))
-        item = by_candidate[key]
-        # Same per-row check as the promotion evaluator (#3278): a row that fails it is BLOCKED
-        # there, so here it adds no evidence; without a secret nothing earns credit.
-        marked = {**row, "nonproduction_secret": True} if physical_evidence.get("nonproduction_secret") is True else row
-        if zero_trust_v2_signature_reasons(marked, signing_secret=signing_secret):
-            item["rejected_rows"] += 1
-            continue
-        item["rows"].append(row.get("row_id"))
-        item["v2_evidence_count"] += int(row.get("v2_evidence_count") or 0)
-        item["v2_trust_mismatch_count"] += int(row.get("v2_trust_mismatch_count") or 0)
-        item["negative_control_blocked_count"] += int(row.get("negative_control_blocked_count") or 0)
+    rows = [row for row in rows if row.get("arm_type") in {"candidate_skill_v2", "shadow_candidate_v2", "wrong_or_quarantined_skill_v2"}]
+    if physical_evidence.get("nonproduction_secret") is True:
+        rows = [{**row, "nonproduction_secret": True} for row in rows]
+    # Counts come only from verified, de-duplicated signed receipts, shared with the promotion
+    # evaluator (#3355); the rows' own count columns are not trusted.
+    by_candidate = derive_zero_trust_v2_signed_counts(rows, signing_secret=signing_secret)
     candidates = []
     for (capability_id, skill_id), item in sorted(by_candidate.items()):
         ready = (
@@ -62,8 +52,11 @@ def build_zero_trust_v2_evidence_accumulation(
                 "v2_evidence_count": item["v2_evidence_count"],
                 "v2_trust_mismatch_count": item["v2_trust_mismatch_count"],
                 "negative_control_blocked_count": item["negative_control_blocked_count"],
-                "row_refs": item["rows"],
+                "row_refs": item["row_refs"],
                 "signature_rejected_row_count": item["rejected_rows"],
+                "rejected_row_refs": item["rejected_row_refs"],
+                "duplicate_proof_count": item["duplicate_proof_count"],
+                "unsigned_count_mismatch_row_refs": item["unsigned_count_mismatch_row_refs"],
             }
         )
     status_counts = Counter(candidate["status"] for candidate in candidates)

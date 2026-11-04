@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Mapping
 
+from nexus.learning.zero_trust_v2_receipts import verify_runtime_signed_receipt
 from nexus.learning.zero_trust_v2_sandbox import validate_sandbox_attestation
 from nexus.learning.zero_trust_v2_signing_secret import NONPRODUCTION_DEFAULT_SECRETS
 
 READY_FOR_MANUAL_APPLY = "READY_FOR_MANUAL_APPLY"
 BLOCKED = "BLOCKED"
 DIAGNOSTIC_ONLY = "DIAGNOSTIC_ONLY"
+
+# What a signed receipt proves (#3355); the kind is part of the signed inputs.
+V2_EVIDENCE_KIND = "v2_evidence"
+NEGATIVE_CONTROL_BLOCK_KIND = "negative_control_block"
+NO_CREDIT_KIND = "no_credit"
+CANDIDATE_ARM_TYPES = frozenset({"candidate_skill_v2", "shadow_candidate_v2"})
+NEGATIVE_CONTROL_ARM_TYPE = "wrong_or_quarantined_skill_v2"
 
 
 def _get_path(row: Mapping[str, Any], *path: str) -> Any:
@@ -24,10 +33,9 @@ def zero_trust_v2_signature_reasons(
 ) -> list[str]:
     """Non-production marker and attestation-signature re-check, shared with the evidence
     accumulation report (#3303). An empty list means the row's signature earns credit."""
-    if not signing_secret:
-        return ["sandbox_signature_not_verified"]
-    if signing_secret in NONPRODUCTION_DEFAULT_SECRETS or row.get("nonproduction_secret") is True:
-        return ["nonproduction_signing_secret"]
+    secret_reasons = _secret_reasons(row, signing_secret=signing_secret)
+    if secret_reasons:
+        return secret_reasons
     attestation = row.get("sandbox_attestation")
     try:
         verdict = validate_sandbox_attestation(
@@ -42,18 +50,146 @@ def zero_trust_v2_signature_reasons(
     return []
 
 
+def _secret_reasons(row: Mapping[str, Any], *, signing_secret: str | None) -> list[str]:
+    if not signing_secret:
+        return ["sandbox_signature_not_verified"]
+    if signing_secret in NONPRODUCTION_DEFAULT_SECRETS or row.get("nonproduction_secret") is True:
+        return ["nonproduction_signing_secret"]
+    return []
+
+
+def zero_trust_v2_candidate_key(row: Mapping[str, Any]) -> tuple[str, str]:
+    return (
+        str(row.get("capability_id") or ""),
+        str(row.get("source_skill_id") or row.get("skill_id") or ""),
+    )
+
+
+def verified_zero_trust_v2_proof(
+    row: Mapping[str, Any], *, signing_secret: str | None
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Verify one row's runtime-signed receipt and bind its signed inputs to the row (#3355).
+
+    Returns ``(proof, [])`` with the candidate key, the signed evidence kind and the
+    signature that identifies the proof, or ``(None, reasons)``."""
+    reasons = _secret_reasons(row, signing_secret=signing_secret)
+    if reasons:
+        return None, reasons
+    try:
+        receipt_ok = verify_runtime_signed_receipt(row, secret=str(signing_secret))
+    except (TypeError, ValueError):
+        receipt_ok = False
+    if not receipt_ok:
+        return None, ["receipt_not_verified"]
+    inputs = row["receipt_signature_inputs"]
+    arm_type = str(row.get("arm_type") or "")
+    bound = (
+        str(inputs.get("row_id") or "") == str(row.get("row_id") or "")
+        and str(inputs.get("arm_id") or "") == arm_type
+        and str(inputs.get("capability_id") or "") == str(row.get("capability_id") or "")
+        and str(inputs.get("skill_id") or "") == str(row.get("skill_id") or "")
+        and str(inputs.get("source_skill_id") or "") == zero_trust_v2_candidate_key(row)[1]
+    )
+    if not bound:
+        return None, ["receipt_inputs_not_bound_to_row"]
+    kind = str(inputs.get("evidence_kind") or NO_CREDIT_KIND)
+    if kind == V2_EVIDENCE_KIND:
+        if arm_type not in CANDIDATE_ARM_TYPES:
+            return None, ["receipt_kind_not_valid_for_arm"]
+        attestation_reasons = zero_trust_v2_signature_reasons(row, signing_secret=signing_secret)
+        if attestation_reasons:
+            return None, attestation_reasons
+        attested_artifact = _get_path(row, "sandbox_attestation", "artifact_hash")
+        if attested_artifact != inputs.get("artifact_hash"):
+            return None, ["receipt_artifact_not_bound_to_attestation"]
+    elif kind == NEGATIVE_CONTROL_BLOCK_KIND:
+        if arm_type != NEGATIVE_CONTROL_ARM_TYPE:
+            return None, ["receipt_kind_not_valid_for_arm"]
+    elif kind != NO_CREDIT_KIND:
+        return None, ["receipt_kind_unknown"]
+    return {
+        "key": (str(inputs["capability_id"]), str(inputs["source_skill_id"])),
+        "kind": kind,
+        "proof_id": str(row.get("receipt_signature")),
+        "row_id": row.get("row_id"),
+    }, []
+
+
+def _new_counts() -> dict[str, Any]:
+    return {
+        "v2_evidence_count": 0,
+        "v2_trust_mismatch_count": 0,
+        "negative_control_blocked_count": 0,
+        "row_refs": [],
+        "rejected_rows": 0,
+        "rejected_row_refs": [],
+        "duplicate_proof_count": 0,
+        "unsigned_count_mismatch_row_refs": [],
+    }
+
+
+def derive_zero_trust_v2_signed_counts(
+    rows: Iterable[Mapping[str, Any]], *, signing_secret: str | None
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Per candidate, the v2 evidence and negative-control counts derived only from verified,
+    de-duplicated signed receipts: each proof counts once, whatever the row columns say (#3355).
+    Shared by the accumulation report and the promotion evaluator."""
+    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        proof, _reasons = verified_zero_trust_v2_proof(row, signing_secret=signing_secret)
+        if proof is None:
+            item = by_key.setdefault(zero_trust_v2_candidate_key(row), _new_counts())
+            item["rejected_rows"] += 1
+            item["rejected_row_refs"].append(row.get("row_id"))
+            continue
+        item = by_key.setdefault(proof["key"], _new_counts())
+        if proof["proof_id"] in seen:
+            item["duplicate_proof_count"] += 1
+            continue
+        seen.add(proof["proof_id"])
+        item["row_refs"].append(proof["row_id"])
+        credited_v2 = 1 if proof["kind"] == V2_EVIDENCE_KIND else 0
+        if proof["kind"] == NEGATIVE_CONTROL_BLOCK_KIND:
+            item["negative_control_blocked_count"] += 1
+            if int(row.get("negative_control_blocked_count") or 0) != 1:
+                item["unsigned_count_mismatch_row_refs"].append(proof["row_id"])
+        item["v2_evidence_count"] += credited_v2
+        if int(row.get("v2_evidence_count") or 0) != credited_v2:
+            item["unsigned_count_mismatch_row_refs"].append(proof["row_id"])
+        # Not signed; it can only block, and the producer always writes 0.
+        item["v2_trust_mismatch_count"] += int(row.get("v2_trust_mismatch_count") or 0)
+    return by_key
+
+
 def evaluate_zero_trust_v2_promotion_candidate(
     row: Mapping[str, Any], *, min_v2_evidence_count: int = 3, signing_secret: str | None = None
 ) -> dict[str, Any]:
     """``signing_secret`` re-verifies the sandbox attestation signature here, where it is
-    consumed for credit (#3249); without it, or with a source-default secret, nothing earns credit."""
+    consumed for credit (#3249); without it, or with a source-default secret, nothing earns credit.
+    Evidence and negative-control counts come from the verified signed receipts of the row and
+    its ``signed_proofs`` (#3355), never from the row's own count columns."""
     capability_id = str(row.get("capability_id") or "")
     skill_id = str(row.get("skill_id") or "")
     reasons: list[str] = []
     security_contract_version = str(row.get("security_contract_version") or "")
     promotion_credit_source = str(row.get("promotion_credit_source") or "")
-    v2_evidence_count = int(row.get("v2_evidence_count") or 0)
     v2_trust_mismatch_count = int(row.get("v2_trust_mismatch_count") or 0)
+    secret_reasons = _secret_reasons(row, signing_secret=signing_secret)
+    proofs = [
+        row,
+        *[item for item in (row.get("signed_proofs") or []) if isinstance(item, Mapping)],
+    ]
+    counts = (
+        derive_zero_trust_v2_signed_counts(proofs, signing_secret=signing_secret).get(
+            zero_trust_v2_candidate_key(row), _new_counts()
+        )
+        if not secret_reasons
+        else _new_counts()
+    )
+    v2_evidence_count = int(counts["v2_evidence_count"])
 
     if security_contract_version != "v2":
         return {
@@ -70,16 +206,23 @@ def evaluate_zero_trust_v2_promotion_candidate(
 
     if promotion_credit_source != "v2_only":
         reasons.append("promotion_credit_source_not_v2_only")
-    if v2_evidence_count < min_v2_evidence_count:
+    # Without a usable secret nothing is counted and the secret reason blocks the row; the count
+    # reasons then describe the row's own (unverified) claim, never credit (#3355).
+    claimed = row if secret_reasons else counts
+    if int(claimed.get("v2_evidence_count") or 0) < min_v2_evidence_count:
         reasons.append("insufficient_v2_evidence")
     if v2_trust_mismatch_count != 0:
         reasons.append("v2_trust_mismatch_nonzero")
-    if int(row.get("negative_control_blocked_count") or 0) < 1:
+    if int(claimed.get("negative_control_blocked_count") or 0) < 1:
         reasons.append("missing_negative_control_block")
     if row.get("receipt_provenance") != "runtime_signed":
         reasons.append("missing_runtime_signed_receipt")
     if not row.get("receipt_signature"):
         reasons.append("missing_receipt_signature")
+    elif not secret_reasons:
+        _proof, proof_reasons = verified_zero_trust_v2_proof(row, signing_secret=signing_secret)
+        if any(reason.startswith("receipt_") for reason in proof_reasons):
+            reasons.append("receipt_not_verified")
     if _get_path(row, "sandbox_attestation", "status") != "PASS":
         reasons.append("sandbox_attestation_not_pass")
     reasons.extend(zero_trust_v2_signature_reasons(row, signing_secret=signing_secret))
