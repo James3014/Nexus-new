@@ -72,9 +72,12 @@ def test_huge_commondir_and_dotgit_file_fail_closed(tmp_path: Path) -> None:
     gd, _ = met._discovered_git_dirs(wt)
     (gd / "commondir").write_text("../.." + " " * 10000 + "\n", encoding="utf-8")
     assert met._discovered_git_dirs(wt) is None
+    # The oversized pointer names a real git dir (padding is trailing whitespace), so only the
+    # size bound refuses it: an unbounded read would strip it and accept the repository.
     big = tmp_path / "big"
     big.mkdir()
-    (big / ".git").write_text("gitdir: " + "a" * 10000, encoding="utf-8")
+    pointer = "gitdir: " + str((main / ".git").resolve()) + " " * 10000 + "\n"
+    (big / ".git").write_text(pointer, encoding="utf-8")
     assert met._discovered_git_dirs(big) is None
 
 
