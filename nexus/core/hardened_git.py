@@ -139,6 +139,7 @@ def run_hardened_git(
     index_file: Optional[Path] = None,
     separate_git_dir: bool = False,
     timeout: float = GIT_TIMEOUT_S,
+    repo_fd: Optional[int] = None,
 ) -> subprocess.CompletedProcess[Any]:
     """Run ``git <args>`` in ``repo_dir`` (pinned to ``git_dir`` when given, on the index
     file ``index_file`` when given; output is bytes when ``text`` is False); raises
@@ -148,7 +149,13 @@ def run_hardened_git(
     ``separate_git_dir`` marks ``git_dir`` as one the caller created outside ``repo_dir``
     (``git init --separate-git-dir``) at a path it chose itself, never one read from a
     ``.git`` pointer; it is then pinned as its own common dir, after a self-contained check
-    (``git_dir_is_self_contained``): one that fails returns 128 without running git."""
+    (``git_dir_is_self_contained``): one that fails returns 128 without running git.
+
+    ``repo_fd`` is a descriptor the caller opened on ``repo_dir`` and validated (#3153): git
+    then enters the work tree through it (``fchdir`` in the child) and a pinned work tree is
+    named relative to it, so a ``repo_dir`` path swapped after the caller's last check is not
+    what git acts on. A descriptor that is not the directory ``repo_dir`` names at the call
+    returns 128 without running git."""
     empty = "" if text else b""
     refused = _refused_caller_option(args)
     if refused is not None:
@@ -182,7 +189,17 @@ def run_hardened_git(
             return subprocess.CompletedProcess(
                 ["git", *args], 128, empty, message if text else message.encode()
             )
+    if repo_fd is not None and not _fd_names_dir(repo_fd, Path(repo_dir)):
+        message = (
+            f"fatal: work tree is not the directory open at the given descriptor: {repo_dir}\n"
+        )
+        return subprocess.CompletedProcess(
+            ["git", *args], 128, empty, message if text else message.encode()
+        )
     env = hardened_git_env(repo_dir, git_dir, common_dir)
+    if repo_fd is not None and git_dir is not None:
+        # The work tree is the directory git starts in, entered through the descriptor.
+        env["GIT_WORK_TREE"] = "."
     if index_file is not None:
         env["GIT_INDEX_FILE"] = str(index_file)
     key = Path(repo_dir).resolve()
@@ -192,7 +209,8 @@ def run_hardened_git(
         # The pinned settings come after the caller's -c pairs, so the pinned values win.
         return subprocess.run(
             ["git", *args[:caller_end], *_GIT_OVERRIDES, *args[caller_end:]],
-            cwd=str(repo_dir),
+            cwd=None if repo_fd is not None else str(repo_dir),
+            preexec_fn=None if repo_fd is None else (lambda: os.fchdir(repo_fd)),
             env=env,
             capture_output=True,
             text=text,
@@ -204,6 +222,20 @@ def run_hardened_git(
             _RUNNING[key] -= 1
             if not _RUNNING[key]:
                 del _RUNNING[key]
+
+
+def _fd_names_dir(fd: int, path: Path) -> bool:
+    """True when ``fd`` is a directory and ``path`` (not followed if it is a link) names it."""
+    try:
+        opened = os.fstat(fd)
+        named = os.lstat(path)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(opened.st_mode)
+        and stat.S_ISDIR(named.st_mode)
+        and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino)
+    )
 
 
 def clear_stale_index_lock(repo_dir: Path, git_dir: Path) -> bool:
@@ -252,10 +284,13 @@ def config_names_a_repository_program(names: List[str]) -> bool:
 
 
 def repository_config_can_start_a_program(
-    repo_dir: Path, git_dir: Optional[Path] = None, separate_git_dir: bool = False
+    repo_dir: Path,
+    git_dir: Optional[Path] = None,
+    separate_git_dir: bool = False,
+    repo_fd: Optional[int] = None,
 ) -> bool:
     """True when the config of the repository at ``repo_dir`` names such a program, or cannot
-    be read."""
+    be read; ``repo_fd`` as for ``run_hardened_git``."""
     try:
         config = run_hardened_git(
             repo_dir,
@@ -265,6 +300,7 @@ def repository_config_can_start_a_program(
             "--includes",
             git_dir=git_dir,
             separate_git_dir=separate_git_dir,
+            repo_fd=repo_fd,
         )
     except (subprocess.TimeoutExpired, UnicodeDecodeError):
         # A config whose names git prints as bytes that do not decode cannot be read.
