@@ -38,7 +38,12 @@ def workspace_mgr(tmp_path):
 
 def test_workspace_lease_success(workspace_mgr):
     """驗證 Workspace 租借流程（Mock Git）。"""
-    with patch("subprocess.run") as mock_run:
+    with (
+        patch.object(
+            WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0)
         
         task_id, branch, path = workspace_mgr.lease(task_id="T123")
@@ -59,7 +64,12 @@ def test_workspace_cleanup(workspace_mgr, tmp_path):
     work_path = workspace_mgr.workspace_base / task_id
     work_path.mkdir(parents=True, exist_ok=True)
     
-    with patch("subprocess.run") as mock_run:
+    with (
+        patch.object(
+            WorkspaceManager, "_hardened_git_dir", return_value=workspace_mgr.project_root
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         workspace_mgr.cleanup(task_id, branch)
         
         # physical cleanup is allowed, but branch deletion is explicit-only.
@@ -299,3 +309,170 @@ def test_sync_staged_to_sandbox_refuses_a_patch_path_that_is_a_link(tmp_path, mo
     assert mgr.sync_staged_to_sandbox(tmp_path / "sandbox") is False
     assert target.read_text(encoding="utf-8") == "keep me\n"
 
+
+
+# --- #3343: the remaining git calls run through the hardened runner ---
+
+
+def _hostile_repo(tmp_path):
+    """A repo whose config names a smudge filter (applied to every file) that writes a marker."""
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    marker = tmp_path / "filter-ran"
+    script = tmp_path / "smudge.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n", encoding="utf-8")
+    script.chmod(0o755)
+    (repo / ".gitattributes").write_text("* filter=evil\n", encoding="utf-8")
+    _git(repo, "add", ".gitattributes")
+    _git(repo, "commit", "-m", "attrs")
+    _git(repo, "config", "filter.evil.smudge", str(script))
+    marker.unlink(missing_ok=True)
+    return repo, marker
+
+
+def _manager(repo, tmp_path):
+    mgr = WorkspaceManager(repo)
+    mgr.workspace_base = tmp_path / "ws"
+    mgr.workspace_base.mkdir(exist_ok=True)
+    return mgr
+
+
+def _hang_on(monkeypatch, subcommand):
+    """run_hardened_git raises TimeoutExpired for ``subcommand``; the probes run for real."""
+    import nexus.core.hardened_git as hardened_git
+
+    real = hardened_git.run_hardened_git
+
+    def run(repo_dir, *args, **kwargs):
+        if args and args[0] == subcommand:
+            raise subprocess.TimeoutExpired(cmd="git", timeout=1)
+        return real(repo_dir, *args, **kwargs)
+
+    monkeypatch.setattr(hardened_git, "run_hardened_git", run)
+
+
+def test_lease_refuses_a_repository_config_naming_a_program(tmp_path):
+    repo, marker = _hostile_repo(tmp_path)
+    mgr = _manager(repo, tmp_path)
+    assert mgr.lease(task_id="T1") == (None, None, None)
+    assert not marker.exists()
+    assert not (mgr.workspace_base / "T1").exists()
+
+
+def test_lease_fails_closed_when_worktree_add_hangs(tmp_path, monkeypatch):
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    mgr = _manager(repo, tmp_path)
+    _hang_on(monkeypatch, "worktree")
+    assert mgr.lease(task_id="T1") == (None, None, None)
+
+
+def test_lease_runs_through_the_hardened_runner_on_a_clean_repo(tmp_path):
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    mgr = _manager(repo, tmp_path)
+    task_id, branch, path = mgr.lease(task_id="T1")
+    assert path == mgr.workspace_base / "T1"
+    assert (path / "tracked.txt").exists()
+
+
+def test_cleanup_refuses_a_repository_config_naming_a_program(tmp_path):
+    repo, marker = _hostile_repo(tmp_path)
+    mgr = _manager(repo, tmp_path)
+    work = mgr.workspace_base / "T1"
+    _git(repo, "worktree", "add", "-b", "isolated/task-T1", str(work), "HEAD")
+    marker.unlink(missing_ok=True)  # the plain add above ran the filter
+    mgr.cleanup("T1", "isolated/task-T1")
+    assert not marker.exists()
+    assert work.exists()  # git was not run, so the registered worktree was not removed
+
+
+def test_cleanup_branch_delete_refuses_a_config_naming_a_program(tmp_path, monkeypatch):
+    repo, marker = _hostile_repo(tmp_path)
+    _git(repo, "branch", "isolated/task-T1")
+    mgr = _manager(repo, tmp_path)
+    (mgr.workspace_base / "T1").mkdir()
+    monkeypatch.setenv(WorkspaceManager.LEGACY_MUTATION_ENV, "1")
+    mgr.cleanup("T1", "isolated/task-T1")
+    assert not marker.exists()
+    assert "isolated/task-T1" in _git(repo, "branch", "--list", "isolated/task-T1")
+
+
+def test_cleanup_fails_closed_when_git_hangs(tmp_path, monkeypatch):
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    mgr = _manager(repo, tmp_path)
+    (mgr.workspace_base / "T1").mkdir()
+    _hang_on(monkeypatch, "worktree")
+    mgr.cleanup("T1", "isolated/task-T1")  # returns instead of hanging; nothing raised
+
+
+def test_auto_gc_refuses_a_repository_config_naming_a_program(tmp_path, monkeypatch):
+    repo, marker = _hostile_repo(tmp_path)
+    mgr = _manager(repo, tmp_path)
+    stale = mgr.workspace_base / "old"
+    _git(repo, "worktree", "add", "-b", "old", str(stale), "HEAD")
+    marker.unlink(missing_ok=True)  # the plain add above ran the filter
+    old = 1_000_000_000
+    os.utime(stale, (old, old))
+    monkeypatch.setattr(mgr, "_is_independently_registered_worktree", lambda path: True)
+    mgr._auto_gc()
+    assert not marker.exists()
+    assert stale.exists()
+
+
+def test_harvest_refuses_a_repository_config_naming_a_program(tmp_path, monkeypatch):
+    repo, marker = _hostile_repo(tmp_path)
+    _git(repo, "branch", "feature")
+    head = _git(repo, "rev-parse", "HEAD")
+    mgr = _manager(repo, tmp_path)
+    monkeypatch.setenv(WorkspaceManager.LEGACY_MUTATION_ENV, "1")
+    monkeypatch.setattr(mgr, "_trigger_flash_crystallization", lambda: None)
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    assert mgr.harvest("feature", sandbox) is False
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_ensure_sandbox_committed_refuses_a_config_naming_a_program(tmp_path):
+    sandbox, marker = _hostile_repo(tmp_path)
+    (sandbox / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    _git(sandbox, "add", "tracked.txt")
+    head = _git(sandbox, "rev-parse", "HEAD")
+    _manager(sandbox, tmp_path)._ensure_sandbox_committed(sandbox)
+    assert _git(sandbox, "rev-parse", "HEAD") == head
+
+
+def test_merge_steps_fail_closed_when_git_hangs(tmp_path, monkeypatch):
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    _git(repo, "branch", "feature")
+    mgr = _manager(repo, tmp_path)
+    _hang_on(monkeypatch, "merge")
+    assert mgr._execute_merge("feature") is False
+    _hang_on(monkeypatch, "checkout")
+    mgr._prepare_main_for_merge()  # bounded: returns instead of hanging
+
+
+def test_run_git_stays_pinned_to_the_probed_git_dir_when_the_pointer_is_rewritten(
+    tmp_path, monkeypatch
+):
+    """#3351: git runs on the git dir probed before the call, never on one a rewritten
+    .git pointer names afterwards."""
+    controller = tmp_path / "controller"
+    _init_repo(controller)
+    work = tmp_path / "work"
+    _git(controller, "worktree", "add", "-q", "--detach", str(work))
+    other = tmp_path / "other"
+    other_head = _init_repo(other)
+    monkeypatch.setenv("NEXUS_WORKSPACE_BASE", str(tmp_path / "workspaces"))
+    mgr = WorkspaceManager(controller)
+    probed = mgr._hardened_git_dir(work)
+    assert probed is not None
+    monkeypatch.setattr(WorkspaceManager, "_hardened_git_dir", staticmethod(lambda cwd: probed))
+    (work / ".git").write_text(f"gitdir: {other / '.git'}\n", encoding="utf-8")
+
+    mgr._run_git(work, "commit", "--allow-empty", "-q", "-m", "should not land in other")
+
+    assert _git(other, "rev-parse", "HEAD") == other_head
