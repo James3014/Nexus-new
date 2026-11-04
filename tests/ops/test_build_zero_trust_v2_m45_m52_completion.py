@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 
 from nexus.learning.zero_trust_v2_receipts import build_runtime_signed_receipt
-from scripts.ops.build_zero_trust_v2_m45_m52_completion import build_zero_trust_v2_m45_m52_completion
+from scripts.ops.build_zero_trust_v2_m45_m52_completion import (
+    build_zero_trust_v2_m45_m52_completion,
+    reverify_m45_behavior_run_results,
+)
 
 
 def _m36(bundle: str) -> dict:
@@ -202,13 +205,19 @@ def _write_signed_bundle(path, receipt, *, eligible=1) -> None:
     )
 
 
-def _receipt(run_id: str, *, capability_id: str = "policy_capability_gate", row_id: str | None = None) -> dict:
+def _receipt(
+    run_id: str,
+    *,
+    capability_id: str = "policy_capability_gate",
+    skill_id: str = "browse",
+    row_id: str | None = None,
+) -> dict:
     return build_runtime_signed_receipt(
         run_id=run_id,
         row_id=row_id or f"{run_id}:with_nexus",
         arm_id="candidate_skill_v2",
         capability_id=capability_id,
-        skill_id="browse",
+        skill_id=skill_id,
         artifact_hash=f"artifact-{run_id}",
         raw_observation={"row_counts": {"eligible_with_nexus": 1}},
         secret="test-secret",
@@ -301,3 +310,81 @@ def test_m45_m52_unsigned_eligible_count_does_not_raise_credit(tmp_path, monkeyp
     for item in result["m45_behavior_run_results"]:
         assert item["eligible_behavior_rows"] == 1
         assert item["unsigned_eligible_behavior_rows"] == 999
+
+
+def test_m45_m52_refuses_receipt_signed_for_another_skill(tmp_path, monkeypatch) -> None:
+    run_plan = []
+    for index in range(1, 4):
+        bundle = tmp_path / f"run-{index}" / "evidence_bundle.json"
+        skill = "other_skill" if index == 2 else "browse"
+        _write_signed_bundle(bundle, _receipt(f"run-{index}", skill_id=skill))
+        run_plan.append({
+            "run_index": index,
+            "run_id": f"run-{index}",
+            "capability_id": "policy_capability_gate",
+            "skill_id": "browse",
+            "expected_evidence_bundle": str(bundle),
+        })
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+
+    result = build_zero_trust_v2_m45_m52_completion(m36_m44=_plan_m36(run_plan))
+
+    assert result["summary"]["m45_clean_v2_receipt_count"] == 2
+    assert result["status"] == "BLOCKED"
+    refused = result["m45_behavior_run_results"][1]
+    assert refused["runtime_signed_receipt_verified"] is True
+    assert refused["runtime_signed_receipt_identity_bound"] is False
+    assert "runtime_signed_v2_receipt_identity_mismatch" in refused["blockers"]
+
+
+def test_m45_m52_same_signed_identity_with_another_signature_counts_once(
+    tmp_path, monkeypatch
+) -> None:
+    run_plan = []
+    for index in range(1, 4):
+        bundle = tmp_path / f"run-{index}" / "evidence_bundle.json"
+        # Runs 1 and 2: distinct signatures (one per run id) over one signed identity.
+        row_id = "shared-row:with_nexus" if index in (1, 2) else None
+        _write_signed_bundle(bundle, _receipt(f"run-{index}", row_id=row_id))
+        run_plan.append({
+            "run_index": index,
+            "run_id": f"run-{index}",
+            "expected_evidence_bundle": str(bundle),
+        })
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+
+    result = build_zero_trust_v2_m45_m52_completion(m36_m44=_plan_m36(run_plan))
+
+    runs = result["m45_behavior_run_results"]
+    assert result["summary"]["m45_clean_v2_receipt_count"] == 2
+    assert result["status"] == "BLOCKED"
+    assert runs[0]["clean_v2_receipt"] is True
+    assert "duplicate_runtime_signed_v2_receipt" in runs[1]["blockers"]
+    assert runs[1]["eligible_behavior_rows"] == 0
+    assert runs[2]["clean_v2_receipt"] is True
+
+
+def test_m45_m52_reverify_keeps_an_earlier_report_block(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "test-secret")
+    rows = []
+    for index in range(1, 4):
+        bundle = tmp_path / f"run-{index}" / "evidence_bundle.json"
+        _write_signed_bundle(bundle, _receipt(f"run-{index}"))
+        rows.append({
+            "run_index": index,
+            "run_id": f"run-{index}",
+            "evidence_bundle": str(bundle),
+            "clean_v2_receipt": True,
+            "runtime_signed_receipt_verified": True,
+            "eligible_behavior_rows": 1,
+            "blockers": [],
+        })
+    rows[1]["clean_v2_receipt"] = False
+    rows[2]["blockers"] = ["earlier_report_blocker"]
+
+    results = reverify_m45_behavior_run_results({"m45_behavior_run_results": rows})
+
+    assert [item["clean_v2_receipt"] for item in results] == [True, False, False]
+    assert results[1]["status"] == "EXECUTED_BUT_BLOCKED"
+    assert results[2]["status"] == "EXECUTED_BUT_BLOCKED"
+    assert "earlier_report_blocker" in results[2]["blockers"]
