@@ -197,3 +197,136 @@ def test_verify_runtime_signed_receipt_binds_expected_identity() -> None:
         verify_runtime_signed_receipt(receipt, secret="s", expected={"evidence_kind": "anything"})
         is False
     )
+
+
+def test_3374_report_signature_roundtrip_and_tamper() -> None:
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_POST_APPLY_SMOKE,
+        sign_report,
+        verify_report_signature,
+    )
+
+    report = {"status": "PASS", "summary": {"case_count": 34, "pass_count": 34}}
+    signed = sign_report(report, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    assert verify_report_signature(signed, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    assert not verify_report_signature(signed, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="other")
+    assert not verify_report_signature(report, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    edited = {**signed, "summary": {"case_count": 34, "pass_count": 33}}
+    assert not verify_report_signature(edited, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+
+
+def test_3374_report_signature_rejects_other_kind_and_other_purpose() -> None:
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_POST_APPLY_SMOKE,
+        REPORT_KIND_ROLLOUT,
+        sign_report,
+        verify_report_signature,
+    )
+
+    report = {"status": "PASS", "summary": {}}
+    signed = sign_report(report, kind=REPORT_KIND_ROLLOUT, secret="k")
+    assert not verify_report_signature(signed, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    relabeled = {
+        **signed,
+        "report_signature": {
+            **signed["report_signature"],
+            "report_kind": REPORT_KIND_POST_APPLY_SMOKE,
+        },
+    }
+    assert not verify_report_signature(relabeled, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    receipt = build_runtime_signed_receipt(
+        run_id="r",
+        row_id="x",
+        arm_id="a",
+        capability_id="c",
+        skill_id="s",
+        artifact_hash="h",
+        raw_observation={},
+        secret="k",
+    )
+    as_report = {**report, "report_signature": receipt}
+    assert not verify_report_signature(as_report, kind=REPORT_KIND_ROLLOUT, secret="k")
+
+
+def test_3374_load_signing_secret_never_creates_key(tmp_path, monkeypatch) -> None:
+    from nexus.learning.zero_trust_v2_receipts import load_signing_secret
+
+    monkeypatch.delenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", raising=False)
+    missing = tmp_path / "nokey"
+    assert load_signing_secret(str(missing)) == ""
+    assert not missing.exists()
+    keyfile = tmp_path / "key"
+    keyfile.write_text("abc\n", encoding="utf-8")
+    assert load_signing_secret(str(keyfile)) == "abc"
+    monkeypatch.setenv("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "envkey")
+    assert load_signing_secret(str(keyfile)) == "envkey"
+
+
+def _forged_report_signature(
+    report: dict, *, purpose: str, label_kind: str, fields: dict, key: str
+) -> dict:
+    import hashlib
+    import hmac
+
+    digest = canonical_json_hash({
+        "signature_purpose": purpose,
+        "report_kind": label_kind,
+        "fields": fields,
+    })
+    return {
+        **report,
+        "report_signature": {
+            "signature_purpose": purpose,
+            "report_kind": label_kind,
+            "algorithm": "hmac-sha256",
+            "fields": fields,
+            "signature": hmac.new(key.encode(), digest.encode(), hashlib.sha256).hexdigest(),
+        },
+    }
+
+
+def test_3374_purpose_check_rejects_same_key_signature_of_other_purpose() -> None:
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_POST_APPLY_SMOKE,
+        report_signed_fields,
+        verify_report_signature,
+    )
+
+    report = {"status": "PASS", "summary": {"case_count": 34, "pass_count": 34}}
+    fields = report_signed_fields(REPORT_KIND_POST_APPLY_SMOKE, report)
+    forged = _forged_report_signature(
+        report,
+        purpose="nexus.zero_trust_v2.runtime_receipt",
+        label_kind=REPORT_KIND_POST_APPLY_SMOKE,
+        fields=fields,
+        key="k",
+    )
+    assert not verify_report_signature(forged, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+    good = _forged_report_signature(
+        report,
+        purpose="nexus.zero_trust_v2.report",
+        label_kind=REPORT_KIND_POST_APPLY_SMOKE,
+        fields=fields,
+        key="k",
+    )
+    assert verify_report_signature(good, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")
+
+
+def test_3374_kind_check_rejects_signature_labelled_for_other_kind() -> None:
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_POST_APPLY_SMOKE,
+        REPORT_KIND_ROLLOUT,
+        report_signed_fields,
+        verify_report_signature,
+    )
+
+    report = {"status": "PASS", "summary": {"case_count": 34, "pass_count": 34}}
+    fields = report_signed_fields(REPORT_KIND_POST_APPLY_SMOKE, report)
+    mislabelled = _forged_report_signature(
+        report,
+        purpose="nexus.zero_trust_v2.report",
+        label_kind=REPORT_KIND_ROLLOUT,
+        fields=fields,
+        key="k",
+    )
+    assert not verify_report_signature(mislabelled, kind=REPORT_KIND_POST_APPLY_SMOKE, secret="k")

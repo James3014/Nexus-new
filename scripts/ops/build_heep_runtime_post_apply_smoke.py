@@ -127,14 +127,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--overlay", default=str(DEFAULT_OVERLAY))
     parser.add_argument("--skill-status-report", default=str(DEFAULT_SKILL_STATUS))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--signing-secret-file", default="")
     args = parser.parse_args(argv)
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_POST_APPLY_SMOKE,
+        load_signing_secret,
+        sign_report_if_keyed,
+    )
+
     smoke = build_heep_runtime_post_apply_smoke(
         overlay=read_json(args.overlay),
         overlay_path=args.overlay,
         skill_status_report=args.skill_status_report,
     )
+    # Signed only when a key is given; without one the output is unchanged.
+    smoke = sign_report_if_keyed(
+        smoke,
+        kind=REPORT_KIND_POST_APPLY_SMOKE,
+        secret=load_signing_secret(args.signing_secret_file),
+    )
     write_json(args.output, smoke)
-    print(json.dumps({"status": smoke["status"], "output": args.output, **smoke["summary"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": smoke["status"], "output": args.output, **smoke["summary"]}, sort_keys=True
+        )
+    )
     return 0 if smoke["status"] == "PASS" else 1
 
 

@@ -14,7 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.learning.skill_fit_closure import read_json, write_json
-from nexus.learning.zero_trust_v2_receipts import verify_runtime_signed_receipt
+from nexus.learning.zero_trust_v2_receipts import (  # noqa: E402
+    REPORT_KIND_M45_M52,
+    sign_report_if_keyed,
+    verify_runtime_signed_receipt,
+)
 
 
 DEFAULT_M36_M44 = Path("docs/reports/NEXUS_ZERO_TRUST_V2_M36_M44_COMPLETION_2026-05-21.json")
@@ -42,12 +46,14 @@ def _read_bundle(path: str) -> dict[str, Any] | None:
     return read_json(bundle_path)
 
 
-def _load_signing_secret() -> str:
+def _load_signing_secret(path: str = "") -> str:
     import os
 
     env_secret = os.environ.get("NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET", "").strip()
     if env_secret:
         return env_secret
+    if path and Path(path).is_file():
+        return Path(path).read_text(encoding="utf-8").strip()
     if DEFAULT_SIGNING_SECRET_PATH.exists():
         return DEFAULT_SIGNING_SECRET_PATH.read_text(encoding="utf-8").strip()
     return ""
@@ -373,11 +379,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--m36-m44", default=str(DEFAULT_M36_M44))
     parser.add_argument("--runner-matrix", default="")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--signing-secret-file", default="")
     args = parser.parse_args(argv)
     runner_matrix = read_json(args.runner_matrix) if args.runner_matrix else None
-    result = build_zero_trust_v2_m45_m52_completion(m36_m44=read_json(args.m36_m44), runner_matrix=runner_matrix)
+    result = build_zero_trust_v2_m45_m52_completion(
+        m36_m44=read_json(args.m36_m44), runner_matrix=runner_matrix
+    )
+    result = sign_report_if_keyed(
+        result,
+        kind=REPORT_KIND_M45_M52,
+        secret=_load_signing_secret(args.signing_secret_file),
+    )
     write_json(args.output, result)
-    print(json.dumps({"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True
+        )
+    )
     return 0
 
 
