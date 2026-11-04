@@ -3045,8 +3045,10 @@ class UltraReviewService:
         the dir. Returns ``{"ok": False, ...}`` on any failure, leaving the checkout untouched."""
         try:
             self._mirror_git_dir(checkout)
-            original = (checkout / ".git").read_text(encoding="utf-8")
-        except (UltraReviewError, OSError) as exc:
+            # Read again with the same bounded regular-file reader: the file may have been
+            # swapped since the check above (#3357).
+            original = read_git_pointer_file(checkout / ".git")
+        except (UltraReviewError, OSError, ValueError) as exc:
             return {"ok": False, "detail": f"not_a_review_worktree:{exc}"}
         checkout_identity = _dir_identity(checkout)
         if checkout_identity is None:

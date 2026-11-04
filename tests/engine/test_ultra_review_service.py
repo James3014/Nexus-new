@@ -1893,3 +1893,33 @@ def test_mirror_git_dir_refuses_an_oversized_git_file(tmp_path):
     (fake / ".git").write_text(f"gitdir: {tmp_path / 'elsewhere'}\n" + " " * 5000, encoding="utf-8")
     with pytest.raises(UltraReviewError, match="mirror_git_dir_unreadable"):
         service._mirror_git_dir(fake)
+
+
+def test_checkout_git_file_swapped_to_a_named_pipe_after_the_check_is_refused_promptly(
+    tmp_path, monkeypatch
+):
+    import threading
+
+    _init_app_repo(tmp_path)
+    service = UltraReviewService(tmp_path)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    os.mkfifo(checkout / ".git")
+    # The pointer check passes, as if the pipe replaced the file right after it.
+    monkeypatch.setattr(service, "_mirror_git_dir", lambda root: root / "unused")
+    box: list = []
+
+    def run() -> None:
+        box.append(service._give_checkout_sandbox_git_dir(checkout, rev="HEAD"))
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(5)
+    blocked = thread.is_alive()
+    if blocked:
+        # Unblock a reader stuck on the pipe so the thread can end.
+        os.close(os.open(checkout / ".git", os.O_WRONLY | os.O_NONBLOCK))
+    assert not blocked, "checkout .git read blocked on a named pipe"
+    assert box[0]["ok"] is False
+    assert box[0]["detail"].startswith("not_a_review_worktree")
+
