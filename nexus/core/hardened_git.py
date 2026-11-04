@@ -162,7 +162,7 @@ def run_hardened_git(
         elif linked_worktree_git_dir(repo_dir) == git_dir.resolve():
             try:
                 common_dir = _common_dir(git_dir.resolve())
-            except (OSError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError, ValueError):
                 common_dir = None
         if common_dir is None:
             message = f"fatal: pinned git dir is not a worktree: {git_dir}\n"
@@ -392,6 +392,12 @@ def _read_pointer_file(path: Path) -> str:
     if len(data) > _POINTER_MAX_BYTES or len(data) != info.st_size:
         raise OSError(f"git pointer file was not read whole: {path}")
     return data.decode("utf-8")
+
+
+def read_git_pointer_file(path: Path) -> str:
+    """Public form of the bounded pointer reader for other modules. Raises OSError (not a
+    regular file, too large, short read) or UnicodeDecodeError/ValueError; callers refuse."""
+    return _read_pointer_file(path)
 
 
 def _gitdir_pointer(path: Path, prefix: str = "gitdir:") -> Optional[Path]:

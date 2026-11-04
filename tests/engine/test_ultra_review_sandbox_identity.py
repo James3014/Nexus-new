@@ -571,3 +571,43 @@ def test_review_whose_mirror_is_replaced_by_a_lane_builds_no_later_profile_and_i
     assert payload["gate_passed"] is False
     assert "execution_root" in payload["blocked_reason"]
     _assert_outside_intact(outside)
+
+
+def _swap_checkout(tmp_path: Path) -> tuple[UltraReviewService, Path]:
+    project = tmp_path / "project"
+    _init_app_repo(project)
+    service = UltraReviewService(project)
+    service._git_home = (tmp_path / "git-home").resolve()
+    service._git_home.mkdir()
+    checkout = tmp_path / "wt"
+    _git(project, "worktree", "add", "--detach", str(checkout), "HEAD")
+    return service, checkout
+
+
+def test_checkout_swap_restores_the_validated_git_text_not_a_later_rewrite(tmp_path, monkeypatch):
+    service, checkout = _swap_checkout(tmp_path)
+    validated = (checkout / ".git").read_text(encoding="utf-8")
+    real_reader = ultra_mod.read_git_pointer_file
+    rewritten: list[bool] = []
+
+    def read_then_rewrite(path):
+        text = real_reader(path)
+        if not rewritten:
+            rewritten.append(True)
+            # The file changes right after it was validated.
+            (checkout / ".git").write_text(f"gitdir: {tmp_path / 'elsewhere'}\n", encoding="utf-8")
+        return text
+
+    monkeypatch.setattr(ultra_mod, "read_git_pointer_file", read_then_rewrite)
+    swap = service._give_checkout_sandbox_git_dir(checkout, rev="HEAD")
+    assert swap["ok"] is True, swap
+    service._restore_checkout_git_file(checkout, swap)
+    assert (checkout / ".git").read_text(encoding="utf-8") == validated
+
+
+def test_checkout_swap_refuses_a_git_file_that_is_not_utf8(tmp_path):
+    service, checkout = _swap_checkout(tmp_path)
+    (checkout / ".git").write_bytes(b"gitdir: \xff\xfe\n")
+    swap = service._give_checkout_sandbox_git_dir(checkout, rev="HEAD")
+    assert swap["ok"] is False
+    assert swap["detail"].startswith("not_a_review_worktree")

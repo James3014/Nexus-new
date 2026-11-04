@@ -1842,3 +1842,54 @@ def test_verify_ghost_report_rejects_wrong_key_exit_code_and_swapped_dir(tmp_pat
     for name in ("junit.xml", "witness.json"):
         (swapped["dir"] / name).write_bytes((moved / name).read_bytes())
     assert verify(swapped, 0)["reason"] == "report_dir_replaced"
+
+
+def test_mirror_git_dir_refuses_a_git_file_that_is_a_named_pipe_promptly(tmp_path, monkeypatch):
+    import threading
+
+    from nexus.engine.ultra_review_service import UltraReviewError
+
+    _init_app_repo(tmp_path)
+    service = UltraReviewService(tmp_path)
+    fake = tmp_path / "mirror"
+    fake.mkdir()
+    os.mkfifo(fake / ".git")
+    fd = os.open(fake / ".git", os.O_RDWR)
+    os.write(fd, f"gitdir: {tmp_path / 'elsewhere'}\n".encode())
+    # The type check sees an ordinary file, as if the pipe replaced it after that check.
+    real_lstat = os.lstat
+    ordinary = real_lstat(tmp_path / ".git" / "HEAD")
+    monkeypatch.setattr(
+        os, "lstat", lambda p, *a, **k: ordinary if Path(p) == fake / ".git" else real_lstat(p, *a, **k)
+    )
+    box: list = []
+
+    def run() -> None:
+        try:
+            service._mirror_git_dir(fake)
+        except BaseException as exc:
+            box.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(5)
+    try:
+        assert not thread.is_alive(), "mirror .git read blocked on a named pipe"
+        assert isinstance(box[0], UltraReviewError)
+        assert "mirror_git_dir_unreadable" in str(box[0])
+    finally:
+        os.close(fd)
+
+
+def test_mirror_git_dir_refuses_an_oversized_git_file(tmp_path):
+    import pytest
+
+    from nexus.engine.ultra_review_service import UltraReviewError
+
+    _init_app_repo(tmp_path)
+    service = UltraReviewService(tmp_path)
+    fake = tmp_path / "mirror"
+    fake.mkdir()
+    (fake / ".git").write_text(f"gitdir: {tmp_path / 'elsewhere'}\n" + " " * 5000, encoding="utf-8")
+    with pytest.raises(UltraReviewError, match="mirror_git_dir_unreadable"):
+        service._mirror_git_dir(fake)
