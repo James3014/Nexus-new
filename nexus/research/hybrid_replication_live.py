@@ -27,6 +27,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 from nexus.core.contained_write import PathContainmentError, read_bytes_in_root
 from nexus.core.hardened_git import (
+    read_git_pointer_file,
     repository_config_can_start_a_program,
     repository_git_dir,
     run_hardened_git,
@@ -1979,7 +1980,10 @@ def _verified_persistent_shadow_git_dir(source: Path, revision: str) -> Path:
     gitfile = source / ".git"
     if gitfile.is_symlink() or not gitfile.is_file():
         raise RuntimeError("persistent_shadow_gitfile_invalid")
-    pointer = gitfile.read_text(encoding="utf-8", errors="replace").strip()
+    try:
+        pointer = read_git_pointer_file(gitfile).strip()
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("persistent_shadow_gitfile_invalid") from exc
     if not pointer.startswith("gitdir:") or (
         Path(pointer.removeprefix("gitdir:").strip()).resolve() != git_dir.resolve()
     ):

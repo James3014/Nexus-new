@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Mapping, Optional
 
+from nexus.core.hardened_git import read_git_pointer_file
+
 CANONICAL_SOURCE_ROOT_ENV = "NEXUS_CANONICAL_SOURCE_ROOT"
 # Derive the repository root from this module's own location instead of a
 # machine-specific developer path. parents: [0]=orchestrator, [1]=nexus,
@@ -191,8 +193,8 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
             return "CONTROLLER_GITDIR_NOT_ITS_OWN"
     else:
         try:
-            back = (Path(controller_gitdir) / "gitdir").read_text(encoding="utf-8").strip()
-        except OSError:
+            back = read_git_pointer_file(Path(controller_gitdir) / "gitdir").strip()
+        except (OSError, ValueError):
             return "CONTROLLER_GITDIR_NOT_ITS_OWN"
         if not _same_physical_directory(Path(back), dot_git):
             return "CONTROLLER_GITDIR_NOT_ITS_OWN"
