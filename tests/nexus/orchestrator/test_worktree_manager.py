@@ -2509,3 +2509,37 @@ def test_unbound_target_outside_root_with_a_git_symlink_to_a_directory_is_refuse
         manager._status_bytes(outside)
 
     assert _controller_git_state(controller) == before
+
+
+def test_option_shaped_base_branch_is_refused_and_writes_no_file_3361(temp_git_repo, tmp_path):
+    target = tmp_path / "written-by-git"
+    manager = WorktreeManager(root_dir=str(temp_git_repo / ".nexus" / "worktrees"))
+    original_cwd = os.getcwd()
+    os.chdir(temp_git_repo)
+    try:
+        with pytest.raises(RuntimeError, match="revision argument refused"):
+            manager.create("TASK-3361", base_branch=f"--output={target}")
+    finally:
+        os.chdir(original_cwd)
+    assert not target.exists()
+    assert not (temp_git_repo / ".nexus" / "worktrees" / "TASK-3361").exists()
+
+
+def test_option_shaped_salvage_ref_and_candidate_commit_are_refused_3361(tmp_path):
+    from nexus.orchestrator import worktree_manager as wm
+
+    target = tmp_path / "written-by-git"
+    calls = []
+    manager = WorktreeManager(root_dir=str(tmp_path / "wt"))
+    manager._run_git = lambda *a, **k: calls.append(a) or ""  # type: ignore[method-assign]
+    manager.validate_lease_identity = lambda *a, **k: None  # type: ignore[method-assign]
+    contract = type("C", (), {"controller_repo_root": str(tmp_path), "task_id": "T"})()
+    lease = type("L", (), {"target_worktree": str(tmp_path), "initial_head": "a" * 40})()
+    with pytest.raises(RuntimeError, match="revision argument refused"):
+        manager.restore_task_branch_for_retry(contract, lease, "b" * 40, f"--output={target}")
+    with pytest.raises(RuntimeError, match="revision argument refused"):
+        manager.protect_candidate(contract, lease, f"--output={target}")
+    with pytest.raises(RuntimeError, match="revision argument refused"):
+        wm._revision(f"--output={target}")
+    assert calls == []
+    assert not target.exists()

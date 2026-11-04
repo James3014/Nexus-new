@@ -1386,3 +1386,17 @@ def test_option_shaped_revision_is_refused_before_git_reads_it_3361(tmp_path):
             with pytest.raises(closure.ClosureError, match="REVISION_REFUSED"):
                 call(b, h)
             assert not written.exists()
+
+
+def test_closure_diff_readers_accept_only_a_full_lowercase_sha_3361(tmp_path):
+    from nexus.services import external_intelligence_closure as closure
+
+    repo, base = make_repo(tmp_path)
+    for bad in ("main", "HEAD", base[:12], base.upper(), base + "0", ""):
+        for call in (closure._changed_paths, closure._deleted_paths, closure._diff_sha):
+            for b, h in ((bad, base), (base, bad)):
+                with pytest.raises(closure.ClosureError, match="REVISION_REFUSED"):
+                    call(repo, b, h)
+        with pytest.raises(closure.ClosureError, match="REVISION_REFUSED"):
+            closure._raw_diff_patch(repo, bad, base)
+    assert closure._changed_paths(repo, base, base) == []

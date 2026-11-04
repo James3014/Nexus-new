@@ -483,3 +483,20 @@ def test_nightshift_stage_failure_is_not_promoted(tmp_path):
 
     assert runner._commit_improvement(workpath, 1.0) is False
     assert runner.base_commit == base_before
+
+
+def test_repair_candidate_diff_refuses_an_option_shaped_source_revision_3361(tmp_path, monkeypatch):
+    written = tmp_path / "written-by-git"
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if list(cmd) == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"--output={written}\n", stderr="")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    payload = _candidate_diff(tmp_path, lambda root, wt: None)
+
+    assert not written.exists()
+    assert payload == ""

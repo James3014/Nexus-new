@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.core import hardened_git as target_git
+from nexus.core.hardened_git import revision_argument
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.measure_external_target import (
     FILTER_DRIVER_PRESENT,
@@ -28,6 +29,14 @@ from nexus.orchestrator.measure_external_target import (
 )
 from nexus.orchestrator.measurement_worktree_diff import MeasurementDiffError, verify_target
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
+
+
+def _revision(rev: Any) -> str:
+    """``rev`` as a git revision; an option-shaped one is refused (RuntimeError, fails closed)."""
+    try:
+        return revision_argument(rev)
+    except ValueError as exc:
+        raise RuntimeError("revision argument refused") from exc
 
 
 def _utc_now() -> str:
@@ -1322,9 +1331,9 @@ class WorktreeManager:
         try:
             self._run_git(["rev-parse", "--verify", branch_name])
         except RuntimeError:
-            self._run_git(["branch", branch_name, base_branch])
+            self._run_git(["branch", _revision(branch_name), _revision(base_branch)])
 
-        self._run_git(["worktree", "add", str(worktree_path), branch_name])
+        self._run_git(["worktree", "add", str(worktree_path), _revision(branch_name)])
         return str(worktree_path.resolve())
 
     def cleanup(self, task_id: str, force: bool = False):
@@ -1461,9 +1470,10 @@ class WorktreeManager:
         )
         if candidate_tree is not None and candidate_tree_sha != candidate_tree:
             raise RuntimeError("precommitted candidate tree does not match the asserted tree")
+        target_base = _revision(contract.target_base_revision)
         try:
             self._run_git(
-                ["merge-base", "--is-ancestor", contract.target_base_revision, candidate_commit],
+                ["merge-base", "--is-ancestor", target_base, candidate_commit],
                 cwd=controller_root,
             )
         except RuntimeError as exc:
@@ -1471,7 +1481,7 @@ class WorktreeManager:
                 "precommitted candidate must descend from the exact Target base"
             ) from exc
         merge_commits = self._run_git(
-            ["rev-list", "--merges", f"{contract.target_base_revision}..{candidate_commit}"],
+            ["rev-list", "--merges", f"{target_base}..{candidate_commit}"],
             cwd=controller_root,
         ).splitlines()
         if merge_commits:
@@ -2042,9 +2052,10 @@ class WorktreeManager:
             # Re-check before the Controller status probe (status runs clean
             # filters) and again right before ``worktree add`` (#2749).
             recheck_external_controller_at_lease(controller_root, contract.target_base_revision)
+        target_base = _revision(contract.target_base_revision)
         controller_status = self._verify_controller(contract)
         resolved_target_revision = self._run_git(
-            ["rev-parse", f"{contract.target_base_revision}^{{commit}}"],
+            ["rev-parse", f"{target_base}^{{commit}}"],
             cwd=controller_root,
         )
         if resolved_target_revision != contract.target_base_revision:
@@ -2102,7 +2113,7 @@ class WorktreeManager:
                     "-b",
                     target_branch,
                     str(target_path),
-                    contract.target_base_revision,
+                    target_base,
                 ]
                 branch_created_this_call = True
             else:
@@ -2118,7 +2129,7 @@ class WorktreeManager:
                                 "merge-base",
                                 "--is-ancestor",
                                 branch_head,
-                                contract.target_base_revision,
+                                target_base,
                             ],
                             cwd=controller_root,
                         )
@@ -2132,7 +2143,7 @@ class WorktreeManager:
                             "add",
                             "--detach",
                             str(target_path),
-                            contract.target_base_revision,
+                            target_base,
                         ]
                     else:
                         protected = self._run_git(
@@ -2193,7 +2204,7 @@ class WorktreeManager:
                             "add",
                             "--detach",
                             str(target_path),
-                            contract.target_base_revision,
+                            target_base,
                         ]
                 else:
                     add_args = ["worktree", "add", str(target_path), target_branch]
@@ -2514,6 +2525,7 @@ class WorktreeManager:
         candidate_commit: str,
     ) -> str:
         self.validate_lease_identity(contract, lease)
+        candidate_commit = _revision(candidate_commit)
         target = Path(lease.target_worktree).resolve()
         actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
         if actual != candidate_commit:
@@ -2804,7 +2816,7 @@ class WorktreeManager:
                     )
                 try:
                     protected = self._run_git(
-                        ["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller
+                        ["rev-parse", f"{_revision(durable_ref)}^{{commit}}"], cwd=controller
                     )
                 except RuntimeError:
                     protected = ""
@@ -2862,7 +2874,7 @@ class WorktreeManager:
                 )
             try:
                 protected = self._run_git(
-                    ["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller
+                    ["rev-parse", f"{_revision(durable_ref)}^{{commit}}"], cwd=controller
                 )
             except RuntimeError:
                 protected = ""
@@ -2948,7 +2960,9 @@ class WorktreeManager:
         task_id = contract.task_id
         target_branch = f"nexus/task/{task_id}"
         branch_ref = f"refs/heads/{target_branch}"
-        initial_head = lease.initial_head
+        initial_head = _revision(lease.initial_head)
+        salvage_commit = _revision(salvage_commit)
+        salvage_ref = _revision(salvage_ref)
 
         result_base: dict[str, str | bool] = {
             "branch_ref": branch_ref,
@@ -3151,6 +3165,7 @@ class WorktreeManager:
         committed_changed: list[str] = []
         committed_deleted: list[str] = []
         if target_head != lease.initial_head:
+            _revision(lease.initial_head)
             try:
                 self._run_git(
                     ["merge-base", "--is-ancestor", lease.initial_head, target_head],
@@ -4364,7 +4379,12 @@ class WorktreeManager:
                 reachable = False
                 try:
                     self._run_git(
-                        ["merge-base", "--is-ancestor", current_head, contract.controller_revision],
+                        [
+                            "merge-base",
+                            "--is-ancestor",
+                            current_head,
+                            _revision(contract.controller_revision),
+                        ],
                         cwd=c_root,
                     )
                     reachable = True

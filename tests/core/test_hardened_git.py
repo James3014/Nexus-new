@@ -1057,3 +1057,9 @@ def test_revision_argument_passes_a_plain_revision_through_unchanged(rev):
 def test_revision_argument_refuses_an_option_or_malformed_revision(rev):
     with pytest.raises(ValueError):
         hardened_git.revision_argument(rev)
+
+
+@pytest.mark.parametrize("rev", ["a\rb", "\r", "HEAD\r", "\rHEAD"])
+def test_revision_argument_refuses_a_carriage_return_3361(rev):
+    with pytest.raises(ValueError):
+        hardened_git.revision_argument(rev)

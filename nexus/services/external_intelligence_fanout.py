@@ -121,12 +121,18 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
             pass
 
 
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+
 def _revision(rev: object) -> str:
-    """``rev`` as a git revision; an option-shaped one is refused (fails closed)."""
+    """``rev`` as a git commit sha (40 lowercase hex); anything else is refused (fails closed)."""
     try:
-        return revision_argument(rev)
+        revision = revision_argument(rev)
     except ValueError as exc:
         raise FanoutError("REVISION_REFUSED") from exc
+    if not _COMMIT_SHA.fullmatch(revision):
+        raise FanoutError("REVISION_REFUSED")
+    return revision
 
 
 def _run_git(root: Path, *args: str, timeout: float = 30.0, git_dir: Path | None = None) -> str:
@@ -2025,8 +2031,8 @@ def _git_blob_bytes(
     if git_dir is None:
         git_dir = _worker_git_dir(root)
     try:
-        revision = revision_argument(revision)
-    except ValueError:
+        revision = _revision(revision)
+    except FanoutError:
         return None
     result = run_hardened_git(
         root,

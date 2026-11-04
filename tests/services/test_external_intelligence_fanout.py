@@ -2795,3 +2795,80 @@ def test_option_shaped_base_revision_is_refused_at_every_forwarding_site_3361(tm
     with pytest.raises(CoreBindingError, match="workspace_observation"):
         runtime._revalidate_core_binding_for_continuation({"base_sha": bad}, {}, lease)
     assert not written.exists()
+
+
+def test_every_tree_revision_and_blob_read_checks_the_revision_first_3361(tmp_path, monkeypatch):
+    import ast
+    import inspect
+
+    import nexus.services.external_intelligence_fanout as fanout
+    from nexus.services.external_intelligence_fanout import CoreBindingError
+
+    # Structural: each ``<rev>^{tree}`` string is built from a ``_revision(...)`` call.
+    tree = ast.parse(inspect.getsource(fanout))
+    tree_strings = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.JoinedStr)
+        and any(isinstance(v, ast.Constant) and "^{tree}" in str(v.value) for v in node.values)
+    ]
+    assert len(tree_strings) == 3
+    for node in tree_strings:
+        calls = [
+            c.func.id
+            for v in node.values
+            if isinstance(v, ast.FormattedValue)
+            for c in ast.walk(v.value)
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        ]
+        assert calls == ["_revision"]
+
+    # Behavioral: the revalidation paths and the blob reader call the check first.
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base)
+    good = ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/x.git"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    lease = GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(good)
+    seen: list[object] = []
+    real = fanout._revision
+
+    def spy(rev):
+        seen.append(rev)
+        return real(rev)
+
+    monkeypatch.setattr(fanout, "_revision", spy)
+    runtime = fanout.AdaptiveWorkerFanoutRuntime
+    for call in (
+        lambda: runtime._revalidate_core_binding(good, lease, {}),
+        lambda: runtime._revalidate_core_binding_for_continuation({"base_sha": base}, {}, lease),
+    ):
+        seen.clear()
+        why = None
+        try:
+            call()
+        except (CoreBindingError, KeyError) as exc:
+            # Past the revision reads the stub inputs are incomplete; only the reads matter.
+            why = repr(exc)
+        assert seen and set(seen) == {base}, why
+    seen.clear()
+    assert fanout._git_blob_bytes(repo, base, "a.py") == b"VALUE = 1\n"
+    assert seen == [base]
+    seen.clear()
+    assert fanout._git_blob_bytes(repo, "main", "a.py") is None
+    assert fanout._git_blob_bytes(repo, base.upper(), "a.py") is None
+
+
+def test_a_non_sha_revision_is_refused_by_the_fanout_check_3361(tmp_path):
+    import nexus.services.external_intelligence_fanout as fanout
+
+    repo, base = make_repo(tmp_path)
+    assert fanout._revision(base) == base
+    for bad in ("main", "HEAD", base[:12], base.upper(), base + "0", ""):
+        with pytest.raises(FanoutError, match="REVISION_REFUSED"):
+            fanout._revision(bad)
