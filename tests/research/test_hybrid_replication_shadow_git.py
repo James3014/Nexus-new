@@ -1001,6 +1001,8 @@ def test_plan_mode_counts_a_new_file_under_a_self_ignoring_rule_as_mutation(
 def test_plan_mode_counts_a_new_file_under_a_git_dir_exclude_rule_as_mutation(
     sandbox: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Regression guard only: the git-dir digest already counts the exclude-file write as a
+    mutation, so this test stays green even if the plan-mode status honoured that rule."""
     repo, revision = _origin(sandbox)
 
     def agent(cwd: Path) -> None:
