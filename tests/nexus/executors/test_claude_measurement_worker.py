@@ -1124,3 +1124,14 @@ def test_worktree_git_dirs_refuse_an_oversized_or_non_utf8_dot_git(tmp_path):
     assert cmw.worktree_git_dirs(target, contract.controller_repo_root) == []
     dot_git.write_bytes(b"gitdir: \xff\xfe\n")
     assert cmw.worktree_git_dirs(target, contract.controller_repo_root) == []
+
+
+def test_worktree_git_dirs_do_not_admit_the_common_dir_of_a_non_utf8_commondir(tmp_path):
+    contract, lease = _linked_worktree_lease(tmp_path)
+    target = Path(lease.target_worktree)
+    common = Path(os.path.realpath(Path(contract.controller_repo_root) / ".git"))
+    assert common in cmw.worktree_git_dirs(target, contract.controller_repo_root)
+    (_linked_registration(lease) / "commondir").write_bytes(b"\xff\xfe\n")
+    dirs = cmw.worktree_git_dirs(target, contract.controller_repo_root)
+    assert common not in dirs
+    assert dirs  # the worktree's own gitdir is still admitted
