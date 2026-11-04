@@ -1440,7 +1440,7 @@ class AutoResearchNightShift:
         if not base:
             print("🛑 [AutoResearch] No round base to restore to; stopping the run.")
             return False
-        for args in (("reset", "--hard", base), ("clean", "-fd")):
+        for args in (("reset", "--hard", base), ("clean", "-ffd")):
             done = self._workpath_git(workpath, *args)
             if done is None or done.returncode != 0:
                 print("🛑 [AutoResearch] Work path could not be restored; stopping the run.")
@@ -1460,11 +1460,38 @@ class AutoResearchNightShift:
             "reason": "workpath_restore_failed",
         }
 
+    @staticmethod
+    def _gitlinks(listing_z: str) -> set[tuple[str, str]]:
+        """(path, object id) of each mode 160000 entry in `git ls-files --stage -z` or
+        `git ls-tree -r -z` output (``<mode> [<type>] <oid>[ <stage>]\t<path>`` records)."""
+        links = set()
+        for record in listing_z.split("\0"):
+            meta, _, path = record.partition("\t")
+            fields = meta.split()
+            if fields and fields[0] == "160000":
+                oid = fields[2] if fields[1] == "commit" else fields[1]
+                links.add((path, oid))
+        return links
+
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
         git there is not trusted or the commit did not land."""
         added = self._workpath_git(workpath, "add", ".")
         if added is None or added.returncode != 0:
+            return False
+        # Refuse to promote an embedded repository (a new gitlink entry): the restore clears
+        # them, so a round that adds one on purpose must not be able to carry it forward.
+        # Any difference (added, removed or repointed) refuses. The index listing is used rather
+        # than diff because the hardened runner's diff ignores these entries; `add .` does not.
+        staged = self._workpath_git(workpath, "ls-files", "--stage", "-z")
+        known = self._workpath_git(workpath, "ls-tree", "-r", "-z", "HEAD")
+        if (
+            staged is None
+            or known is None
+            or staged.returncode != 0
+            or known.returncode != 0
+            or self._gitlinks(staged.stdout) != self._gitlinks(known.stdout)
+        ):
             return False
         committed = self._workpath_git(
             workpath,

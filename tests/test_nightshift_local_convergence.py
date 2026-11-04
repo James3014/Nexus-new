@@ -733,3 +733,103 @@ def test_restore_refuses_without_a_round_base(tmp_path, monkeypatch):
 
     assert shift._restore_work_tree(work) is False
     assert (work / "left_over.txt").exists()
+
+
+# --- one more class of untracked leftover (#3368) -------------------------------------------------
+
+
+def _plant_nested_repo(work: Path, name: str = "nested") -> None:
+    nested = work / name
+    nested.mkdir()
+    init_git_repo(nested)
+    (nested / "f.txt").write_text("x\n", encoding="utf-8")
+    _swarm_git(nested, "add", "f.txt")
+    _swarm_git(nested, "commit", "-q", "-m", "inner")
+
+
+def test_losing_round_nested_repo_is_cleared_and_not_promoted(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [
+            RoundOutcome(0.0, "", "NO_CHANGE", "lost"),
+            RoundOutcome(8.0, "", "SCORED", "wins"),
+        ],
+        [{"target.py": "value = 2\n"}, {"target.py": "value = 3\n"}],
+    )
+    real_round = shift._run_round
+    calls = {"n": 0}
+
+    def planting_round(round_id, workpath):
+        calls["n"] += 1
+        outcome = real_round(round_id, workpath)
+        if calls["n"] == 1:
+            _plant_nested_repo(work)
+        return outcome
+
+    shift._run_round = planting_round
+    shift.run()
+
+    assert not (work / "nested").exists()
+    assert (work / "target.py").read_text(encoding="utf-8") == "value = 3\n"
+    assert _head_files(work) == {"target.py"}
+
+
+def test_winning_round_that_adds_a_nested_repo_is_not_promoted(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(8.0, "", "SCORED", "wins with a nested repo")],
+        [{"target.py": "value = 2\n"}],
+    )
+    real_round = shift._run_round
+
+    def planting_round(round_id, workpath):
+        outcome = real_round(round_id, workpath)
+        _plant_nested_repo(work)
+        return outcome
+
+    shift._run_round = planting_round
+    shift.run()
+
+    assert _swarm_git(work, "log", "--format=%s").splitlines() == ["initial"]
+    assert not (work / "nested").exists()
+    assert (work / "target.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_plain_winning_round_is_still_promoted(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(8.0, "", "SCORED", "wins")],
+        [{"target.py": "value = 2\n", "extra.py": "Z = 1\n"}],
+    )
+    shift.run()
+
+    assert _head_files(work) == {"target.py", "extra.py"}
+    assert _swarm_git(work, "log", "--format=%s").splitlines()[1] == "initial"
+
+
+def test_round_that_repoints_an_existing_nested_repo_is_not_promoted(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(8.0, "", "SCORED", "wins by repointing")],
+        [{"target.py": "value = 2\n"}],
+    )
+    base_link = _swarm_git(work, "rev-parse", "HEAD").strip()
+    _swarm_git(work, "update-index", "--add", "--cacheinfo", f"160000,{base_link},dep")
+    _swarm_git(work, "commit", "-q", "-m", "base with nested repo")
+    start = _swarm_git(work, "rev-parse", "HEAD").strip()
+    real_round = shift._run_round
+
+    def repointing_round(round_id, workpath):
+        outcome = real_round(round_id, workpath)
+        _plant_nested_repo(work, "dep")
+        return outcome
+
+    shift._run_round = repointing_round
+    shift.run()
+
+    assert _swarm_git(work, "rev-parse", "HEAD").strip() == start
+    assert _swarm_git(work, "ls-tree", "HEAD", "dep").split()[2] == base_link
