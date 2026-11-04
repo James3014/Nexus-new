@@ -1436,7 +1436,11 @@ class AutoResearchNightShift:
         if Path(workpath).resolve() == self.project_root.resolve():
             print("🛑 [AutoResearch] Work path is the project root; not restoring it.")
             return False
-        for args in (("reset", "--hard", self.base_commit), ("clean", "-fd")):
+        base = self.base_commit
+        if not base:
+            print("🛑 [AutoResearch] No round base to restore to; stopping the run.")
+            return False
+        for args in (("reset", "--hard", base), ("clean", "-fd")):
             done = self._workpath_git(workpath, *args)
             if done is None or done.returncode != 0:
                 print("🛑 [AutoResearch] Work path could not be restored; stopping the run.")

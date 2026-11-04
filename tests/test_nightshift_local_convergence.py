@@ -723,3 +723,13 @@ def test_restore_refuses_when_the_work_path_is_the_project_root(tmp_path, monkey
 
     assert shift._restore_work_tree(root) is False
     assert (root / "keep_me.txt").read_text(encoding="utf-8") == "precious\n"
+
+
+def test_restore_refuses_without_a_round_base(tmp_path, monkeypatch):
+    shift, work = _restore_shift(tmp_path, monkeypatch, [], [])
+    (work / "left_over.txt").write_text("from a losing round\n", encoding="utf-8")
+    shift.base_commit = None
+    shift._workpath_git_dir = shift._resolve_workpath_git_dir(work)
+
+    assert shift._restore_work_tree(work) is False
+    assert (work / "left_over.txt").exists()
