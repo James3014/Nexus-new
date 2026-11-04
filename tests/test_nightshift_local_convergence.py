@@ -152,7 +152,14 @@ def test_run_stops_after_convergence_patience(tmp_path, monkeypatch):
     shift.tracelog_path = tmp_path / "tracelog.jsonl"
     shift.optimization_curve_path = tmp_path / "optimization_curve.csv"
     shift.resolved_target_file = "target.py"
-    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, tmp_path)
+    work = tmp_path / "work"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "nightshift-conv", str(work)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, work)
     shift._resolve_target_file = lambda: "target.py"
 
     outcomes = iter([
@@ -510,3 +517,219 @@ def test_cleanup_keeps_a_lock_file_that_is_a_link(tmp_path):
     assert (lock_dir / "swarm_1.lock").is_symlink()
     assert target.exists()
     assert not stale.exists()
+
+
+# --- a refused or non-improving round leaves nothing for a later winning commit (#3354) ----------
+
+
+def _restore_shift(tmp_path: Path, monkeypatch, outcomes, writes):
+    monkeypatch.setenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "1")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    (repo / "target.py").write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "target.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+    shift = AutoResearchNightShift(
+        "target.py", max_rounds=len(outcomes), convergence_patience=9, keep_worktree=True
+    )
+    shift.project_root = repo
+    # The leased work path is an independent linked worktree, as in production.
+    work = tmp_path / "work"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "nightshift-test", str(work)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    shift.tracelog_path = tmp_path / "tracelog.jsonl"
+    shift.optimization_curve_path = tmp_path / "optimization_curve.csv"
+    shift.resolved_target_file = "target.py"
+    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, work)
+    shift._resolve_target_file = lambda: "target.py"
+    queue = iter(zip(outcomes, writes))
+
+    def fake_run_round(round_id, workpath):
+        outcome, write = next(queue)
+        for name, text in write.items():
+            (work / name).write_text(text, encoding="utf-8")
+        return outcome
+
+    shift._run_round = fake_run_round
+    shift._run_tier2_validation = lambda _workpath: (True, "tier2_pass")
+    shift._append_to_pending_manifest = lambda *a, **k: None
+    shift._log_trace = lambda *a, **k: None
+    return shift, work
+
+
+def _head_files(repo: Path) -> set[str]:
+    out = _swarm_git(repo, "show", "--name-only", "--format=", "HEAD")
+    return set(out.split())
+
+
+def test_refused_commit_round_leftovers_do_not_ride_into_next_win(tmp_path, monkeypatch):
+    shift, repo = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [
+            RoundOutcome(5.0, "", "SCORED", "refused"),
+            RoundOutcome(8.0, "", "SCORED", "wins"),
+        ],
+        [
+            {"target.py": "value = 2\n", "stray_new.py": "X = 1\n"},
+            {"target.py": "value = 3\n"},
+        ],
+    )
+    real_commit = shift._commit_improvement
+    calls = {"n": 0}
+
+    def commit(workpath, score):
+        calls["n"] += 1
+        return False if calls["n"] == 1 else real_commit(workpath, score)
+
+    shift._commit_improvement = commit
+    shift.run()
+
+    assert (repo / "target.py").read_text(encoding="utf-8") == "value = 3\n"
+    assert not (repo / "stray_new.py").exists()
+    assert _head_files(repo) == {"target.py"}
+
+
+def test_non_improving_round_leftovers_do_not_ride_into_next_win(tmp_path, monkeypatch):
+    shift, repo = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [
+            RoundOutcome(0.0, "", "NO_CHANGE", "lost"),
+            RoundOutcome(8.0, "", "SCORED", "wins"),
+        ],
+        [
+            {"target.py": "value = 2\n", "stray_new.py": "X = 1\n"},
+            {"target.py": "value = 3\n"},
+        ],
+    )
+    shift.run()
+
+    assert (repo / "target.py").read_text(encoding="utf-8") == "value = 3\n"
+    assert not (repo / "stray_new.py").exists()
+    assert _head_files(repo) == {"target.py"}
+
+
+def test_run_stops_when_the_work_tree_cannot_be_restored(tmp_path, monkeypatch):
+    import nexus.app.nightshift_runner_service as svc
+
+    shift, repo = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [
+            RoundOutcome(0.0, "", "NO_CHANGE", "lost"),
+            RoundOutcome(8.0, "", "SCORED", "must not run"),
+        ],
+        [{"stray_new.py": "X = 1\n"}, {"target.py": "value = 3\n"}],
+    )
+    real = svc.run_hardened_git
+
+    def failing(root, *args, **kwargs):
+        if args and args[0] == "reset":
+            return subprocess.CompletedProcess(args, 1, "", "boom")
+        return real(root, *args, **kwargs)
+
+    monkeypatch.setattr(svc, "run_hardened_git", failing)
+    result = shift.run()
+
+    assert result["status"] == "FAILED"
+    assert result["reason"] == "workpath_restore_failed"
+    assert _swarm_git(repo, "log", "--format=%s").splitlines() == ["initial"]
+
+
+def test_losing_round_own_commit_is_undone_by_the_restore(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(0.0, "", "NO_CHANGE", "lost")],
+        [{"target.py": "value = 2\n"}],
+    )
+    start = _swarm_git(work, "rev-parse", "HEAD").strip()
+    real_round = shift._run_round
+
+    def committing_round(round_id, workpath):
+        outcome = real_round(round_id, workpath)
+        _swarm_git(workpath, "add", ".")
+        _swarm_git(workpath, "commit", "-q", "-m", "candidate own commit")
+        return outcome
+
+    shift._run_round = committing_round
+    shift.run()
+
+    assert _swarm_git(work, "rev-parse", "HEAD").strip() == start
+    assert _swarm_git(work, "log", "--format=%s").splitlines() == ["initial"]
+    assert (work / "target.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_run_fails_when_the_clean_step_fails(tmp_path, monkeypatch):
+    import nexus.app.nightshift_runner_service as svc
+
+    shift, _work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(0.0, "", "NO_CHANGE", "lost")],
+        [{"stray_new.py": "X = 1\n"}],
+    )
+    real = svc.run_hardened_git
+
+    def failing(root, *args, **kwargs):
+        if args and args[0] == "clean":
+            return subprocess.CompletedProcess(args, 1, "", "boom")
+        return real(root, *args, **kwargs)
+
+    monkeypatch.setattr(svc, "run_hardened_git", failing)
+    result = shift.run()
+
+    assert result["status"] == "FAILED"
+    assert result["reason"] == "workpath_restore_failed"
+
+
+def test_base_commit_comes_from_the_work_tree_not_a_moved_project_head(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(0.0, "", "NO_CHANGE", "lost")],
+        [{"stray_new.py": "X = 1\n"}],
+    )
+    start = _swarm_git(work, "rev-parse", "HEAD").strip()
+    real_lease = shift.worktree_mgr.lease
+
+    def lease_then_project_moves(task_id, branch_prefix):
+        leased = real_lease(task_id, branch_prefix)
+        (shift.project_root / "later.py").write_text("Y = 1\n", encoding="utf-8")
+        _swarm_git(shift.project_root, "add", "later.py")
+        _swarm_git(shift.project_root, "commit", "-q", "-m", "project moved on")
+        return leased
+
+    shift.worktree_mgr.lease = lease_then_project_moves
+    shift.run()
+
+    assert shift.base_commit == start
+    assert _swarm_git(work, "rev-parse", "HEAD").strip() == start
+    assert not (work / "later.py").exists()
+
+
+def test_restore_refuses_when_the_work_path_is_the_project_root(tmp_path, monkeypatch):
+    shift, _work = _restore_shift(tmp_path, monkeypatch, [], [])
+    root = shift.project_root
+    (root / "keep_me.txt").write_text("precious\n", encoding="utf-8")
+    shift.base_commit = _swarm_git(root, "rev-parse", "HEAD").strip()
+    shift._workpath_git_dir = shift._resolve_workpath_git_dir(root)
+
+    assert shift._restore_work_tree(root) is False
+    assert (root / "keep_me.txt").read_text(encoding="utf-8") == "precious\n"
+
+
+def test_restore_refuses_without_a_round_base(tmp_path, monkeypatch):
+    shift, work = _restore_shift(tmp_path, monkeypatch, [], [])
+    (work / "left_over.txt").write_text("from a losing round\n", encoding="utf-8")
+    shift.base_commit = None
+    shift._workpath_git_dir = shift._resolve_workpath_git_dir(work)
+
+    assert shift._restore_work_tree(work) is False
+    assert (work / "left_over.txt").exists()
