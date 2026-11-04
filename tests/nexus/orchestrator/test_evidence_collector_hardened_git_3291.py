@@ -76,3 +76,39 @@ def test_git_timeout_gives_no_proof(tmp_path):
         data = _bundle(tmp_path, repo)
     assert data["proof_type"] == "none"
     assert data["claim_state"] != "VERIFIED"
+
+
+def _bundle_for(tmp_path: Path, repo: Path, base_branch: str) -> dict:
+    task = Task(
+        task_id="T-3291",
+        owner="A1",
+        allowed_files=["a.txt"],
+        done_criteria=[],
+        evidence_requirements=["pytest"],
+        working_dir=str(repo),
+        base_branch=base_branch,
+    )
+    task.add_evidence(Evidence(command="pytest", exit_code=0, output_summary="ok"))
+    out = tmp_path / "ev" / "evidence.json"
+    collector = EvidenceCollector(reports_dir=str(tmp_path / "reports"), evidence_file=str(out))
+    return json.loads(Path(collector.generate_hallucination_evidence(task, "Done")).read_text())
+
+
+def test_a_work_tree_whose_git_pointer_leaves_it_gives_no_proof(tmp_path):
+    """A .git file naming a git dir outside the work tree (not a registered linked worktree)
+    is not trusted, so no diff is taken there."""
+    elsewhere = _repo(tmp_path)
+    work = tmp_path / "pointer"
+    work.mkdir()
+    (work / "a.txt").write_text("two\n")
+    (work / ".git").write_text(f"gitdir: {elsewhere / '.git'}\n")
+    data = _bundle(tmp_path, work)
+    assert data["proof_type"] == "none"
+    assert data["claim_state"] != "VERIFIED"
+
+
+def test_a_base_revision_shaped_like_an_option_gives_no_proof(tmp_path):
+    repo = _repo(tmp_path)
+    data = _bundle_for(tmp_path, repo, "--output=" + str(tmp_path / "written"))
+    assert not (tmp_path / "written").exists()
+    assert data["proof_type"] == "none"

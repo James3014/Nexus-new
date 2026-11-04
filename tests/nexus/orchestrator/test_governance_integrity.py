@@ -22,8 +22,9 @@ def test_evidence_collector_low_confidence_no_proof(tmp_path):
     # Add a successful evidence but no physical git diff exists
     task.add_evidence(Evidence(command="pytest", exit_code=0, output_summary="OK"))
     
-    with patch("subprocess.check_output") as mock_diff:
-        mock_diff.side_effect = Exception("No diff")
+    # The diff now runs through the hardened runner (#3291); a failing diff gives no proof.
+    with patch("nexus.orchestrator.evidence_collector.run_hardened_git") as mock_diff:
+        mock_diff.side_effect = OSError("No diff")
         evidence_path = collector.generate_hallucination_evidence(task, "Done")
         
         with open(evidence_path, "r") as f:

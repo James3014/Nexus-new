@@ -78,16 +78,18 @@ class EvidenceCollector:
         diff = ""
         try:
             work_tree = Path(task.working_dir or ".")
-            git_dir = repository_git_dir(work_tree)
+            base = str(task.base_branch or "")
+            # A revision shaped like an option would be read by git diff as one.
+            git_dir = None if not base or base.startswith("-") else repository_git_dir(work_tree)
             if git_dir is not None and not repository_config_can_start_a_program(
                 work_tree, git_dir=git_dir
             ):
                 result = run_hardened_git(
-                    work_tree, "diff", task.base_branch, "--", git_dir=git_dir
+                    work_tree, "diff", base, "--", git_dir=git_dir
                 )
                 if result.returncode == 0:
                     diff = result.stdout
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
             diff = ""
         bundle = derive_claim_bundle(task, final_response, diff)
         
