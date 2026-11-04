@@ -380,13 +380,17 @@ def _read_pointer_file(path: Path) -> str:
     which every caller treats as an invalid pointer."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
             raise OSError(f"git pointer is not a regular file: {path}")
+        if info.st_size > _POINTER_MAX_BYTES:
+            raise OSError(f"git pointer file is too large: {path}")
         data = os.read(fd, _POINTER_MAX_BYTES + 1)
     finally:
         os.close(fd)
-    if len(data) > _POINTER_MAX_BYTES:
-        raise OSError(f"git pointer file is too large: {path}")
+    # A short read (or a file that changed size) is refused rather than half-parsed.
+    if len(data) > _POINTER_MAX_BYTES or len(data) != info.st_size:
+        raise OSError(f"git pointer file was not read whole: {path}")
     return data.decode("utf-8")
 
 

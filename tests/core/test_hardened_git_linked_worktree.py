@@ -239,3 +239,26 @@ def test_a_pointer_file_of_exactly_the_size_limit_is_still_read(env):
     assert len(dotgit.read_bytes()) == 4096
 
     assert hardened_git.linked_worktree_git_dir(worktree) == registration
+
+
+def test_a_short_read_of_a_pointer_file_is_refused(env, monkeypatch):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    real_read = os.read
+    monkeypatch.setattr(hardened_git.os, "read", lambda fd, n: real_read(fd, n)[:5])
+
+    with pytest.raises(OSError):
+        hardened_git._read_pointer_file(registration / "commondir")
+    assert hardened_git.linked_worktree_git_dir(worktree) is None
+
+
+def test_a_pointer_file_larger_than_the_limit_is_refused_by_its_size(env, monkeypatch):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    pointer = registration / "commondir"
+    pointer.write_text(pointer.read_text(encoding="utf-8") + " " * 5000, encoding="utf-8")
+    real_read = os.read
+    monkeypatch.setattr(hardened_git.os, "read", lambda fd, n: real_read(fd, 64))
+
+    with pytest.raises(OSError):
+        hardened_git._read_pointer_file(pointer)
