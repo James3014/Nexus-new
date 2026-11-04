@@ -5417,6 +5417,10 @@ def dispatch_run(
             )
             env = dict(claim.lease.execution_env)
             attempt_baseline = None
+            # Fixed before the attempt: what the attempt does to the tree cannot change it.
+            attempt_outside_git = (
+                source_repo_root is None and direct_operation_journal.cwd_outside_git(cwd)
+            )
             try:
                 if not _target_pin_intact(accept_edits_target_pin):
                     # #3181: no host git step in a replaced target; the
@@ -5927,12 +5931,32 @@ def dispatch_run(
                 and not timed_out
                 and len(out.strip().encode("utf-8")) < int(limits["empty_output_min_bytes"])
             )
+            # #3335: declared write paths need an observation to check against.
+            # Only an attempt that would otherwise complete is refused for the
+            # missing one; quota, empty output and the other classifications keep
+            # their own handling.  A working directory that was outside git before
+            # the attempt (``attempt_outside_git``, fixed then) has no baseline by
+            # design; a failed capture inside a repository gets no such exemption.
+            scope_unverifiable = bool(
+                write_paths
+                and attempt_changed_paths is None
+                and code == 0
+                and not timed_out
+                and not empty_output
+                and not provider_terminal_quota
+                and not target_replaced
+                and not permission_blocked
+                and not scope_blocked
+                and not no_tool_violation
+                and not (attempt_baseline is None and attempt_outside_git)
+            )
             if (
                 code == 0
                 and not timed_out
                 and not empty_output
                 and not permission_blocked
                 and not scope_blocked
+                and not scope_unverifiable
                 and not no_tool_violation
                 and not provider_terminal_quota
                 and not target_replaced
@@ -5959,7 +5983,7 @@ def dispatch_run(
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if (permission_blocked or scope_blocked or no_tool_violation)
+                if (permission_blocked or scope_blocked or scope_unverifiable or no_tool_violation)
                 else AccountFailureKind.QUOTA_EXHAUSTED
                 if provider_terminal_quota
                 else classify_failure(code, scanned_out, scanned_err, timed_out)
@@ -5999,6 +6023,10 @@ def dispatch_run(
                 else:
                     provider_effect_observed = None
                     reconciliation_required = True
+            elif scope_unverifiable:
+                last_kind = "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+                provider_effect_observed = None
+                reconciliation_required = True
             elif scope_blocked:
                 last_kind = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
                 provider_effect_observed = True
