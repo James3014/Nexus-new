@@ -65,6 +65,9 @@ def zero_trust_v2_candidate_key(row: Mapping[str, Any]) -> tuple[str, str]:
     )
 
 
+_IDENTITY_FIELDS = ("capability_id", "source_skill_id", "row_id", "arm_id")
+
+
 def verified_zero_trust_v2_proof(
     row: Mapping[str, Any], *, signing_secret: str | None
 ) -> tuple[dict[str, Any] | None, list[str]]:
@@ -82,6 +85,10 @@ def verified_zero_trust_v2_proof(
     if not receipt_ok:
         return None, ["receipt_not_verified"]
     inputs = row["receipt_signature_inputs"]
+    # A validly signed receipt without the identity fields is one bad row, not a failed report
+    # (#3372).
+    if any(field not in inputs for field in _IDENTITY_FIELDS):
+        return None, ["receipt_identity_missing"]
     arm_type = str(row.get("arm_type") or "")
     bound = (
         str(inputs.get("row_id") or "") == str(row.get("row_id") or "")

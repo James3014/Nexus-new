@@ -411,3 +411,33 @@ def test_3362_repeated_row_still_adds_its_mismatch() -> None:
         assert candidate["v2_evidence_count"] == 3
         assert candidate["v2_trust_mismatch_count"] == 1
         assert candidate["status"] == "BLOCKED"
+
+
+def test_3372_signed_receipt_without_identity_fields_rejects_only_that_row() -> None:
+    bare = {
+        "row_id": "bare",
+        "capability_id": "codeintel",
+        "skill_id": "",
+        "arm_type": "candidate_skill_v2",
+        **build_runtime_signed_receipt(
+            run_id="run-1",
+            row_id="bare",
+            arm_id="candidate_skill_v2",
+            capability_id="codeintel",
+            skill_id="",
+            artifact_hash="",
+            raw_observation={},
+            secret=_PROD_SECRET,
+        ),
+    }
+
+    report = build_zero_trust_v2_evidence_accumulation(
+        physical_evidence={"rows": [bare, _signed_row("ok")]}, signing_secret=_PROD_SECRET
+    )
+
+    assert report["status"] == "PASS"
+    by_skill = {candidate["skill_id"]: candidate for candidate in report["candidates"]}
+    assert by_skill[""]["rejected_row_refs"] == ["bare"]
+    assert by_skill[""]["v2_evidence_count"] == 0
+    assert by_skill["code-skill"]["row_refs"] == ["ok"]
+    assert by_skill["code-skill"]["v2_evidence_count"] == 1
