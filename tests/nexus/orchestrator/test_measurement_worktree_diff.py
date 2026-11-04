@@ -824,3 +824,84 @@ def test_worker_gitattributes_cannot_name_controller_filter(harness, tmp_path):
     # Control: with the worktree's attributes (plain git), the filter runs.
     _bare_arm_diff(worktree, base)
     assert marker.exists()
+
+
+# --- git pointer files are read through the bounded reader (#3357) ---
+
+
+def _pointer_returns_within(seconds: float, call):
+    import threading
+
+    box: list = []
+
+    def run() -> None:
+        try:
+            box.append(call())
+        except BaseException as exc:
+            box.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), "a git pointer read blocked on a non-regular file"
+    return box[0]
+
+
+def _registration(harness) -> Path:
+    text = (Path(harness.lease.target_worktree) / ".git").read_text(encoding="utf-8")
+    return Path(text.strip()[len("gitdir:") :].strip())
+
+
+def _verify(harness):
+    return mwd.verify_target(harness.lease.target_worktree, harness.contract.controller_repo_root)
+
+
+def _swap_for_fifo(path: Path):
+    data = path.read_bytes()
+    path.unlink()
+    os.mkfifo(path)
+    fd = os.open(path, os.O_RDWR)
+    os.write(fd, data)
+    return fd
+
+
+@pytest.mark.parametrize("name", ["commondir", "gitdir"])
+def test_registration_pointer_that_is_a_named_pipe_is_refused_promptly(harness, name):
+    fd = _swap_for_fifo(_registration(harness) / name)
+    try:
+        result = _pointer_returns_within(5, lambda: _verify(harness))
+    finally:
+        os.close(fd)
+    assert isinstance(result, mwd.MeasurementDiffError) and "gitdir_untrusted" in str(result)
+
+
+@pytest.mark.parametrize("name", ["commondir", "gitdir"])
+def test_registration_pointer_over_the_size_limit_is_refused(harness, name):
+    pointer = _registration(harness) / name
+    pointer.write_text(pointer.read_text(encoding="utf-8").strip() + " " * 5000, encoding="utf-8")
+    with pytest.raises(mwd.MeasurementDiffError, match="gitdir_untrusted"):
+        _verify(harness)
+
+
+def test_target_dot_git_over_the_size_limit_is_refused(harness):
+    dotgit = Path(harness.lease.target_worktree) / ".git"
+    dotgit.write_text(dotgit.read_text(encoding="utf-8").strip() + " " * 5000, encoding="utf-8")
+    with pytest.raises(mwd.MeasurementDiffError, match="gitdir_untrusted"):
+        _verify(harness)
+
+
+def test_a_controller_dot_git_file_over_the_size_limit_is_not_trusted(tmp_path):
+    root = tmp_path / "controller"
+    root.mkdir()
+    (root / ".git").write_text(f"gitdir: {tmp_path}\n" + " " * 5000, encoding="utf-8")
+    assert mwd._repo_common_dir(root) is None
+
+
+def test_a_controller_registration_commondir_that_is_not_utf8_is_not_trusted(tmp_path):
+    registration = tmp_path / "reg"
+    registration.mkdir()
+    (registration / "commondir").write_bytes(b"\xff\xfe")
+    root = tmp_path / "controller"
+    root.mkdir()
+    (root / ".git").write_text(f"gitdir: {registration}\n", encoding="utf-8")
+    assert mwd._repo_common_dir(root) is None
