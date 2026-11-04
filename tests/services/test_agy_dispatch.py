@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -7408,7 +7409,9 @@ def _scope_git_repo(tmp_path: Path) -> tuple[Path, Path]:
     return work, target
 
 
-def _run_scope_dispatch(tmp_path, work, target, write_paths):
+def _run_scope_dispatch(
+    tmp_path, work, target, write_paths, *, after_edit=None, source_repo_root=None
+):
     home = tmp_path / "home"
     home.mkdir()
     coordinator = _WriteScopeCoordinator(home)
@@ -7416,12 +7419,15 @@ def _run_scope_dispatch(tmp_path, work, target, write_paths):
 
     def mock_runner(write_boundary=None, **_kwargs):
         target.write_text("after\n", encoding="utf-8")
+        if after_edit is not None:
+            after_edit()
         return 0, "edited target successfully", "", False, 5
 
     code = dispatch.dispatch_run(
         prompt="edit target",
         cwd=str(work),
         mode="accept-edits" if write_paths else "plan",
+        source_repo_root=source_repo_root,
         write_paths=write_paths,
         temp_command_permissions=False,
         coordinator=coordinator,
@@ -7470,7 +7476,6 @@ def test_no_write_paths_without_baseline_still_completes(
     assert not any(e.get("failure_kind") for e in events)
 
 
-
 def test_write_paths_in_a_directory_outside_git_still_completes(
     tmp_path: Path, pass_through_boundary, monkeypatch
 ) -> None:
@@ -7485,13 +7490,94 @@ def test_write_paths_in_a_directory_outside_git_still_completes(
     assert not any(e.get("failure_kind") for e in events)
 
 
-def test_git_error_inside_repository_is_not_treated_as_outside_git(
-    tmp_path: Path, pass_through_boundary, monkeypatch
+def _repo_config_naming_a_program(work: Path) -> None:
+    # The repository check refuses this repo: root and baseline both come back None.
+    subprocess.run(["git", "config", "gpg.program", "/bin/true"], cwd=work, check=True)
+
+
+def test_refused_repository_check_is_not_treated_as_outside_git(
+    tmp_path: Path, pass_through_boundary
 ) -> None:
     work, target = _scope_git_repo(tmp_path)
-    monkeypatch.setattr(
-        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
-    )
+    _repo_config_naming_a_program(work)
     assert dispatch.direct_operation_journal.cwd_outside_git(str(work)) is False
     code, events = _run_scope_dispatch(tmp_path, work, target, [str(target)])
     assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1]["failure_kind"] == "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+
+
+def test_git_dir_vanishing_during_attempt_does_not_turn_refusal_into_completion(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    work, target = _scope_git_repo(tmp_path)
+    _repo_config_naming_a_program(work)
+    code, _events = _run_scope_dispatch(
+        tmp_path,
+        work,
+        target,
+        [str(target)],
+        after_edit=lambda: shutil.rmtree(work / ".git"),
+    )
+    assert code == 1
+
+
+def test_recorded_root_with_cwd_outside_git_is_refused(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    repo, _repo_target = _scope_git_repo(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target = elsewhere / "target.txt"
+    target.write_text("before\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
+    )
+    code, events = _run_scope_dispatch(
+        tmp_path, elsewhere, target, [str(target)], source_repo_root=str(repo)
+    )
+    assert code == 1
+    failures = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert failures[-1]["failure_kind"] == "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION"
+
+
+def test_terminal_quota_without_observation_keeps_its_quota_classification(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    work, target = _scope_git_repo(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
+    )
+
+    class Coordinator(_WriteScopeCoordinator):
+        def rotate_claim(self, **_kwargs):
+            raise dispatch.AgyAccountPoolExhaustedError("no alternate account in test")
+
+    events: list[dict[str, object]] = []
+
+    def runner(write_boundary=None, **_kwargs):
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(_agy_created_conversation_line("bb007db1-8535-4f40-b074-232d0da1e9a8"))
+            fh.write(_AGY_TERMINAL_QUOTA_LOG_LINE)
+        return 0, "", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=Coordinator(home),
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+    classified = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert code != 0
+    assert classified
+    assert all(e["failure_kind"] != "SCOPE_UNVERIFIABLE_NO_SOURCE_OBSERVATION" for e in classified)
+    assert classified[0]["failure_kind"].startswith("PROVIDER_QUOTA")

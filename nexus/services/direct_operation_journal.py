@@ -338,6 +338,14 @@ def _is_repository_dir(git_dir: Path) -> bool:
     return (git_dir / "objects").is_dir() and (git_dir / "refs").is_dir()
 
 
+def _git_ceilings() -> set[Path]:
+    return {
+        Path(entry).resolve()
+        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
+        if entry
+    }
+
+
 def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
     """The nearest directory at or above ``cwd`` holding a ``.git`` entry, found the way
     git searches (stopping below any ``GIT_CEILING_DIRECTORIES`` entry), with its checked
@@ -346,11 +354,7 @@ def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
 
     The delegated agent ran and wrote in ``cwd``, so every git call below runs through the
     shared hardened runner bound to this work tree and git dir, never searching for them."""
-    ceilings = {
-        Path(entry).resolve()
-        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
-        if entry
-    }
+    ceilings = _git_ceilings()
     try:
         start = Path(cwd).resolve()
     except (OSError, RuntimeError):
@@ -376,11 +380,7 @@ def cwd_outside_git(cwd: str) -> bool:
     """True only when ``cwd`` is a directory with no ``.git`` entry at or above it (git's
     own search, below any ``GIT_CEILING_DIRECTORIES`` entry).  Any doubt is False: a repo
     whose checks refused, or a path that cannot be examined, is not "outside git"."""
-    ceilings = {
-        Path(entry).resolve()
-        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
-        if entry
-    }
+    ceilings = _git_ceilings()
     try:
         start = Path(cwd).resolve()
         if not start.is_dir():
