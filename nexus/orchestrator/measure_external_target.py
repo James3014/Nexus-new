@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -412,6 +413,32 @@ def _measurement_root_at_start() -> Optional[Path]:
         raise ExternalGitRefused("EXTERNAL_TARGET_ROOT_UNCONFIGURED") from exc
 
 
+_POINTER_MAX_BYTES = 4096
+
+
+def read_git_pointer_file(path: Path) -> str:
+    """Bounded read of a git pointer file (``.git`` file, ``commondir``).
+
+    Same contract as ``nexus.core.hardened_git.read_git_pointer_file`` (#3373), kept local
+    because this module must stay free of Nexus imports: a regular file of at most
+    ``_POINTER_MAX_BYTES``, never followed through a link, never blocking on a pipe.
+    Anything else raises OSError; invalid UTF-8 raises UnicodeDecodeError (a ValueError).
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"git pointer is not a regular file: {path}")
+        if info.st_size > _POINTER_MAX_BYTES:
+            raise OSError(f"git pointer file is too large: {path}")
+        data = os.read(fd, _POINTER_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(data) > _POINTER_MAX_BYTES or len(data) != info.st_size:
+        raise OSError(f"git pointer file was not read whole: {path}")
+    return data.decode("utf-8")
+
+
 def _discovered_git_dirs(start: Path) -> Optional[tuple[Path, Path]]:
     """The ``(gitdir, common dir)`` git would use from ``start``, read in Python.
 
@@ -423,7 +450,7 @@ def _discovered_git_dirs(start: Path) -> Optional[tuple[Path, Path]]:
             if dotgit.is_dir():
                 gitdir = dotgit.resolve(strict=True)
             elif dotgit.is_file():
-                text = dotgit.read_text(encoding="utf-8").strip()
+                text = read_git_pointer_file(dotgit).strip()
                 if not text.startswith("gitdir:"):
                     return None
                 gitdir = (directory / text[len("gitdir:") :].strip()).resolve(strict=True)
@@ -432,11 +459,11 @@ def _discovered_git_dirs(start: Path) -> Optional[tuple[Path, Path]]:
             else:
                 continue
             try:
-                pointer = (gitdir / "commondir").read_text(encoding="utf-8").strip()
+                pointer = read_git_pointer_file(gitdir / "commondir").strip()
             except FileNotFoundError:
                 return gitdir, gitdir
             return gitdir, (gitdir / pointer).resolve(strict=True)
-        except (OSError, RuntimeError, UnicodeDecodeError):
+        except (OSError, RuntimeError, ValueError):
             return None
     return None
 
