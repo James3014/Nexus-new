@@ -1147,7 +1147,7 @@ def test_codex_output_that_is_not_an_object_is_a_parse_error(
         repo=repo, revision=revision, prompt="p", schema={}, binding=binding
     )
 
-    assert receipt["response"] == {}
+    assert receipt.get("response", receipt.get("final_response")) == {}
     assert receipt["parse_error"] == "RuntimeError:run_dir_output_not_an_object"
     assert receipt["status"] == "INVALID"
 
@@ -1162,7 +1162,7 @@ def test_codex_candidate_end_to_end_with_an_object_output(
         repo=repo, revision=revision, prompt="p", schema={"type": "object"}, binding=binding
     )
 
-    assert receipt["response"] == {"ok": True}
+    assert receipt["final_response"] == {"ok": True}
     assert receipt["parse_error"] is None
     assert receipt["status"] == "VALID"
     assert receipt["changed_files"] == []
