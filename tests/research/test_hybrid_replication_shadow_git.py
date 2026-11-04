@@ -1015,3 +1015,53 @@ def test_plan_mode_counts_a_new_file_under_a_git_dir_exclude_rule_as_mutation(
     receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
 
     assert receipt["repository_mutated"] is True
+
+
+def test_seal_records_the_diff_hash_of_the_raw_bytes_with_crlf_and_non_utf8(
+    sandbox: Path,
+) -> None:
+    source = _tracked_repo(sandbox)
+    (source / "f.txt").write_bytes(b"line one\r\nline two\r\n\xff\xfe\x80 tail\r\n")
+
+    sealing = live.seal_shadow_candidate(source)
+
+    raw = gzip.decompress(base64.b64decode(sealing["diff_gzip_base64"]))
+    assert hashlib.sha256(raw).hexdigest() == sealing["diff_sha256"]
+    assert b"line one\r\n" in raw
+    assert b"\xff\xfe\x80" in raw
+
+
+def test_run_dir_targets_that_are_named_pipes_are_refused_promptly(tmp_path: Path) -> None:
+    import threading
+
+    outcomes: dict[str, object] = {}
+
+    def attempt(name: str, action: Any) -> None:
+        try:
+            action()
+            outcomes[name] = "returned"
+        except BaseException as exc:  # recorded for the assertion below
+            outcomes[name] = exc
+
+    pipe = tmp_path / "schema.json"
+    os.mkfifo(pipe)
+    out = tmp_path / "last.json"
+    os.mkfifo(out)
+    threads = [
+        threading.Thread(
+            target=attempt,
+            args=("write", lambda: live._write_run_dir_file(pipe, "{}")),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=attempt, args=("read", lambda: live._read_run_dir_file(out)), daemon=True
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+        assert not thread.is_alive()
+    for name in ("write", "read"):
+        assert isinstance(outcomes[name], RuntimeError)
+        assert str(outcomes[name]) == "run_dir_target_not_regular_file"
