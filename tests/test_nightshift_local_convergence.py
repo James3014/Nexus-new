@@ -808,3 +808,28 @@ def test_plain_winning_round_is_still_promoted(tmp_path, monkeypatch):
 
     assert _head_files(work) == {"target.py", "extra.py"}
     assert _swarm_git(work, "log", "--format=%s").splitlines()[1] == "initial"
+
+
+def test_round_that_repoints_an_existing_nested_repo_is_not_promoted(tmp_path, monkeypatch):
+    shift, work = _restore_shift(
+        tmp_path,
+        monkeypatch,
+        [RoundOutcome(8.0, "", "SCORED", "wins by repointing")],
+        [{"target.py": "value = 2\n"}],
+    )
+    base_link = _swarm_git(work, "rev-parse", "HEAD").strip()
+    _swarm_git(work, "update-index", "--add", "--cacheinfo", f"160000,{base_link},dep")
+    _swarm_git(work, "commit", "-q", "-m", "base with nested repo")
+    start = _swarm_git(work, "rev-parse", "HEAD").strip()
+    real_round = shift._run_round
+
+    def repointing_round(round_id, workpath):
+        outcome = real_round(round_id, workpath)
+        _plant_nested_repo(work, "dep")
+        return outcome
+
+    shift._run_round = repointing_round
+    shift.run()
+
+    assert _swarm_git(work, "rev-parse", "HEAD").strip() == start
+    assert _swarm_git(work, "ls-tree", "HEAD", "dep").split()[2] == base_link

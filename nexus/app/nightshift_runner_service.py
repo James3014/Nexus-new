@@ -1461,15 +1461,17 @@ class AutoResearchNightShift:
         }
 
     @staticmethod
-    def _gitlink_paths(listing_z: str) -> set[str]:
-        """Paths with mode 160000 in `git ls-files --stage -z` or `git ls-tree -r -z`
-        output (``<mode> <rest>\t<path>`` records)."""
-        paths = set()
+    def _gitlinks(listing_z: str) -> set[tuple[str, str]]:
+        """(path, object id) of each mode 160000 entry in `git ls-files --stage -z` or
+        `git ls-tree -r -z` output (``<mode> [<type>] <oid>[ <stage>]\t<path>`` records)."""
+        links = set()
         for record in listing_z.split("\0"):
             meta, _, path = record.partition("\t")
-            if meta.startswith("160000 "):
-                paths.add(path)
-        return paths
+            fields = meta.split()
+            if fields and fields[0] == "160000":
+                oid = fields[2] if fields[1] == "commit" else fields[1]
+                links.add((path, oid))
+        return links
 
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
@@ -1479,7 +1481,8 @@ class AutoResearchNightShift:
             return False
         # Refuse to promote an embedded repository (a new gitlink entry): the restore clears
         # them, so a round that adds one on purpose must not be able to carry it forward.
-        # (diff is hardened to ignore submodules, so compare the index with HEAD directly.)
+        # Any difference (added, removed or repointed) refuses. The index listing is used rather
+        # than diff because the hardened runner's diff ignores these entries; `add .` does not.
         staged = self._workpath_git(workpath, "ls-files", "--stage", "-z")
         known = self._workpath_git(workpath, "ls-tree", "-r", "-z", "HEAD")
         if (
@@ -1487,7 +1490,7 @@ class AutoResearchNightShift:
             or known is None
             or staged.returncode != 0
             or known.returncode != 0
-            or self._gitlink_paths(staged.stdout) - self._gitlink_paths(known.stdout)
+            or self._gitlinks(staged.stdout) != self._gitlinks(known.stdout)
         ):
             return False
         committed = self._workpath_git(
