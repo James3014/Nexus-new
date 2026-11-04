@@ -5913,6 +5913,13 @@ def dispatch_run(
                 and not target_replaced
                 and not permission_blocked
                 and not no_tool_violation
+                            # A working directory outside any git repository has no baseline by
+                # design; a failed capture inside one does not get this exemption.
+                and not (
+                    attempt_baseline is None
+                    and source_repo_root is None
+                    and direct_operation_journal.cwd_outside_git(cwd)
+                )
             )
             no_tool_refused_calls = 0
             # Without a source observation (``None``: cwd outside git, or the

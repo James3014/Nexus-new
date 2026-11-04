@@ -1684,8 +1684,6 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
-    # #3335: declared write paths need a git baseline to be checked against.
-    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
     coordinator = _WriteScopeCoordinator(home)
     settings = home / ".gemini" / "antigravity-cli" / "settings.json"
 
@@ -1720,7 +1718,6 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # #3335
     target = work / "target.py"
     coordinator = _WriteScopeCoordinator(home)
     settings = home / ".gemini" / "antigravity-cli" / "settings.json"
@@ -4663,7 +4660,6 @@ def test_permission_profile_preflight_and_journal_projection(
     home.mkdir()
     work = tmp_path / "work"
     work.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=work, check=True)  # #3335
     target = work / "target.py"
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
@@ -7472,3 +7468,30 @@ def test_no_write_paths_without_baseline_still_completes(
     code, events = _run_scope_dispatch(tmp_path, work, target, None)
     assert code == 0
     assert not any(e.get("failure_kind") for e in events)
+
+
+
+def test_write_paths_in_a_directory_outside_git_still_completes(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    # Outside any repository (GIT_CEILING stops the search at tmp_path).
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "target.txt"
+    target.write_text("before\n", encoding="utf-8")
+    code, events = _run_scope_dispatch(tmp_path, work, target, [str(target)])
+    assert code == 0
+    assert not any(e.get("failure_kind") for e in events)
+
+
+def test_git_error_inside_repository_is_not_treated_as_outside_git(
+    tmp_path: Path, pass_through_boundary, monkeypatch
+) -> None:
+    work, target = _scope_git_repo(tmp_path)
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "capture_source_baseline", lambda *a, **k: None
+    )
+    assert dispatch.direct_operation_journal.cwd_outside_git(str(work)) is False
+    code, events = _run_scope_dispatch(tmp_path, work, target, [str(target)])
+    assert code == 1

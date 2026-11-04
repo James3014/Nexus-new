@@ -372,6 +372,29 @@ def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
     return None
 
 
+def cwd_outside_git(cwd: str) -> bool:
+    """True only when ``cwd`` is a directory with no ``.git`` entry at or above it (git's
+    own search, below any ``GIT_CEILING_DIRECTORIES`` entry).  Any doubt is False: a repo
+    whose checks refused, or a path that cannot be examined, is not "outside git"."""
+    ceilings = {
+        Path(entry).resolve()
+        for entry in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep)
+        if entry
+    }
+    try:
+        start = Path(cwd).resolve()
+        if not start.is_dir():
+            return False
+        for candidate in (start, *start.parents):
+            if os.path.lexists(candidate / ".git"):
+                return False
+            if candidate.parent in ceilings:
+                break
+    except (OSError, RuntimeError):
+        return False
+    return True
+
+
 def _bound_repository(cwd: str, repo_root: str | None) -> tuple[Path, Path] | None:
     """The repository recorded when the operation started, checked the same way, never
     searched for again; without a recorded root, the enclosing repository of ``cwd``."""
