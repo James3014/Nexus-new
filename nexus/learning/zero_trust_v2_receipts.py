@@ -59,7 +59,10 @@ def build_runtime_signed_receipt(
 
 def _digest_equal(expected: str, claimed: Any) -> bool:
     """Constant-time compare on bytes, so a non-ASCII claimed value is a plain mismatch."""
-    return hmac.compare_digest(expected.encode("utf-8"), str(claimed or "").encode("utf-8"))
+    return hmac.compare_digest(
+        expected.encode("utf-8", "surrogatepass"),
+        str(claimed or "").encode("utf-8", "surrogatepass"),
+    )
 
 
 def verify_runtime_signed_receipt(

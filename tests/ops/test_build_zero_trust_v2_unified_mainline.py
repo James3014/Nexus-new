@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 from nexus.learning.zero_trust_v2_receipts import (
     REPORT_KIND_M45_M52,
@@ -321,12 +322,41 @@ _EDIT_CASES = {
         ("m45_behavior_run_results", None, [{"blockers": []}]),
         "m45_m52_report_signature_not_verified",
     ),
+    "manual_trial_status": (
+        "manual_trial",
+        {"status": "BLOCKED", "summary": {"manual_apply_trial_ready": True}},
+        ("status", None, "PASS"),
+        "manual_apply_trial_report_signature_not_verified",
+    ),
+    "runtime_apply_status": (
+        "runtime_apply",
+        {
+            "status": "BLOCKED",
+            "summary": {"runtime_update_allowed": True, "v2_default_applied_count": 34},
+        },
+        ("status", None, "PASS"),
+        "runtime_apply_report_signature_not_verified",
+    ),
+    "smoke_status": (
+        "post_apply_smoke",
+        {"status": "BLOCKED", "summary": {"case_count": 34, "pass_count": 34}},
+        ("status", None, "PASS"),
+        "post_apply_smoke_report_signature_not_verified",
+    ),
+    "m45_import_gate_reason": (
+        "m45_m52",
+        {
+            "summary": {"m45_clean_v2_receipt_count": 102, "m51_v2_ready_capability_count": 34},
+            "m45_behavior_run_results": [{"blockers": []}],
+            "m46_receipt_import_gate": {"dominant_blockers": [{"reason": "semantic_not_verified"}]},
+        },
+        ("m46_receipt_import_gate", None, {"dominant_blockers": []}),
+        "m45_m52_report_signature_not_verified",
+    ),
 }
 
 
 def test_3374_signed_failing_report_edited_to_pass_is_blocked() -> None:
-    import json
-
     for case_id, (name, failing, (top, sub, value), reason) in _EDIT_CASES.items():
         chain = _chain()
         report = _failing_signed(name, failing)
@@ -354,9 +384,10 @@ def test_3374_non_ascii_signature_is_a_plain_mismatch() -> None:
     chain = _chain()
     for name in chain:
         edited = copy.deepcopy(chain[name])
-        edited["report_signature"]["signature"] = "café-✓"
-        chain[name] = edited
-        assert _run(chain)["status"] == "BLOCKED", name
+        for bad in ("café-✓", "\ud800"):
+            edited["report_signature"]["signature"] = bad
+            chain[name] = edited
+            assert _run(chain)["status"] == "BLOCKED", (name, bad)
         chain[name] = _chain()[name]
     receipt = build_runtime_signed_receipt(
         run_id="r",
@@ -369,5 +400,6 @@ def test_3374_non_ascii_signature_is_a_plain_mismatch() -> None:
         secret=KEY,
     )
     assert verify_runtime_signed_receipt(receipt, secret=KEY) is True
-    receipt["receipt_signature"] = "café-✓"
-    assert verify_runtime_signed_receipt(receipt, secret=KEY) is False
+    for bad in ("café-✓", "\ud800"):
+        receipt["receipt_signature"] = bad
+        assert verify_runtime_signed_receipt(receipt, secret=KEY) is False
