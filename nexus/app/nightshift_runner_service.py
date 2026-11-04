@@ -1461,14 +1461,15 @@ class AutoResearchNightShift:
         }
 
     @staticmethod
-    def _adds_embedded_repo(raw_z: str) -> bool:
-        """True when `git diff --raw -z` output has an added entry with mode 160000."""
-        for meta in raw_z.split("\0"):
-            if meta.startswith(":"):
-                parts = meta[1:].split()
-                if len(parts) >= 5 and parts[1] == "160000" and parts[4][:1] in ("A", "T"):
-                    return True
-        return False
+    def _gitlink_paths(listing_z: str) -> set[str]:
+        """Paths with mode 160000 in `git ls-files --stage -z` or `git ls-tree -r -z`
+        output (``<mode> <rest>\t<path>`` records)."""
+        paths = set()
+        for record in listing_z.split("\0"):
+            meta, _, path = record.partition("\t")
+            if meta.startswith("160000 "):
+                paths.add(path)
+        return paths
 
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
@@ -1478,10 +1479,16 @@ class AutoResearchNightShift:
             return False
         # Refuse to promote an embedded repository (a new gitlink entry): the restore clears
         # them, so a round that adds one on purpose must not be able to carry it forward.
-        staged = self._workpath_git(
-            workpath, "diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev", "HEAD"
-        )
-        if staged is None or staged.returncode != 0 or self._adds_embedded_repo(staged.stdout):
+        # (diff is hardened to ignore submodules, so compare the index with HEAD directly.)
+        staged = self._workpath_git(workpath, "ls-files", "--stage", "-z")
+        known = self._workpath_git(workpath, "ls-tree", "-r", "-z", "HEAD")
+        if (
+            staged is None
+            or known is None
+            or staged.returncode != 0
+            or known.returncode != 0
+            or self._gitlink_paths(staged.stdout) - self._gitlink_paths(known.stdout)
+        ):
             return False
         committed = self._workpath_git(
             workpath,
