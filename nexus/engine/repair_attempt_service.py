@@ -10,6 +10,7 @@ from nexus.core.hardened_git import (
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
     repository_git_dir,
+    revision_argument,
     run_hardened_git,
 )
 from nexus.engine.cli_pregate import run_cli_pregate
@@ -297,12 +298,12 @@ class RepairAttemptService:
                             Path(wt_path),
                             "diff",
                             "--binary",
-                            source_revision,
+                            revision_argument(source_revision),
                             git_dir=wt_git_dir,
                             timeout=10,
                         )
                         candidate_payload = diff_proc.stdout or ""
-                    except (OSError, subprocess.SubprocessError):
+                    except (OSError, ValueError, subprocess.SubprocessError):
                         candidate_payload = ""
                 gate_evidence = []
                 for gate in wt_gates:

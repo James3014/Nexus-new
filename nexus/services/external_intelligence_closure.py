@@ -223,12 +223,18 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
     return _sha256(payload)
 
 
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+
 def _revision(rev: object) -> str:
-    """``rev`` as a git revision; an option-shaped one is refused (fails closed)."""
+    """``rev`` as a git commit sha (40 lowercase hex); anything else is refused (fails closed)."""
     try:
-        return revision_argument(rev)
+        revision = revision_argument(rev)
     except ValueError as exc:
         raise ClosureError("REVISION_REFUSED") from exc
+    if not _COMMIT_SHA.fullmatch(revision):
+        raise ClosureError("REVISION_REFUSED")
+    return revision
 
 
 def _changed_paths(root: Path, base: str, head: str, git_dir: Path | None = None) -> list[str]:

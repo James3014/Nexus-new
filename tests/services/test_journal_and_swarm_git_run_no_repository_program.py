@@ -378,3 +378,26 @@ def test_journal_baseline_lists_a_submodule_checked_out_at_another_commit(env):
 
     assert baseline is not None
     assert baseline["entries"]["sub"]["status"] == " M"
+
+
+def test_swarm_refuses_an_option_shaped_branch_name_and_runs_no_git_3361(env, monkeypatch, caplog):
+    from nexus.engine import battle_swarm
+
+    root = _repo(env)
+    written = env / "written-by-git"
+    calls: list[Any] = []
+    real = battle_swarm.run_hardened_git
+
+    def record(*args: Any, **kwargs: Any):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(battle_swarm, "run_hardened_git", record)
+    swarm = BattleSwarm(project_root=str(root), default_workers=1, run_dir=str(env / "runs"))
+    swarm.run_dir.mkdir(parents=True)
+
+    assert swarm._create_worktree("conservative", f"--output={written}") is None
+
+    assert calls == []
+    assert not written.exists()
+    assert "branch name refused" in caplog.text

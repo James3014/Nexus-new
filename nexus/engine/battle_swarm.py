@@ -5,7 +5,11 @@ import concurrent.futures
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 
-from nexus.core.hardened_git import repository_config_can_start_a_program, run_hardened_git
+from nexus.core.hardened_git import (
+    repository_config_can_start_a_program,
+    revision_argument,
+    run_hardened_git,
+)
 from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 logger = logging.getLogger(__name__)
@@ -44,6 +48,7 @@ class BattleSwarm:
                     logger.error(f"Old worktree for {strategy_name} not removed: {error}")
             
         try:
+            branch_name = revision_argument(branch_name)
             for args in (("branch", "-f", branch_name, "HEAD"), ("worktree", "add", str(worktree_path), branch_name)):
                 run_hardened_git(root, *args).check_returncode()
             return worktree_path
@@ -53,6 +58,9 @@ class BattleSwarm:
             return None
         except subprocess.TimeoutExpired as e:
             logger.error(f"Failed to create worktree for {strategy_name}: {e}")
+            return None
+        except ValueError:
+            logger.error(f"Failed to create worktree for {strategy_name}: branch name refused")
             return None
 
     def _cleanup_worktrees(self, worktree_paths: List[Path], branches: List[str]):
