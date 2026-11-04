@@ -1939,6 +1939,11 @@ def _agy_shadow_checkout(
     yield source
 
 
+# Plan-mode status: ignored paths are listed too, so a new file under a rule the agent can
+# write still counts as a mutation (same stance as the seal, which lists new files unfiltered).
+_PLAN_STATUS_ARGS = ("--porcelain=v1", "--untracked-files=all", "--ignored=matching")
+
+
 def _run_agy_b_fallback(
     *,
     repo: Path,
@@ -1983,12 +1988,12 @@ def _run_agy_b_fallback(
                 pin = {"git_dir": git_dir, "separate_git_dir": True}
                 # The agent's own index is checked too (a broken or dirty one is a mutation),
                 # but only the harness-built index can show that every file is clean.
-                status_check = run_hardened_git(source, "status", "--porcelain=v1", **pin)
+                status_check = run_hardened_git(source, "status", *_PLAN_STATUS_ARGS, **pin)
                 mutated = status_check.returncode != 0 or bool(status_check.stdout.strip())
                 try:
                     with _fresh_index(source, pin) as index_file:
                         fresh_check = run_hardened_git(
-                            source, "status", "--porcelain=v1", index_file=index_file, **pin
+                            source, "status", *_PLAN_STATUS_ARGS, index_file=index_file, **pin
                         )
                     mutated = mutated or fresh_check.returncode != 0
                     mutated = mutated or bool(fresh_check.stdout.strip())
