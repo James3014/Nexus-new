@@ -636,3 +636,35 @@ def test_a_candidate_already_in_the_head_is_refused_without_a_merge_commit(tmp_p
         )
     assert _integration_head(root) == head
     assert git(root, "count-objects", "-v") == objects_before
+
+
+def test_merge_attributes_come_from_the_head_not_the_controller_checkout(tmp_path: Path):
+    """#3186: a detached Controller can lag the integration branch, so its
+    ``.gitattributes`` must not decide how the candidate merges.  The head dropped
+    ``merge=union``; both sides edit the same line, so the merge must conflict (as a
+    ``merge --no-ff`` at the head does) instead of union-merging under stale attributes."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.name", "t")
+    git(root, "config", "user.email", "t@example.invalid")
+    (root / "f.txt").write_text("a\nb\nc\n")
+    (root / ".gitattributes").write_text("f.txt merge=union\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    base = git(root, "rev-parse", "HEAD")
+    controller = tmp_path / "controller"
+    git(root, "worktree", "add", "-q", "--detach", str(controller), base)
+    git(root, "rm", "-q", ".gitattributes")
+    git(root, "commit", "-qm", "drop union")
+    git(root, "checkout", "-q", "-b", "cand")
+    (root / "f.txt").write_text("a\nCAND\nc\n")
+    git(root, "commit", "-qam", "cand")
+    candidate = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    (root / "f.txt").write_text("a\nHEAD\nc\n")
+    git(root, "commit", "-qam", "head")
+    head = git(root, "rev-parse", "HEAD")
+    assert (controller / ".gitattributes").exists()
+    with pytest.raises(RuntimeError, match="does not merge cleanly"):
+        ControlledIntegrationManager._controller_merge_commit(head, candidate, controller)

@@ -148,6 +148,8 @@ class ControlledIntegrationManager:
         No work tree takes part: the tree comes from ``merge-tree --write-tree`` and
         the commit from ``commit-tree`` with the head and the candidate as parents, so
         the sha the receipt binds is fixed before any staging checkout or verifier.
+        Merge attributes come from the head (``--attr-source``), not from the
+        Controller checkout, which may lag the integration branch.
         A candidate that does not merge cleanly, or is already on the head (where
         ``merge --no-ff`` made no commit), is refused.
         """
@@ -157,13 +159,23 @@ class ControlledIntegrationManager:
                 "the candidate is already on the head"
             )
         merged = cls._run_sanitised_git(
-            ["merge-tree", "--write-tree", "--no-messages", head, candidate], controller_root
+            [
+                f"--attr-source={head}",
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                head,
+                candidate,
+            ],
+            controller_root,
         )
         if merged.returncode != 0:
             raise RuntimeError(
                 "git merge-tree refused: the candidate does not merge cleanly onto the head"
             )
         tree = merged.stdout.split("\n", 1)[0].strip()
+        if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tree) is None:
+            raise RuntimeError("git merge-tree returned no usable tree id")
         return cls._git(
             ["commit-tree", tree, "-p", head, "-p", candidate, "-m", f"Merge commit '{candidate}'"],
             controller_root,
