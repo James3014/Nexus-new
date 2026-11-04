@@ -1440,7 +1440,7 @@ class AutoResearchNightShift:
         if not base:
             print("🛑 [AutoResearch] No round base to restore to; stopping the run.")
             return False
-        for args in (("reset", "--hard", base), ("clean", "-fd")):
+        for args in (("reset", "--hard", base), ("clean", "-ffd")):
             done = self._workpath_git(workpath, *args)
             if done is None or done.returncode != 0:
                 print("🛑 [AutoResearch] Work path could not be restored; stopping the run.")
@@ -1460,11 +1460,28 @@ class AutoResearchNightShift:
             "reason": "workpath_restore_failed",
         }
 
+    @staticmethod
+    def _adds_embedded_repo(raw_z: str) -> bool:
+        """True when `git diff --raw -z` output has an added entry with mode 160000."""
+        for meta in raw_z.split("\0"):
+            if meta.startswith(":"):
+                parts = meta[1:].split()
+                if len(parts) >= 5 and parts[1] == "160000" and parts[4][:1] in ("A", "T"):
+                    return True
+        return False
+
     def _commit_improvement(self, workpath: Path, score: float) -> bool:
         """Commit the winning round in the work path and move base_commit to it; False when
         git there is not trusted or the commit did not land."""
         added = self._workpath_git(workpath, "add", ".")
         if added is None or added.returncode != 0:
+            return False
+        # Refuse to promote an embedded repository (a new gitlink entry): the restore clears
+        # them, so a round that adds one on purpose must not be able to carry it forward.
+        staged = self._workpath_git(
+            workpath, "diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev", "HEAD"
+        )
+        if staged is None or staged.returncode != 0 or self._adds_embedded_repo(staged.stdout):
             return False
         committed = self._workpath_git(
             workpath,
