@@ -112,3 +112,35 @@ def test_a_base_revision_shaped_like_an_option_gives_no_proof(tmp_path):
     data = _bundle_for(tmp_path, repo, "--output=" + str(tmp_path / "written"))
     assert not (tmp_path / "written").exists()
     assert data["proof_type"] == "none"
+
+
+def test_diff_stays_on_the_probed_git_dir_when_the_pointer_is_rewritten(tmp_path):
+    """The diff stays pinned to the git dir that was probed: a .git pointer rewritten
+    between the probe and the diff is refused, never followed to another repository."""
+    main = tmp_path / "main"
+    main.mkdir()
+    _git(main, "init", "-q", "-b", "main")
+    (main / "a.txt").write_text("one\n")
+    _git(main, "add", "a.txt")
+    _git(main, "commit", "-q", "-m", "init")
+    work = tmp_path / "linked"
+    _git(main, "worktree", "add", "-q", "-b", "wt", str(work))
+    (work / "a.txt").write_text("two\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    _git(other, "init", "-q", "-b", "main")
+    (other / "a.txt").write_text("other\n")
+    _git(other, "add", "a.txt")
+    _git(other, "commit", "-q", "-m", "init")
+
+    from nexus.core.hardened_git import repository_config_can_start_a_program as real_probe
+
+    def probe_then_rewrite(*args, **kwargs):
+        result = real_probe(*args, **kwargs)
+        (work / ".git").write_text(f"gitdir: {other / '.git'}\n")
+        return result
+
+    with patch(f"{MOD}.repository_config_can_start_a_program", side_effect=probe_then_rewrite):
+        data = _bundle(tmp_path, work)
+    assert data["proof_type"] == "none"
+    assert "other" not in json.dumps(data)
