@@ -308,8 +308,34 @@ def _checked_git_dir(work_tree: Path) -> Path | None:
     if dotgit.is_symlink():
         return None
     if dotgit.is_dir():
-        return dotgit
+        return dotgit if _is_repository_dir(dotgit) else None
     return linked_worktree_git_dir(work_tree)
+
+
+def _is_repository_dir(git_dir: Path) -> bool:
+    """True when ``git_dir`` looks like a repository to git: a valid HEAD (a ``ref: refs/...``
+    line or an object id) plus ``objects`` and ``refs`` directories, unless a ``commondir``
+    names them elsewhere. An empty or partial ``.git`` directory is skipped by git itself, so
+    it is not trusted here either."""
+    head_path = git_dir / "HEAD"
+    try:
+        if not stat.S_ISREG(os.lstat(head_path).st_mode):
+            return False
+        fd = os.open(head_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            head = os.read(fd, 4096).decode("utf-8").strip()
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        return False
+    if head.startswith("ref:"):
+        if not head[4:].strip().startswith("refs/"):
+            return False
+    elif len(head) not in (40, 64) or any(c not in "0123456789abcdef" for c in head):
+        return False
+    if (git_dir / "commondir").is_file():
+        return True
+    return (git_dir / "objects").is_dir() and (git_dir / "refs").is_dir()
 
 
 def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
@@ -338,7 +364,7 @@ def _enclosing_repository(cwd: str) -> tuple[Path, Path] | None:
                 return None
             try:
                 refused = repository_config_can_start_a_program(candidate, git_dir=git_dir)
-            except OSError:
+            except (OSError, ValueError):
                 return None
             return None if refused else (candidate, git_dir)
         if candidate.parent in ceilings:
@@ -360,7 +386,7 @@ def _bound_repository(cwd: str, repo_root: str | None) -> tuple[Path, Path] | No
             return None
         if repository_config_can_start_a_program(candidate, git_dir=git_dir):
             return None
-    except OSError:
+    except (OSError, ValueError):
         return None
     return candidate, git_dir
 

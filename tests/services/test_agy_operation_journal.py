@@ -1001,3 +1001,71 @@ def test_repository_created_in_cwd_during_operation_does_not_take_attribution(
 
     assert record["source_attribution_state"] == "ATTRIBUTED"
     assert "tracked.txt" in record["observed_changed_paths"]
+
+
+def test_enclosing_repository_refuses_a_config_that_cannot_be_decoded(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    with (root / ".git" / "config").open("ab") as fh:
+        fh.write(b'\n[remote "\xff\xfe"]\n\turl = https://example.invalid/x\n')
+
+    assert direct_journal._enclosing_repository(str(root)) is None
+    assert direct_journal._git_identity(str(root)) == (None, None)
+    assert direct_journal.capture_source_baseline(str(root)) is None
+
+
+def test_empty_dotgit_between_cwd_and_repository_is_not_a_clearance(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    work = root / "work"
+    (work / ".git").mkdir(parents=True)
+
+    assert direct_journal._checked_git_dir(work) is None
+    assert direct_journal._enclosing_repository(str(work)) is None
+    assert direct_journal._git_identity(str(work)) == (None, None)
+
+
+def test_recorded_root_refuses_a_config_that_cannot_be_decoded(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    with (root / ".git" / "config").open("ab") as fh:
+        fh.write(b'\n[remote "\xff\xfe"]\n\turl = https://example.invalid/x\n')
+
+    assert direct_journal._git_identity(str(root), str(root)) == (None, None)
+    assert direct_journal.capture_source_baseline(str(root), str(root)) is None
+
+
+def test_fifo_head_is_not_a_repository_and_does_not_block(tmp_path: Path) -> None:
+    import threading
+
+    root = _make_source_repo(tmp_path)
+    head = root / ".git" / "HEAD"
+    head.unlink()
+    os.mkfifo(head)
+    holder = os.open(head, os.O_RDWR)
+    os.write(holder, b"ref: refs/heads/main\n")
+    result: list[bool] = []
+    worker = threading.Thread(
+        target=lambda: result.append(direct_journal._is_repository_dir(root / ".git")),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=5)
+    os.close(holder)
+
+    assert not worker.is_alive()
+    assert result == [False]
+
+
+def test_invalid_head_with_objects_and_refs_is_not_a_repository(tmp_path: Path) -> None:
+    git_dir = tmp_path / "r" / ".git"
+    (git_dir / "objects").mkdir(parents=True)
+    (git_dir / "refs").mkdir()
+    (git_dir / "HEAD").write_text("not a valid head\n", encoding="utf-8")
+
+    assert direct_journal._is_repository_dir(git_dir) is False
+
+
+def test_valid_head_without_objects_is_not_a_repository(tmp_path: Path) -> None:
+    git_dir = tmp_path / "r" / ".git"
+    (git_dir / "refs").mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+    assert direct_journal._is_repository_dir(git_dir) is False
