@@ -2033,6 +2033,31 @@ def _agy_shadow_checkout(
 _PLAN_STATUS_ARGS = ("--porcelain=v1", "--untracked-files=all", "--ignored=matching")
 
 
+_GIT_NAME_IGNORABLE = dict.fromkeys(
+    [0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E]
+    + [0x206A, 0x206B, 0x206C, 0x206D, 0x206E, 0x206F, 0xFEFF]
+)
+
+
+def _is_git_reserved_name(name: str) -> bool:
+    """Whether git treats ``name`` as its own metadata dir on some filesystem (case, ignorable
+    characters, trailing dots or spaces, the short form), so status never lists what is below."""
+    folded = name.translate(_GIT_NAME_IGNORABLE).casefold().rstrip(". ")
+    return folded in {".git", "git~1"}
+
+
+def _has_nested_git_reserved_name(source: Path) -> bool:
+    """Fail closed: any entry below ``source`` with a git-reserved name (the root's own
+    ``.git`` link file is the only one the harness makes). Unreadable directories count."""
+    failed: list[OSError] = []
+    for current, dirs, files in os.walk(source, followlinks=False, onerror=failed.append):
+        at_root = Path(current) == source
+        for name in (*dirs, *files):
+            if _is_git_reserved_name(name) and not (at_root and name == ".git"):
+                return True
+    return bool(failed)
+
+
 def _run_agy_b_fallback(
     *,
     repo: Path,
@@ -2073,6 +2098,8 @@ def _run_agy_b_fallback(
             mutated = mutated or repository_config_can_start_a_program(
                 source, git_dir=git_dir, separate_git_dir=True
             )
+            # Status never lists below a git-reserved name, so look at the file system itself.
+            mutated = mutated or _has_nested_git_reserved_name(source)
             if not mutated:
                 pin = {"git_dir": git_dir, "separate_git_dir": True}
                 # The agent's own index is checked too (a broken or dirty one is a mutation),

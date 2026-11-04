@@ -1017,6 +1017,32 @@ def test_plan_mode_counts_a_new_file_under_a_git_dir_exclude_rule_as_mutation(
     assert receipt["repository_mutated"] is True
 
 
+@pytest.mark.parametrize("name", [".git", ".GIT", ".git ", "git~1"])
+def test_plan_mode_counts_a_new_file_under_a_git_reserved_name_as_mutation(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    repo, revision = _origin(sandbox)
+
+    def agent(cwd: Path) -> None:
+        (cwd / "sub" / name).mkdir(parents=True)
+        (cwd / "sub" / name / "new.txt").write_text("written by agent\n", encoding="utf-8")
+
+    _stub_dispatch(sandbox, monkeypatch, agent)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is True
+
+
+def test_plan_mode_without_changes_is_not_mutated_by_the_reserved_name_check(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    _stub_dispatch(sandbox, monkeypatch, lambda cwd: None)
+    receipt, _ = live._run_agy_b_fallback(repo=repo, revision=revision, prompt="plan", binding={})
+
+    assert receipt["repository_mutated"] is False
+
+
 def test_seal_records_the_diff_hash_of_the_raw_bytes_with_crlf_and_non_utf8(
     sandbox: Path,
 ) -> None:
