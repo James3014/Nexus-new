@@ -379,8 +379,9 @@ def test_the_ref_update_apply_only_moves_the_branch_forward(
     # Fault injection: the staging step yields a commit that is not a
     # descendant of the head, while the merge-shape probe still agrees.
     def git_without_descendant(cls, args, cwd):
-        if list(args[:2]) == ["merge", "--no-ff"]:
-            return real_git(cls, ["checkout", "-q", "--detach", candidate], cwd)
+        # The Controller computes the staging commit with commit-tree (#3186).
+        if list(args[:1]) == ["commit-tree"]:
+            return candidate
         if list(args[:2]) == ["rev-list", "--parents"]:
             return f"{args[-1]} {head} {candidate}"
         return real_git(cls, args, cwd)
@@ -574,3 +575,64 @@ def test_a_branch_moved_during_cleanup_is_reported_instead_of_receipted(
     assert reported.value.stage == "POST_APPLY_VERIFICATION"
     assert reported.value.branch_head_after == moved["head"]
     assert reported.value.staging_commit_sha not in (None, moved["head"])
+
+
+def test_the_controller_computes_the_staging_commit_before_any_staging_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """#3186: the sha the receipt binds is a merge the Controller builds from objects
+    (head and candidate as parents, the same tree a ``merge`` gives) before the staging
+    worktree exists, and no merge runs inside the staging worktree."""
+    root, base, candidate = make_repo(tmp_path)
+    (root / "other.txt").write_text("head side\n")
+    git(root, "add", "other.txt")
+    git(root, "commit", "-m", "head side change")
+    head = git(root, "rev-parse", "HEAD")
+    receipt = acceptance(candidate)
+    auth = authorization(root, head, candidate, receipt)
+    real_run = ControlledIntegrationManager._run_sanitised_git
+    calls: list[tuple[list[str], Path]] = []
+
+    def recording_run(args, cwd):
+        calls.append((list(args), Path(cwd)))
+        return real_run(args, cwd)
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_run_sanitised_git", staticmethod(recording_run)
+    )
+    stage = tmp_path / "stage"
+    staged = integrate(staging_root=str(stage), acceptance_receipt=receipt, auth=auth)
+
+    sha = staged.staging_commit_sha
+    assert git(root, "rev-list", "--parents", "-n", "1", sha).split()[1:] == [head, candidate]
+    reference = tmp_path / "reference"
+    git(root, "worktree", "add", "--detach", str(reference), head)
+    git(reference, "merge", "--no-ff", "--no-edit", candidate)
+    assert git(root, "rev-parse", f"{sha}^{{tree}}") == git(reference, "rev-parse", "HEAD^{tree}")
+    commit_tree = next(i for i, (args, _) in enumerate(calls) if args[0] == "commit-tree")
+    in_stage = [
+        i for i, (_, cwd) in enumerate(calls) if cwd.resolve().is_relative_to(stage.resolve())
+    ]
+    assert in_stage and commit_tree < min(in_stage)
+    assert calls[commit_tree][1].resolve() == root.resolve()
+    assert not any(args[0] == "merge" for args, cwd in calls if cwd.resolve() != root.resolve())
+
+
+def test_a_candidate_already_in_the_head_is_refused_without_a_merge_commit(tmp_path: Path):
+    """#3186: ``commit-tree`` would record an empty merge where ``merge --no-ff`` made none."""
+    root, _base, candidate = make_repo(tmp_path)
+    git(root, "merge", "--no-ff", "--no-edit", candidate)
+    git(root, "commit", "--allow-empty", "-m", "later work")
+    head = git(root, "rev-parse", "HEAD")
+    receipt = acceptance(candidate)
+    auth = authorization(root, head, candidate, receipt)
+    objects_before = git(root, "count-objects", "-v")
+    with pytest.raises(RuntimeError, match="not the expected head merged with the candidate"):
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert _integration_head(root) == head
+    assert git(root, "count-objects", "-v") == objects_before
