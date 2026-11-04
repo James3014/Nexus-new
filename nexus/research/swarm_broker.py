@@ -14,6 +14,7 @@ from typing import Callable, List, Optional
 from nexus.core.hardened_git import (
     GIT_TIMEOUT_S,
     linked_worktree_git_dir,
+    read_git_pointer_file,
     repository_config_can_start_a_program,
     run_hardened_git,
 )
@@ -634,8 +635,8 @@ class SwarmBroker:
         if not swarm_common_dir or Path(swarm_common_dir).resolve() != Path(common_dir).resolve():
             return False
         try:
-            back_pointer = (admin_dir / "gitdir").read_text(encoding="utf-8").strip()
-        except (OSError, UnicodeDecodeError):
+            back_pointer = read_git_pointer_file(admin_dir / "gitdir").strip()
+        except (OSError, ValueError):
             return False
         if not back_pointer:
             return False

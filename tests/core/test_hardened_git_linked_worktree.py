@@ -262,3 +262,37 @@ def test_a_pointer_file_larger_than_the_limit_is_refused_by_its_size(env, monkey
 
     with pytest.raises(OSError):
         hardened_git._read_pointer_file(pointer)
+
+
+def test_a_pointer_that_changes_between_the_two_reads_is_a_refusal_not_an_error(env, monkeypatch):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    real = hardened_git._read_pointer_file
+    calls: list[Path] = []
+
+    def flaky(path: Path) -> str:
+        calls.append(path)
+        if path.name == "commondir" and sum(p.name == "commondir" for p in calls) > 1:
+            raise ValueError("pointer changed between reads")
+        return real(path)
+
+    monkeypatch.setattr(hardened_git, "_read_pointer_file", flaky)
+    result = hardened_git.run_hardened_git(worktree, "status", git_dir=registration)
+    assert result.returncode == 128
+    assert sum(p.name == "commondir" for p in calls) > 1
+
+
+def test_the_public_pointer_reader_refuses_a_named_pipe_and_an_oversized_file(env):
+    _, worktree = _controller_and_worktree(env)
+    registration = hardened_git.linked_worktree_git_dir(worktree)
+    assert hardened_git.read_git_pointer_file(registration / "gitdir").strip().endswith(".git")
+    fd = _replace_with_prefilled_fifo(registration / "gitdir")
+    try:
+        with pytest.raises(OSError):
+            _returns_within(5, lambda: hardened_git.read_git_pointer_file(registration / "gitdir"))
+    finally:
+        os.close(fd)
+    big = registration / "commondir"
+    big.write_text(" " * 5000, encoding="utf-8")
+    with pytest.raises(OSError):
+        hardened_git.read_git_pointer_file(big)

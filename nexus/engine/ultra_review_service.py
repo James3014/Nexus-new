@@ -19,6 +19,7 @@ from pathlib import Path, PurePath
 from typing import Any, TypeVar
 
 from nexus.core.contained_write import PathContainmentError, write_text_in_root
+from nexus.core.hardened_git import read_git_pointer_file
 from nexus.engine.sandboxed_lane import (  # noqa: F401 - re-exported for callers and tests
     _OS_SANDBOX_PROBE,
     GIT_ENV_ALLOWLIST,
@@ -3256,7 +3257,10 @@ class UltraReviewService:
             raise UltraReviewError("mirror_git_dir_missing") from exc
         if not stat.S_ISREG(info.st_mode):
             raise UltraReviewError("mirror_git_dir_not_regular_file")
-        text = dot_git.read_text(encoding="utf-8").strip()
+        try:
+            text = read_git_pointer_file(dot_git).strip()
+        except (OSError, ValueError) as exc:
+            raise UltraReviewError("mirror_git_dir_unreadable") from exc
         if not text.startswith("gitdir: "):
             raise UltraReviewError("mirror_git_dir_unparseable")
         git_dir = Path(text[len("gitdir: ") :])

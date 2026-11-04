@@ -2758,3 +2758,45 @@ def test_git_output_returns_none_when_output_cannot_be_decoded(tmp_path: Path, m
     monkeypatch.setattr("nexus.research.swarm_broker.run_hardened_git", undecodable_git)
 
     assert SwarmBroker(tmp_path)._git_output(["rev-parse", "--show-toplevel"], tmp_path) is None
+
+
+def _swarm_with_admin(tmp_path: Path, monkeypatch):
+    _sentinel_cwd(tmp_path, monkeypatch)
+    controller = tmp_path / "controller"
+    base = _init_repo(controller)
+    swarm = controller / ".nexus-swarm-001"
+    _git(controller, "worktree", "add", "--detach", str(swarm), base)
+    admin = Path(_git(swarm, "rev-parse", "--absolute-git-dir"))
+    return controller, swarm, admin
+
+
+def _returns_within(seconds: float, call):
+    import threading
+
+    box: list = []
+    thread = threading.Thread(target=lambda: box.append(call()), daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), "back-pointer read blocked on a non-regular file"
+    return box[0]
+
+
+def test_swarm_back_pointer_that_is_a_named_pipe_is_refused_promptly(tmp_path: Path, monkeypatch):
+    controller, swarm, admin = _swarm_with_admin(tmp_path, monkeypatch)
+    text = (admin / "gitdir").read_bytes()
+    (admin / "gitdir").unlink()
+    os.mkfifo(admin / "gitdir")
+    fd = os.open(admin / "gitdir", os.O_RDWR)
+    os.write(fd, text)
+    try:
+        broker = SwarmBroker(controller)
+        assert _returns_within(5, lambda: broker._git_metadata_points_to_own_admin_entry(swarm)) is False
+    finally:
+        os.close(fd)
+
+
+def test_swarm_back_pointer_over_the_size_limit_is_refused(tmp_path: Path, monkeypatch):
+    controller, swarm, admin = _swarm_with_admin(tmp_path, monkeypatch)
+    pointer = admin / "gitdir"
+    pointer.write_text(pointer.read_text(encoding="utf-8").strip() + " " * 5000, encoding="utf-8")
+    assert SwarmBroker(controller)._git_metadata_points_to_own_admin_entry(swarm) is False
