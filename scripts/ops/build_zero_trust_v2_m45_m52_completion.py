@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.learning.skill_fit_closure import read_json, write_json
-from nexus.learning.zero_trust_v2_receipts import (
+from nexus.learning.zero_trust_v2_receipts import (  # noqa: E402
     REPORT_KIND_M45_M52,
     sign_report_if_keyed,
     verify_runtime_signed_receipt,
