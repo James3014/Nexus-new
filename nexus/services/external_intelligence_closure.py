@@ -23,6 +23,7 @@ from nexus.core.hardened_git import (
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
     repository_git_dir,
+    revision_argument,
     run_hardened_git,
 )
 from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
@@ -222,6 +223,14 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
     return _sha256(payload)
 
 
+def _revision(rev: object) -> str:
+    """``rev`` as a git revision; an option-shaped one is refused (fails closed)."""
+    try:
+        return revision_argument(rev)
+    except ValueError as exc:
+        raise ClosureError("REVISION_REFUSED") from exc
+
+
 def _changed_paths(root: Path, base: str, head: str, git_dir: Path | None = None) -> list[str]:
     # ``--no-renames``: a rename must surface as delete + add so its source path is
     # scope- and deletion-checked (rename detection would hide the deleted source).
@@ -231,8 +240,8 @@ def _changed_paths(root: Path, base: str, head: str, git_dir: Path | None = None
         _SUBMODULE_POINTERS_SHOWN,
         "--no-renames",
         "--name-only",
-        base,
-        head,
+        _revision(base),
+        _revision(head),
         "--",
         git_dir=git_dir,
         hardened=True,
@@ -247,8 +256,8 @@ def _deleted_paths(root: Path, base: str, head: str, git_dir: Path | None = None
         _SUBMODULE_POINTERS_SHOWN,
         "--no-renames",
         "--name-status",
-        base,
-        head,
+        _revision(base),
+        _revision(head),
         "--",
         git_dir=git_dir,
         hardened=True,
@@ -268,8 +277,8 @@ def _diff_sha(root: Path, base: str, head: str, git_dir: Path | None = None) -> 
             "diff",
             _SUBMODULE_POINTERS_SHOWN,
             "--binary",
-            base,
-            head,
+            _revision(base),
+            _revision(head),
             git_dir=git_dir,
             hardened=True,
         )
@@ -279,7 +288,9 @@ def _diff_sha(root: Path, base: str, head: str, git_dir: Path | None = None) -> 
 def _raw_diff_patch(root: Path, base: str, head: str) -> str:
     # The hardened runner adds ``--no-ext-diff --no-textconv``: the patch is what
     # composition applies, never a driver's rendering of it.
-    result = run_hardened_git(root, "diff", _SUBMODULE_POINTERS_SHOWN, "--binary", base, head)
+    result = run_hardened_git(
+        root, "diff", _SUBMODULE_POINTERS_SHOWN, "--binary", _revision(base), _revision(head)
+    )
     if result.returncode != 0:
         raise ClosureError(f"GIT_DIFF_FAILED:{(result.stderr or result.stdout).strip()[:1200]}")
     return result.stdout

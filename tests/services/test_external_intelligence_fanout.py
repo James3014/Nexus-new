@@ -2768,3 +2768,30 @@ def test_repair_candidate_refused_when_excerpt_base_file_hash_differs(tmp_path, 
         runtime.continue_repair(
             initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
         )
+
+
+def test_option_shaped_base_revision_is_refused_at_every_forwarding_site_3361(tmp_path):
+    import nexus.services.external_intelligence_fanout as fanout
+    from nexus.services.external_intelligence_fanout import CoreBindingError
+
+    repo, base = make_repo(tmp_path)
+    written = tmp_path / "written-by-git"
+    bad = f"--output={written}"
+    assert fanout._git_blob_bytes(repo, bad, "a.py") is None
+    assert fanout._git_blob_bytes(repo, base, "a.py") == b"VALUE = 1\n"
+    with pytest.raises(FanoutError, match="REVISION_REFUSED"):
+        fanout._revision(bad)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base)
+    good = ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    with pytest.raises(FanoutError, match="REVISION_REFUSED"):
+        GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(
+            replace(good, expected_base_sha=bad)
+        )
+    lease = GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(good)
+    runtime = fanout.AdaptiveWorkerFanoutRuntime
+    with pytest.raises(CoreBindingError, match="workspace_observation"):
+        runtime._revalidate_core_binding(replace(good, expected_base_sha=bad), lease, {})
+    with pytest.raises(CoreBindingError, match="workspace_observation"):
+        runtime._revalidate_core_binding_for_continuation({"base_sha": bad}, {}, lease)
+    assert not written.exists()

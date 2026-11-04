@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
     repository_git_dir,
+    revision_argument,
     run_hardened_git,
 )
 from nexus.orchestrator.task_contract import Evidence, EvidenceRequirement, Task, TaskStatus
@@ -78,9 +79,9 @@ class EvidenceCollector:
         diff = ""
         try:
             work_tree = Path(task.working_dir or ".")
-            base = str(task.base_branch or "")
-            # A revision shaped like an option would be read by git diff as one.
-            git_dir = None if not base or base.startswith("-") else repository_git_dir(work_tree)
+            # A revision shaped like an option would be read by git diff as one (ValueError).
+            base = revision_argument(str(task.base_branch or ""))
+            git_dir = repository_git_dir(work_tree)
             if git_dir is not None and not repository_config_can_start_a_program(
                 work_tree, git_dir=git_dir
             ):

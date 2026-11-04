@@ -1367,3 +1367,22 @@ def test_composed_candidate_commit_uses_explicit_eia_identity(tmp_path, monkeypa
         f"Nexus-EIA-Model: {MODEL}",
     ]
     assert "antigravity" not in _git(assembly, "log", "-1", "--format=%B%an%ae%cn%ce").lower()
+
+
+def test_option_shaped_revision_is_refused_before_git_reads_it_3361(tmp_path):
+    from nexus.services import external_intelligence_closure as closure
+
+    repo, base = make_repo(tmp_path)
+    written = tmp_path / "written-by-git"
+    bad = f"--output={written}"
+    calls = (
+        lambda b, h: closure._changed_paths(repo, b, h),
+        lambda b, h: closure._deleted_paths(repo, b, h),
+        lambda b, h: closure._diff_sha(repo, b, h),
+        lambda b, h: closure._raw_diff_patch(repo, b, h),
+    )
+    for call in calls:
+        for b, h in ((bad, base), (base, bad)):
+            with pytest.raises(closure.ClosureError, match="REVISION_REFUSED"):
+                call(b, h)
+            assert not written.exists()
