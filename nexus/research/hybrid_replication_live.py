@@ -951,7 +951,7 @@ def _run_codex(
         _export_revision(repo, revision, source)
         schema_path = root / "schema.json"
         output_path = root / "last.json"
-        schema_path.write_text(json.dumps(schema, sort_keys=True), encoding="utf-8")
+        _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True))
         cmd = [
             binary,
             "--no-daemon",
@@ -978,7 +978,7 @@ def _run_codex(
         wall = time.perf_counter() - started
         parsed = _codex_usage(cp.stdout)
         try:
-            result = json.loads(output_path.read_text(encoding="utf-8"))
+            result = json.loads(_read_run_dir_file(output_path))
             parse_error = None
         except Exception as exc:
             result = {}
@@ -1059,7 +1059,7 @@ def _run_codex_candidate(
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
-            schema_path.write_text(json.dumps(schema, sort_keys=True), encoding="utf-8")
+            _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True))
             cmd = [
                 binary,
                 "--no-daemon",
@@ -1086,7 +1086,7 @@ def _run_codex_candidate(
             wall = time.perf_counter() - started
             parsed = _codex_usage(cp.stdout)
             try:
-                result = json.loads(output_path.read_text(encoding="utf-8"))
+                result = json.loads(_read_run_dir_file(output_path))
                 parse_error = None
             except Exception as exc:
                 result = {}
@@ -1468,7 +1468,9 @@ def seal_shadow_candidate(
         )
         if tracked.returncode != 0 or untracked.returncode != 0:
             raise RuntimeError("shadow_candidate_status_failed")
-        diff = run_hardened_git(source, "diff", "--binary", "HEAD", index_file=index_file, **pin)
+        diff = run_hardened_git(
+            source, "diff", "--binary", "HEAD", index_file=index_file, text=False, **pin
+        )
 
     tracked_paths = [item for item in tracked.stdout.split("\0") if item]
     untracked_paths = [item for item in untracked.stdout.split("\0") if item]
@@ -1476,7 +1478,7 @@ def seal_shadow_candidate(
 
     if diff.returncode != 0:
         raise RuntimeError("shadow_candidate_diff_failed")
-    diff_bytes = diff.stdout.encode("utf-8")
+    diff_bytes = diff.stdout  # raw bytes: no newline or encoding change before hashing
 
     untracked_rows: list[dict[str, Any]] = []
     oversized_untracked: list[str] = []
@@ -1795,6 +1797,46 @@ def _shadow_git_dir_digest(git_dir: Path) -> str:
             else:
                 add(rel, "other", mode)
     return digest.hexdigest()
+
+
+def _check_run_dir_target(path: Path) -> None:
+    """Fail closed unless ``path`` is absent or a plain file (never a link, pipe or device);
+    checked without following links, before anything opens it."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(mode):
+        raise RuntimeError("run_dir_target_not_regular_file")
+
+
+def _write_run_dir_file(path: Path, text: str) -> None:
+    """Write a run-directory file whose target may already exist: type-checked first, then
+    opened without following a link and without blocking on a special file."""
+    _check_run_dir_target(path)
+    try:
+        # Remove only this name (a hard link's other names and target stay untouched), then
+        # create exclusively: a racing re-create fails closed, never retried.
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise RuntimeError("run_dir_target_not_regular_file")
+        handle.write(text.encode("utf-8"))
+
+
+def _read_run_dir_file(path: Path) -> str:
+    """Read a run-directory file the same way: refuse anything but a plain file."""
+    _check_run_dir_target(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise RuntimeError("run_dir_target_not_regular_file")
+        return handle.read().decode("utf-8")
 
 
 def _shadow_digest_path(source: Path) -> Path:
