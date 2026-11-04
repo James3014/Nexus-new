@@ -152,7 +152,14 @@ def test_run_stops_after_convergence_patience(tmp_path, monkeypatch):
     shift.tracelog_path = tmp_path / "tracelog.jsonl"
     shift.optimization_curve_path = tmp_path / "optimization_curve.csv"
     shift.resolved_target_file = "target.py"
-    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, tmp_path)
+    work = tmp_path / "work"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "nightshift-conv", str(work)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, work)
     shift._resolve_target_file = lambda: "target.py"
 
     outcomes = iter([
