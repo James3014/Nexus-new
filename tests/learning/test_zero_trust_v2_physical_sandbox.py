@@ -207,9 +207,10 @@ def test_probe_profile_uses_resolved_paths_for_symlinked_base(tmp_path: Path) ->
     real.mkdir()
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
-    _, profiles = _probe_with_profile_capture(tmp_path, base_tmp_dir=link)
+    result, profiles = _probe_with_profile_capture(tmp_path, base_tmp_dir=link)
 
     profile = profiles[0]
+    assert result["sandbox_attestation"]["raw_observation"]["write_scope_confined"] is True
     assert str(link) + "/" not in profile
     assert f'(subpath "{real.resolve()}/' in profile
 

@@ -1184,7 +1184,9 @@ class SwarmBroker:
             raise _SwarmDirSwapped(swarm_dir)
         # Bytes in and out: a path the lease put in the index need not be UTF-8, and a
         # decode error here would leave the swarm locked for good.
-        listed = run_hardened_git(swarm_dir, "ls-files", "-v", "-z", git_dir=git_dir, text=False)
+        listed = run_hardened_git(
+            swarm_dir, "ls-files", "-v", "-z", git_dir=git_dir, text=False, repo_fd=pinned
+        )
         if listed.returncode != 0:
             logger.warning(
                 "⚠️ [SwarmBroker] git ls-files failed in %s; left locked: %s",
@@ -1205,7 +1207,7 @@ class SwarmBroker:
                 if not _names_dir(swarm_dir, pinned):
                     raise _SwarmDirSwapped(swarm_dir)
                 cleared = run_hardened_git(
-                    swarm_dir, "update-index", option, "--", *batch, git_dir=git_dir
+                    swarm_dir, "update-index", option, "--", *batch, git_dir=git_dir, repo_fd=pinned
                 )
                 if cleared.returncode != 0:
                     logger.warning(
@@ -1235,7 +1237,7 @@ class SwarmBroker:
                 swarm_dir,
             )
             return False
-        if repository_config_can_start_a_program(swarm_dir, git_dir=git_dir):
+        if repository_config_can_start_a_program(swarm_dir, git_dir=git_dir, repo_fd=pinned):
             logger.warning(
                 "⚠️ [SwarmBroker] Swarm repository config names a program; left locked: %s",
                 swarm_dir,
@@ -1246,12 +1248,24 @@ class SwarmBroker:
             raise _SwarmDirSwapped(swarm_dir)
         base_commit = f"{_LEASE_BASE_REF}^{{commit}}"
         base = run_hardened_git(
-            swarm_dir, "rev-parse", "--verify", "--quiet", base_commit, git_dir=git_dir
+            swarm_dir,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            base_commit,
+            git_dir=git_dir,
+            repo_fd=pinned,
         )
         target = base.stdout.strip() if base.returncode == 0 else ""
         if not re.fullmatch(r"[0-9a-f]{40}", target) and _lock_is_unstarted(pinned):
             head = run_hardened_git(
-                swarm_dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}", git_dir=git_dir
+                swarm_dir,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "HEAD^{commit}",
+                git_dir=git_dir,
+                repo_fd=pinned,
             )
             target = head.stdout.strip() if head.returncode == 0 else ""
         if not re.fullmatch(r"[0-9a-f]{40}", target):
@@ -1273,7 +1287,7 @@ class SwarmBroker:
         ):
             if not _names_dir(swarm_dir, pinned):
                 raise _SwarmDirSwapped(swarm_dir)
-            result = run_hardened_git(swarm_dir, *args, git_dir=git_dir)
+            result = run_hardened_git(swarm_dir, *args, git_dir=git_dir, repo_fd=pinned)
             if result.returncode != 0:
                 logger.warning(
                     "⚠️ [SwarmBroker] git %s failed in %s; left locked: %s",
@@ -1311,7 +1325,13 @@ class SwarmBroker:
         if not _names_dir(swarm_dir, pinned):
             raise _SwarmDirSwapped(swarm_dir)
         enabled = run_hardened_git(
-            swarm_dir, "config", "--bool", "--get", "core.sparseCheckout", git_dir=git_dir
+            swarm_dir,
+            "config",
+            "--bool",
+            "--get",
+            "core.sparseCheckout",
+            git_dir=git_dir,
+            repo_fd=pinned,
         )
         # `config --get` exits 1 for a key that is not set.
         if enabled.returncode not in (0, 1):
@@ -1325,7 +1345,9 @@ class SwarmBroker:
             return True
         if not _names_dir(swarm_dir, pinned):
             raise _SwarmDirSwapped(swarm_dir)
-        disabled = run_hardened_git(swarm_dir, "sparse-checkout", "disable", git_dir=git_dir)
+        disabled = run_hardened_git(
+            swarm_dir, "sparse-checkout", "disable", git_dir=git_dir, repo_fd=pinned
+        )
         if disabled.returncode != 0:
             logger.warning(
                 "⚠️ [SwarmBroker] git sparse-checkout disable failed in %s; left locked: %s",
@@ -1369,7 +1391,9 @@ class SwarmBroker:
         directory (or absent); anything else there is the lease's, and `git clean` leaves it."""
         if not _names_dir(swarm_dir, pinned):
             raise _SwarmDirSwapped(swarm_dir)
-        listed = run_hardened_git(swarm_dir, "ls-files", "-s", "-z", git_dir=git_dir, text=False)
+        listed = run_hardened_git(
+            swarm_dir, "ls-files", "-s", "-z", git_dir=git_dir, text=False, repo_fd=pinned
+        )
         if listed.returncode != 0:
             logger.warning(
                 "⚠️ [SwarmBroker] git ls-files failed in %s; left locked: %s",
