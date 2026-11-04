@@ -118,6 +118,19 @@ def _with_subcommand_flags(args: Tuple[str, ...]) -> Tuple[str, ...]:
     return args
 
 
+def revision_argument(rev: object) -> str:
+    """``rev`` unchanged when git can only read it as a revision; ValueError otherwise.
+
+    A revision that came from task, round or caller data and starts with ``-`` would be
+    read by git as an option (some write files); the runner cannot know which argument is a
+    revision, so each call site that forwards one passes it through here first."""
+    if not isinstance(rev, str) or not rev or rev.startswith("-"):
+        raise ValueError("revision argument refused")
+    if "\0" in rev or "\n" in rev or "\r" in rev:
+        raise ValueError("revision argument refused")
+    return rev
+
+
 def run_hardened_git(
     repo_dir: Path,
     *args: str,

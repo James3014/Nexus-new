@@ -20,6 +20,7 @@ from nexus.core.hardened_git import (
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
     repository_git_dir,
+    revision_argument,
     run_hardened_git,
 )
 from nexus.services.external_intelligence import (
@@ -118,6 +119,14 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
             os.unlink(temporary)
         except FileNotFoundError:
             pass
+
+
+def _revision(rev: object) -> str:
+    """``rev`` as a git revision; an option-shaped one is refused (fails closed)."""
+    try:
+        return revision_argument(rev)
+    except ValueError as exc:
+        raise FanoutError("REVISION_REFUSED") from exc
 
 
 def _run_git(root: Path, *args: str, timeout: float = 30.0, git_dir: Path | None = None) -> str:
@@ -608,7 +617,9 @@ class GitWorktreeAllocator:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
 
     def allocate(self, unit: ExecutionUnit) -> WorkspaceLease:
-        live_base = _run_git(self.repository_root, "cat-file", "-t", unit.expected_base_sha)
+        live_base = _run_git(
+            self.repository_root, "cat-file", "-t", _revision(unit.expected_base_sha)
+        )
         if live_base != "commit":
             raise FanoutError("EXPECTED_BASE_NOT_COMMIT")
         workspace_id = f"ei-{unit.task_id}-{unit.unit_id}-{uuid.uuid4().hex[:12]}"
@@ -2013,6 +2024,10 @@ def _git_blob_bytes(
 ) -> bytes | None:
     if git_dir is None:
         git_dir = _worker_git_dir(root)
+    try:
+        revision = revision_argument(revision)
+    except ValueError:
+        return None
     result = run_hardened_git(
         root,
         "cat-file",
@@ -2312,7 +2327,7 @@ class AdaptiveWorkerFanoutRuntime:
                 git_dir = _worker_git_dir(root, workspace.controller_root)
                 origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
                 source_tree = _run_git(
-                    root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir
+                    root, "rev-parse", "--verify", f"{_revision(base)}^{{tree}}", git_dir=git_dir
                 )
             except FanoutError as exc:
                 raise FanoutError("CORE_BINDING_WORKSPACE_IDENTITY_UNAVAILABLE") from exc
@@ -2449,7 +2464,9 @@ class AdaptiveWorkerFanoutRuntime:
             dirty = _run_git(
                 root, "status", _WORKTREE_SUBMODULE_POINTERS, "--porcelain=v1", git_dir=git_dir
             )
-            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir)
+            tree = _run_git(
+                root, "rev-parse", "--verify", f"{_revision(base)}^{{tree}}", git_dir=git_dir
+            )
             origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
         except FanoutError as exc:
             raise CoreBindingError("workspace_observation") from exc
@@ -2499,7 +2516,9 @@ class AdaptiveWorkerFanoutRuntime:
         try:
             git_dir = _worker_git_dir(root, workspace.controller_root)
             origin = _run_git(root, "remote", "get-url", "origin", git_dir=git_dir)
-            tree = _run_git(root, "rev-parse", "--verify", f"{base}^{{tree}}", git_dir=git_dir)
+            tree = _run_git(
+                root, "rev-parse", "--verify", f"{_revision(base)}^{{tree}}", git_dir=git_dir
+            )
         except FanoutError as exc:
             raise CoreBindingError("workspace_observation") from exc
         try:

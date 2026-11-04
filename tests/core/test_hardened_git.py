@@ -1043,3 +1043,17 @@ def test_a_directory_the_walk_cannot_list_is_refused(env, monkeypatch):
         work, "rev-parse", "HEAD", git_dir=git_dir, separate_git_dir=True
     )
     assert refused.returncode == 128
+
+
+@pytest.mark.parametrize("rev", ["abc123", "main", "feature/x", "HEAD~1", "a" * 40, "origin/main"])
+def test_revision_argument_passes_a_plain_revision_through_unchanged(rev):
+    assert hardened_git.revision_argument(rev) == rev
+
+
+@pytest.mark.parametrize(
+    "rev",
+    ["", "-x", "--output=/tmp/x", "-", "a\nb", "a\0b", "a\rb", None, 7, b"abc", ["HEAD"]],
+)
+def test_revision_argument_refuses_an_option_or_malformed_revision(rev):
+    with pytest.raises(ValueError):
+        hardened_git.revision_argument(rev)

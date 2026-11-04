@@ -144,3 +144,24 @@ def test_diff_stays_on_the_probed_git_dir_when_the_pointer_is_rewritten(tmp_path
         data = _bundle(tmp_path, work)
     assert data["proof_type"] == "none"
     assert "other" not in json.dumps(data)
+
+
+def test_option_shaped_base_branch_writes_no_file_and_gives_no_proof_3361(tmp_path):
+    repo = _repo(tmp_path)
+    target = tmp_path / "written-by-git"
+    task = Task(
+        task_id="T-3361",
+        owner="A1",
+        allowed_files=["a.txt"],
+        done_criteria=[],
+        evidence_requirements=["pytest"],
+        working_dir=str(repo),
+    )
+    task.base_branch = f"--output={target}"
+    task.add_evidence(Evidence(command="pytest", exit_code=0, output_summary="ok"))
+    out = tmp_path / "ev" / "evidence.json"
+    collector = EvidenceCollector(reports_dir=str(tmp_path / "reports"), evidence_file=str(out))
+    data = json.loads(Path(collector.generate_hallucination_evidence(task, "Done")).read_text())
+    assert not target.exists()
+    assert data["proof_type"] == "none"
+    assert data["claim_state"] != "VERIFIED"
