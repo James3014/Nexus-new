@@ -50,6 +50,7 @@ def _stub_source_observation(monkeypatch):
     monkeypatch.setattr(journal, "capture_source_baseline", lambda *a, **k: {})
     monkeypatch.setattr(journal, "observed_changed_paths_since", lambda *a, **k: [])
 
+
 TOKEN = Path(".gemini") / "antigravity-cli" / "antigravity-oauth-token"
 INSTALLATION_ID = Path(".gemini") / "antigravity-cli" / "installation_id"
 

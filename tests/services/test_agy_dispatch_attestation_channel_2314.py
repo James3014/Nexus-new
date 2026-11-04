@@ -40,6 +40,7 @@ def _stub_source_observation(monkeypatch):
     monkeypatch.setattr(journal, "capture_source_baseline", lambda *a, **k: {})
     monkeypatch.setattr(journal, "observed_changed_paths_since", lambda *a, **k: [])
 
+
 MODEL = "gemini-3.8-flash-medium"
 GENUINE_CONVERSATION = "11111111-1111-4111-8111-111111111111"
 FORGED_CONVERSATION = "22222222-2222-4222-8222-222222222222"

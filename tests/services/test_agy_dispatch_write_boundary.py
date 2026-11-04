@@ -47,6 +47,7 @@ def _stub_source_observation(monkeypatch):
     monkeypatch.setattr(journal, "capture_source_baseline", lambda *a, **k: {})
     monkeypatch.setattr(journal, "observed_changed_paths_since", lambda *a, **k: [])
 
+
 _spec = importlib.util.spec_from_file_location(
     "agy_write_admission_test_helpers",
     ROOT / "tests" / "nexus" / "executors" / "test_agy_write_admission.py",
