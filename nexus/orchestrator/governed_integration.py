@@ -142,6 +142,46 @@ class ControlledIntegrationManager:
         return result.stdout.strip()
 
     @classmethod
+    def _controller_merge_commit(cls, head: str, candidate: str, controller_root: Path) -> str:
+        """The staging merge commit, computed by the Controller from objects alone (#3186).
+
+        No work tree takes part: the tree comes from ``merge-tree --write-tree`` and
+        the commit from ``commit-tree`` with the head and the candidate as parents, so
+        the sha the receipt binds is fixed before any staging checkout or verifier.
+        Merge attributes come from the head (``--attr-source``), not from the
+        Controller checkout, which may lag the integration branch.
+        A candidate that does not merge cleanly, or is already on the head (where
+        ``merge --no-ff`` made no commit), is refused.
+        """
+        if cls._git_status(["merge-base", "--is-ancestor", candidate, head], controller_root) == 0:
+            raise RuntimeError(
+                "staging merge result is not the expected head merged with the candidate: "
+                "the candidate is already on the head"
+            )
+        merged = cls._run_sanitised_git(
+            [
+                f"--attr-source={head}",
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                head,
+                candidate,
+            ],
+            controller_root,
+        )
+        if merged.returncode != 0:
+            raise RuntimeError(
+                "git merge-tree refused: the candidate does not merge cleanly onto the head"
+            )
+        tree = merged.stdout.split("\n", 1)[0].strip()
+        if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tree) is None:
+            raise RuntimeError("git merge-tree returned no usable tree id")
+        return cls._git(
+            ["commit-tree", tree, "-p", head, "-p", candidate, "-m", f"Merge commit '{candidate}'"],
+            controller_root,
+        )
+
+    @classmethod
     def _is_detached_linked_worktree(cls, root: Path) -> bool:
         """True only for a separate Controller shape: a linked worktree on a detached HEAD.
 
@@ -977,10 +1017,13 @@ class ControlledIntegrationManager:
         branch_head_after = expected_head
         failure: Exception | None = None
         try:
-            self._git(["merge", "--no-ff", "--no-edit", candidate_sha], staging_path)
-            # The applied commit is the merge result recorded here, before any
-            # admitted verifier runs in the staging worktree (#3174).
-            staging_sha = self._git(["rev-parse", "HEAD"], staging_path)
+            # The applied commit is the merge result the Controller computes here,
+            # before any admitted verifier runs (#3174); the staging worktree only
+            # checks it out (#3186).
+            staging_sha = self._controller_merge_commit(
+                expected_head, candidate_sha, controller_root
+            )
+            self._git(["checkout", "--quiet", "--detach", staging_sha], staging_path)
             merge_parents = self._git(
                 ["rev-list", "--parents", "-n", "1", staging_sha], staging_path
             )
