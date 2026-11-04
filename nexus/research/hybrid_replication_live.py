@@ -944,14 +944,17 @@ def _run_codex(
     if _sha256_file(executable) != str(online["codex_executable_sha256"]):
         raise RuntimeError("codex_executable_hash_drift")
 
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-") as temp:
+    with (
+        tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-") as temp,
+        _run_dir_handle(temp) as root_fd,
+    ):
         root = Path(temp)
         source = root / "source"
         source.mkdir()
         _export_revision(repo, revision, source)
         schema_path = root / "schema.json"
         output_path = root / "last.json"
-        _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True))
+        _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True), root_fd)
         cmd = [
             binary,
             "--no-daemon",
@@ -978,7 +981,7 @@ def _run_codex(
         wall = time.perf_counter() - started
         parsed = _codex_usage(cp.stdout)
         try:
-            result = json.loads(_read_run_dir_file(output_path))
+            result = _parse_run_dir_result(_read_run_dir_file(output_path, root_fd))
             parse_error = None
         except Exception as exc:
             result = {}
@@ -1049,7 +1052,10 @@ def _run_codex_candidate(
     if actual_executable_sha != CODEX_EXECUTABLE_SHA256:
         raise RuntimeError("codex_executable_frozen_identity_drift")
 
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
+    with (
+        tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp,
+        _run_dir_handle(temp) as root_fd,
+    ):
         root = Path(temp)
         source = root / "source"
         # Isolated clone (not a worktree): a worktree shares the parent's refs and
@@ -1059,7 +1065,7 @@ def _run_codex_candidate(
         try:
             schema_path = root / "schema.json"
             output_path = root / "last.json"
-            _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True))
+            _write_run_dir_file(schema_path, json.dumps(schema, sort_keys=True), root_fd)
             cmd = [
                 binary,
                 "--no-daemon",
@@ -1086,7 +1092,7 @@ def _run_codex_candidate(
             wall = time.perf_counter() - started
             parsed = _codex_usage(cp.stdout)
             try:
-                result = json.loads(_read_run_dir_file(output_path))
+                result = _parse_run_dir_result(_read_run_dir_file(output_path, root_fd))
                 parse_error = None
             except Exception as exc:
                 result = {}
@@ -1799,44 +1805,85 @@ def _shadow_git_dir_digest(git_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def _check_run_dir_target(path: Path) -> None:
+_RUN_DIR_READ_LIMIT = 8 * 1024 * 1024
+
+
+@contextmanager
+def _run_dir_handle(temp: str) -> Iterator[int]:
+    """Open the run directory once, without following a link; helper calls then work
+    relative to this handle so a swapped parent path cannot redirect them."""
+    fd = os.open(temp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _run_dir_name(path: Path, dir_fd: int | None) -> tuple[Any, dict[str, Any]]:
+    """The target and the keyword arguments for the os calls: with a directory handle, the
+    bare file name relative to it; without one, the full path."""
+    if dir_fd is None:
+        return path, {}
+    name = path.name
+    if not name or "/" in name or name in {".", ".."}:
+        raise RuntimeError("run_dir_name_invalid")
+    return name, {"dir_fd": dir_fd}
+
+
+def _check_run_dir_target(path: Path, dir_fd: int | None = None) -> None:
     """Fail closed unless ``path`` is absent or a plain file (never a link, pipe or device);
     checked without following links, before anything opens it."""
+    target, kw = _run_dir_name(path, dir_fd)
     try:
-        mode = os.lstat(path).st_mode
+        mode = os.lstat(target, **kw).st_mode
     except FileNotFoundError:
         return
     if not stat.S_ISREG(mode):
         raise RuntimeError("run_dir_target_not_regular_file")
 
 
-def _write_run_dir_file(path: Path, text: str) -> None:
+def _write_run_dir_file(path: Path, text: str, dir_fd: int | None = None) -> None:
     """Write a run-directory file whose target may already exist: type-checked first, then
     opened without following a link and without blocking on a special file."""
-    _check_run_dir_target(path)
+    _check_run_dir_target(path, dir_fd)
+    target, kw = _run_dir_name(path, dir_fd)
     try:
         # Remove only this name (a hard link's other names and target stay untouched), then
         # create exclusively: a racing re-create fails closed, never retried.
-        os.unlink(path)
+        os.unlink(target, **kw)
     except FileNotFoundError:
         pass
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK
-    fd = os.open(path, flags, 0o600)
+    fd = os.open(target, flags, 0o600, **kw)
     with os.fdopen(fd, "wb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             raise RuntimeError("run_dir_target_not_regular_file")
         handle.write(text.encode("utf-8"))
 
 
-def _read_run_dir_file(path: Path) -> str:
-    """Read a run-directory file the same way: refuse anything but a plain file."""
-    _check_run_dir_target(path)
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+def _read_run_dir_file(path: Path, dir_fd: int | None = None) -> str:
+    """Read a run-directory file the same way: refuse anything but a plain file, and
+    anything larger than the read limit (refused, never truncated)."""
+    _check_run_dir_target(path, dir_fd)
+    target, kw = _run_dir_name(path, dir_fd)
+    fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, **kw)
     with os.fdopen(fd, "rb") as handle:
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise RuntimeError("run_dir_target_not_regular_file")
-        return handle.read().decode("utf-8")
+        if info.st_size > _RUN_DIR_READ_LIMIT:
+            raise RuntimeError("run_dir_output_too_large")
+        data = handle.read(_RUN_DIR_READ_LIMIT + 1)
+        if len(data) > _RUN_DIR_READ_LIMIT:
+            raise RuntimeError("run_dir_output_too_large")
+        return data.decode("utf-8")
+
+
+def _parse_run_dir_result(text: str) -> dict[str, Any]:
+    result = json.loads(text)
+    if not isinstance(result, dict):
+        raise RuntimeError("run_dir_output_not_an_object")
+    return result
 
 
 def _shadow_digest_path(source: Path) -> Path:

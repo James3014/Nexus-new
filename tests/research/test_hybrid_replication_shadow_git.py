@@ -1090,3 +1090,96 @@ def test_run_dir_read_of_a_hard_linked_target_is_refused(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="run_dir_target_not_regular_file"):
         live._read_run_dir_file(target)
+
+
+def _stub_codex(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, output: str
+) -> dict[str, dict[str, str]]:
+    """A stubbed model process that writes ``output`` as its last message."""
+    codex = sandbox / "codex"
+    codex.write_text("#!/bin/sh\n", encoding="utf-8")
+    binding = {
+        "strong_online": {
+            "codex_binary": str(codex),
+            "codex_cli": "codex-cli 0.0.0",
+            "codex_executable_path": str(codex),
+            "codex_executable_sha256": live.CODEX_EXECUTABLE_SHA256,
+            "requested_model": "model",
+        }
+    }
+    real_run = live._run
+
+    def fake_run(argv: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        argv = list(argv)
+        if argv[0] != str(codex):
+            return real_run(argv, **kwargs)
+        if argv[1:] == ["--version"]:
+            return subprocess.CompletedProcess(argv, 0, "codex-cli 0.0.0\n", "")
+        Path(argv[argv.index("-o") + 1]).write_text(output, encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(live, "_run", fake_run)
+    monkeypatch.setattr(live, "_sha256_file", lambda _path: live.CODEX_EXECUTABLE_SHA256)
+    return binding
+
+
+def test_run_dir_read_refuses_output_over_the_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(live, "_RUN_DIR_READ_LIMIT", 64)
+    (tmp_path / "ok.json").write_text("{" + " " * 61 + "}", encoding="utf-8")
+    (tmp_path / "big.json").write_text("{" + " " * 70 + "}", encoding="utf-8")
+
+    assert live._read_run_dir_file(tmp_path / "ok.json") == "{" + " " * 61 + "}"
+    with pytest.raises(RuntimeError, match="run_dir_output_too_large"):
+        live._read_run_dir_file(tmp_path / "big.json")
+
+
+@pytest.mark.parametrize("output", ["[1, 2]", "42", '"text"', "null"])
+@pytest.mark.parametrize("runner", ["_run_codex", "_run_codex_candidate"])
+def test_codex_output_that_is_not_an_object_is_a_parse_error(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch, runner: str, output: str
+) -> None:
+    repo, revision = _origin(sandbox)
+    binding = _stub_codex(sandbox, monkeypatch, output)
+
+    receipt, _ = getattr(live, runner)(
+        repo=repo, revision=revision, prompt="p", schema={}, binding=binding
+    )
+
+    assert receipt.get("response", receipt.get("final_response")) == {}
+    assert receipt["parse_error"] == "RuntimeError:run_dir_output_not_an_object"
+    assert receipt["status"] == "INVALID"
+
+
+def test_codex_candidate_end_to_end_with_an_object_output(
+    sandbox: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, revision = _origin(sandbox)
+    binding = _stub_codex(sandbox, monkeypatch, json.dumps({"ok": True}))
+
+    receipt, _ = live._run_codex_candidate(
+        repo=repo, revision=revision, prompt="p", schema={"type": "object"}, binding=binding
+    )
+
+    assert receipt["final_response"] == {"ok": True}
+    assert receipt["parse_error"] is None
+    assert receipt["status"] == "VALID"
+    assert receipt["changed_files"] == []
+
+
+def test_run_dir_helpers_stay_in_the_directory_opened_first(tmp_path: Path) -> None:
+    root = tmp_path / "run"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    with live._run_dir_handle(str(root)) as fd:
+        moved = tmp_path / "moved"
+        os.rename(root, moved)
+        os.symlink(elsewhere, root)
+
+        live._write_run_dir_file(root / "schema.json", "{}", fd)
+
+        assert live._read_run_dir_file(root / "schema.json", fd) == "{}"
+    assert (moved / "schema.json").read_text(encoding="utf-8") == "{}"
+    assert list(elsewhere.iterdir()) == []
