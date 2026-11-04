@@ -22,7 +22,11 @@ def build_runtime_signed_receipt(
     raw_observation: Mapping[str, Any],
     secret: str,
     observer_version: str = "mock-v1",
+    source_skill_id: str | None = None,
+    evidence_kind: str | None = None,
 ) -> dict[str, Any]:
+    """``source_skill_id`` and ``evidence_kind`` are signed when given, so a reader can
+    derive what a row proves from signed content instead of its own columns (#3355)."""
     raw_observation_hash = canonical_json_hash(raw_observation)
     signature_inputs = {
         "run_id": run_id,
@@ -33,6 +37,10 @@ def build_runtime_signed_receipt(
         "artifact_hash": artifact_hash,
         "raw_observation_hash": raw_observation_hash,
     }
+    if source_skill_id is not None:
+        signature_inputs["source_skill_id"] = source_skill_id
+    if evidence_kind is not None:
+        signature_inputs["evidence_kind"] = evidence_kind
     receipt_hash = canonical_json_hash(signature_inputs)
     signature = hmac.new(secret.encode("utf-8"), receipt_hash.encode("utf-8"), hashlib.sha256).hexdigest()
     return {
@@ -54,6 +62,10 @@ def verify_runtime_signed_receipt(receipt: Mapping[str, Any], *, secret: str) ->
         return False
     receipt_hash = str(inputs.get("receipt_hash") or "")
     if not receipt_hash:
+        return False
+    # The signature covers the hash only; the inputs a reader acts on must hash to it (#3355).
+    signed_inputs = {key: value for key, value in inputs.items() if key != "receipt_hash"}
+    if canonical_json_hash(signed_inputs) != receipt_hash:
         return False
     expected = hmac.new(secret.encode("utf-8"), receipt_hash.encode("utf-8"), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, str(receipt.get("receipt_signature") or ""))
