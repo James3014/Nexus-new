@@ -296,3 +296,67 @@ def test_the_public_pointer_reader_refuses_a_named_pipe_and_an_oversized_file(en
     big.write_text(" " * 5000, encoding="utf-8")
     with pytest.raises(OSError):
         hardened_git.read_git_pointer_file(big)
+
+
+def _swap_after_the_check(monkeypatch: pytest.MonkeyPatch, worktree: Path, decoy: Path) -> None:
+    """Swap ``worktree`` for ``decoy`` right after the runner's descriptor check passes, the
+    window between a caller's last path check and git starting (#3153)."""
+    real_check = hardened_git._fd_names_dir
+
+    def check_then_swap(fd: int, path: Path) -> bool:
+        named = real_check(fd, path)
+        worktree.rename(worktree.with_name(worktree.name + "-moved"))
+        decoy.rename(worktree)
+        return named
+
+    monkeypatch.setattr(hardened_git, "_fd_names_dir", check_then_swap)
+
+
+def test_git_enters_the_work_tree_through_the_validated_descriptor(env, monkeypatch):
+    repo, worktree = _controller_and_worktree(env)
+    (worktree / "own.txt").write_text("own\n", encoding="utf-8")
+    decoy = env / "decoy"
+    decoy.mkdir()
+    (decoy / "decoy.txt").write_text("decoy\n", encoding="utf-8")
+    git_dir = hardened_git.linked_worktree_git_dir(worktree, repo)
+    assert git_dir is not None
+    fd = os.open(worktree, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _swap_after_the_check(monkeypatch, worktree, decoy)
+        status = hardened_git.run_hardened_git(
+            worktree, "status", "--porcelain", "-uall", git_dir=git_dir, repo_fd=fd
+        )
+    finally:
+        os.close(fd)
+    assert status.returncode == 0, status.stderr
+    assert "own.txt" in status.stdout
+    assert "decoy.txt" not in status.stdout
+
+
+def test_a_descriptor_that_is_not_the_named_directory_is_refused_without_running_git(env):
+    repo, worktree = _controller_and_worktree(env)
+    git_dir = hardened_git.linked_worktree_git_dir(worktree, repo)
+    other = env / "other"
+    other.mkdir()
+    fd = os.open(other, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        refused = hardened_git.run_hardened_git(
+            worktree, "rev-parse", "HEAD", git_dir=git_dir, repo_fd=fd
+        )
+        config_refused = hardened_git.repository_config_can_start_a_program(
+            worktree, git_dir=git_dir, repo_fd=fd
+        )
+    finally:
+        os.close(fd)
+    assert refused.returncode == 128
+    assert "not the directory open at the given descriptor" in refused.stderr
+    assert config_refused is True
+    fd = os.open(worktree, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        head = hardened_git.run_hardened_git(
+            worktree, "rev-parse", "HEAD", git_dir=git_dir, repo_fd=fd
+        )
+    finally:
+        os.close(fd)
+    assert head.returncode == 0
+    assert head.stdout.strip() == _git(repo, "rev-parse", "HEAD")
