@@ -57,6 +57,11 @@ def build_runtime_signed_receipt(
     }
 
 
+def _digest_equal(expected: str, claimed: Any) -> bool:
+    """Constant-time compare on bytes, so a non-ASCII claimed value is a plain mismatch."""
+    return hmac.compare_digest(expected.encode("utf-8"), str(claimed or "").encode("utf-8"))
+
+
 def verify_runtime_signed_receipt(
     receipt: Mapping[str, Any], *, secret: str, expected: Mapping[str, Any] | None = None
 ) -> bool:
@@ -82,7 +87,7 @@ def verify_runtime_signed_receipt(
         if key not in signed_inputs or signed_inputs[key] != value:
             return False
     signature = hmac.new(secret.encode("utf-8"), receipt_hash.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, str(receipt.get("receipt_signature") or ""))
+    return _digest_equal(signature, receipt.get("receipt_signature"))
 
 
 def stamp_runtime_signed_behavior_bundle(
@@ -283,4 +288,4 @@ def verify_report_signature(report: Any, *, kind: str, secret: str | None) -> bo
     expected = _report_signature_value(
         str(sig.get("report_kind")), current, secret, str(sig.get("signature_purpose"))
     )
-    return hmac.compare_digest(expected, str(sig.get("signature") or ""))
+    return _digest_equal(expected, sig.get("signature"))

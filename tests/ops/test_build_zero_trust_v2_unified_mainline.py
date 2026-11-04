@@ -10,6 +10,7 @@ from nexus.learning.zero_trust_v2_receipts import (
     REPORT_KIND_RUNTIME_APPLY,
     build_runtime_signed_receipt,
     sign_report,
+    verify_runtime_signed_receipt,
 )
 from scripts.ops.build_zero_trust_v2_unified_mainline import build_zero_trust_v2_unified_mainline
 
@@ -215,3 +216,158 @@ def test_unified_mainline_can_pass_after_apply_and_post_smoke() -> None:
     assert result["summary"]["v2_unification_complete"] is True
     assert result["summary"]["runtime_mutation_allowed"] is True
     assert all(item["status"] == "PASS" for item in result["milestones"])
+
+
+def _failing_signed(name: str, failing: dict) -> dict:
+    kinds = {
+        "m45_m52": REPORT_KIND_M45_M52,
+        "manual_trial": REPORT_KIND_MANUAL_TRIAL,
+        "rollout": REPORT_KIND_ROLLOUT,
+        "runtime_apply": REPORT_KIND_RUNTIME_APPLY,
+        "post_apply_smoke": REPORT_KIND_POST_APPLY_SMOKE,
+    }
+    return sign_report(failing, kind=kinds[name], secret=KEY)
+
+
+# (segment, signed failing report, edit applied afterwards, reason expected in the result)
+_EDIT_CASES = {
+    "rollout_p1_p2_flag": (
+        "rollout",
+        {
+            "status": "PASS",
+            "summary": {"p0_rollout_complete": True, "p1_p2_rollout_complete": False},
+        },
+        ("summary", "p1_p2_rollout_complete", True),
+        "rollout_report_signature_not_verified",
+    ),
+    "rollout_p0_flag": (
+        "rollout",
+        {
+            "status": "PASS",
+            "summary": {"p0_rollout_complete": False, "p1_p2_rollout_complete": True},
+        },
+        ("summary", "p0_rollout_complete", True),
+        "rollout_report_signature_not_verified",
+    ),
+    "rollout_status": (
+        "rollout",
+        {
+            "status": "BLOCKED",
+            "summary": {"p0_rollout_complete": True, "p1_p2_rollout_complete": True},
+        },
+        ("status", None, "PASS"),
+        "rollout_report_signature_not_verified",
+    ),
+    "runtime_apply_flag": (
+        "runtime_apply",
+        {
+            "status": "PASS",
+            "summary": {"runtime_update_allowed": False, "v2_default_applied_count": 34},
+        },
+        ("summary", "runtime_update_allowed", True),
+        "runtime_apply_report_signature_not_verified",
+    ),
+    "runtime_apply_count": (
+        "runtime_apply",
+        {
+            "status": "PASS",
+            "summary": {"runtime_update_allowed": True, "v2_default_applied_count": 3},
+        },
+        ("summary", "v2_default_applied_count", 34),
+        "runtime_apply_report_signature_not_verified",
+    ),
+    "smoke_case_count": (
+        "post_apply_smoke",
+        {"status": "PASS", "summary": {"case_count": 3, "pass_count": 34}},
+        ("summary", "case_count", 34),
+        "post_apply_smoke_report_signature_not_verified",
+    ),
+    "smoke_pass_count": (
+        "post_apply_smoke",
+        {"status": "PASS", "summary": {"case_count": 34, "pass_count": 3}},
+        ("summary", "pass_count", 34),
+        "post_apply_smoke_report_signature_not_verified",
+    ),
+    "manual_trial_flag": (
+        "manual_trial",
+        {"status": "PASS", "summary": {"manual_apply_trial_ready": False}},
+        ("summary", "manual_apply_trial_ready", True),
+        "manual_apply_trial_report_signature_not_verified",
+    ),
+    "m45_clean_count": (
+        "m45_m52",
+        {
+            "summary": {"m45_clean_v2_receipt_count": 2, "m51_v2_ready_capability_count": 34},
+            "m45_behavior_run_results": [{"blockers": []}],
+        },
+        ("summary", "m45_clean_v2_receipt_count", 102),
+        "m45_m52_report_signature_not_verified",
+    ),
+    "m45_ready_count": (
+        "m45_m52",
+        {
+            "summary": {"m45_clean_v2_receipt_count": 102, "m51_v2_ready_capability_count": 3},
+            "m45_behavior_run_results": [{"blockers": []}],
+        },
+        ("summary", "m51_v2_ready_capability_count", 34),
+        "m45_m52_report_signature_not_verified",
+    ),
+    "m45_blockers": (
+        "m45_m52",
+        {
+            "summary": {"m45_clean_v2_receipt_count": 102, "m51_v2_ready_capability_count": 34},
+            "m45_behavior_run_results": [{"blockers": ["semantic_not_verified"]}],
+        },
+        ("m45_behavior_run_results", None, [{"blockers": []}]),
+        "m45_m52_report_signature_not_verified",
+    ),
+}
+
+
+def test_3374_signed_failing_report_edited_to_pass_is_blocked() -> None:
+    import json
+
+    for case_id, (name, failing, (top, sub, value), reason) in _EDIT_CASES.items():
+        chain = _chain()
+        report = _failing_signed(name, failing)
+        # the unedited signed failing report must not pass either
+        chain[name] = report
+        assert _run(chain)["status"] != "PASS", case_id
+        # edit one read field to its passing value, keep the original signature
+        edited = copy.deepcopy(report)
+        if sub is None:
+            edited[top] = value
+        else:
+            edited[top][sub] = value
+        chain[name] = edited
+        result = _run(chain)
+        assert result["status"] == "BLOCKED", case_id
+        assert reason in json.dumps(result), case_id
+        # control: the same edit signed with the key does pass, so the edit alone is not the cause
+        chain[name] = _failing_signed(
+            name, {k: v for k, v in edited.items() if k != "report_signature"}
+        )
+        assert _run(chain)["status"] == "PASS", case_id
+
+
+def test_3374_non_ascii_signature_is_a_plain_mismatch() -> None:
+    chain = _chain()
+    for name in chain:
+        edited = copy.deepcopy(chain[name])
+        edited["report_signature"]["signature"] = "café-✓"
+        chain[name] = edited
+        assert _run(chain)["status"] == "BLOCKED", name
+        chain[name] = _chain()[name]
+    receipt = build_runtime_signed_receipt(
+        run_id="r",
+        row_id="x",
+        arm_id="a",
+        capability_id="c",
+        skill_id="s",
+        artifact_hash="h",
+        raw_observation={},
+        secret=KEY,
+    )
+    assert verify_runtime_signed_receipt(receipt, secret=KEY) is True
+    receipt["receipt_signature"] = "café-✓"
+    assert verify_runtime_signed_receipt(receipt, secret=KEY) is False
