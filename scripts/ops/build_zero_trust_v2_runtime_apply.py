@@ -312,7 +312,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--overlay-output", default=str(DEFAULT_APPLIED_OVERLAY))
     parser.add_argument("--skill-status-output", default=str(DEFAULT_APPLIED_STATUS))
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--signing-secret-file", default="")
     args = parser.parse_args(argv)
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_RUNTIME_APPLY,
+        load_signing_secret,
+        sign_report_if_keyed,
+    )
+
     promotion_report = read_json(args.promotion_report)
     if args.apply:
         result = build_zero_trust_v2_runtime_apply_artifacts(
@@ -324,7 +331,12 @@ def main(argv: list[str] | None = None) -> int:
             current_skill_status=read_json(args.current_skill_status),
         )
         decision_output = args.decision_output or args.output
-        write_json(decision_output, result["decision"])
+        decision = sign_report_if_keyed(
+            result["decision"],
+            kind=REPORT_KIND_RUNTIME_APPLY,
+            secret=load_signing_secret(args.signing_secret_file),
+        )
+        write_json(decision_output, decision)
         write_json(args.overlay_output, result["overlay"])
         write_json(args.skill_status_output, result["skill_status"])
         print(

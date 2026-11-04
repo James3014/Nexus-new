@@ -101,22 +101,99 @@ def build_zero_trust_v2_unified_mainline(
     rollout: dict[str, Any] | None = None,
     runtime_apply: dict[str, Any] | None = None,
     post_apply_smoke: dict[str, Any] | None = None,
+    signing_secret: str | None = None,
 ) -> dict[str, Any]:
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_M45_M52,
+        REPORT_KIND_MANUAL_TRIAL,
+        REPORT_KIND_POST_APPLY_SMOKE,
+        REPORT_KIND_ROLLOUT,
+        REPORT_KIND_RUNTIME_APPLY,
+        verify_report_signature,
+    )
+
+    # Only reports whose producer signature verifies are read; anything else is treated as not
+    # passed, and without a key nothing verifies (#3374).
+    def _unsigned(report: dict[str, Any] | None, kind: str) -> bool:
+        return report is not None and not verify_report_signature(
+            report, kind=kind, secret=signing_secret
+        )
+
+    if not verify_report_signature(m45_m52, kind=REPORT_KIND_M45_M52, secret=signing_secret):
+        m45_m52 = {
+            "summary": {},
+            "m45_behavior_run_results": [{"blockers": ["m45_m52_report_signature_not_verified"]}],
+        }
+    unsigned_blockers = {
+        "manual_trial": ["manual_apply_trial_report_signature_not_verified"],
+        "rollout": ["rollout_report_signature_not_verified"],
+        "runtime_apply": ["runtime_apply_report_signature_not_verified"],
+        "post_apply_smoke": ["post_apply_smoke_report_signature_not_verified"],
+    }
     blockers = _blocker_set(m45_m52)
     clean_receipts = int(_as_dict(m45_m52.get("summary")).get("m45_clean_v2_receipt_count") or 0)
-    v2_ready_capabilities = int(_as_dict(m45_m52.get("summary")).get("m51_v2_ready_capability_count") or 0)
-    m53_blockers = [b for b in ("missing_required_capability_receipts", "receipt_data_contract_violation") if b in blockers]
-    m54_blockers = ["missing_runtime_signed_v2_receipt"] if "missing_runtime_signed_v2_receipt" in blockers else []
-    m55_blockers = [b for b in ("no_eligible_behavior_row", "semantic_not_verified") if b in blockers]
+    v2_ready_capabilities = int(
+        _as_dict(m45_m52.get("summary")).get("m51_v2_ready_capability_count") or 0
+    )
+    m53_blockers = [
+        b
+        for b in ("missing_required_capability_receipts", "receipt_data_contract_violation")
+        if b in blockers
+    ]
+    m54_blockers = (
+        ["missing_runtime_signed_v2_receipt"]
+        if "missing_runtime_signed_v2_receipt" in blockers
+        else []
+    )
+    m55_blockers = [
+        b for b in ("no_eligible_behavior_row", "semantic_not_verified") if b in blockers
+    ]
     m56_blockers = ["clean_v2_receipt_count_lt_3"] if clean_receipts < 3 else []
     canary_blockers = sorted(set(m53_blockers + m54_blockers + m55_blockers + m56_blockers))
-    manual_blockers = _manual_trial_blockers(manual_trial) if not canary_blockers else ["canary_not_clean"]
+    manual_blockers = (
+        (
+            unsigned_blockers["manual_trial"]
+            if _unsigned(manual_trial, REPORT_KIND_MANUAL_TRIAL)
+            else _manual_trial_blockers(manual_trial)
+        )
+        if not canary_blockers
+        else ["canary_not_clean"]
+    )
     canary_apply_blockers = manual_blockers
-    p0_blockers = _rollout_blockers(rollout) if not canary_apply_blockers else ["manual_apply_trial_not_ready"]
-    p1_p2_blockers = _rollout_blockers(rollout, p1_p2=True) if not p0_blockers else ["p0_rollout_not_complete"]
+    rollout_unsigned = _unsigned(rollout, REPORT_KIND_ROLLOUT)
+    p0_blockers = (
+        (unsigned_blockers["rollout"] if rollout_unsigned else _rollout_blockers(rollout))
+        if not canary_apply_blockers
+        else ["manual_apply_trial_not_ready"]
+    )
+    p1_p2_blockers = (
+        (
+            unsigned_blockers["rollout"]
+            if rollout_unsigned
+            else _rollout_blockers(rollout, p1_p2=True)
+        )
+        if not p0_blockers
+        else ["p0_rollout_not_complete"]
+    )
     coverage_blocker = ["v2_ready_capability_count_lt_34"] if v2_ready_capabilities < 34 else []
-    runtime_apply_blockers = _runtime_apply_blockers(runtime_apply) if not coverage_blocker and not p1_p2_blockers else ["rollout_or_coverage_not_complete"]
-    smoke_blockers = _post_smoke_blockers(post_apply_smoke) if not runtime_apply_blockers else ["v2_default_overlay_not_applied"]
+    runtime_apply_blockers = (
+        (
+            unsigned_blockers["runtime_apply"]
+            if _unsigned(runtime_apply, REPORT_KIND_RUNTIME_APPLY)
+            else _runtime_apply_blockers(runtime_apply)
+        )
+        if not coverage_blocker and not p1_p2_blockers
+        else ["rollout_or_coverage_not_complete"]
+    )
+    smoke_blockers = (
+        (
+            unsigned_blockers["post_apply_smoke"]
+            if _unsigned(post_apply_smoke, REPORT_KIND_POST_APPLY_SMOKE)
+            else _post_smoke_blockers(post_apply_smoke)
+        )
+        if not runtime_apply_blockers
+        else ["v2_default_overlay_not_applied"]
+    )
 
     milestones = [
         _milestone(
@@ -242,8 +319,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-apply", default="")
     parser.add_argument("--post-apply-smoke", default="")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--signing-secret-file", default="")
     args = parser.parse_args(argv)
+    from nexus.learning.zero_trust_v2_receipts import load_signing_secret
+
     result = build_zero_trust_v2_unified_mainline(
+        signing_secret=load_signing_secret(args.signing_secret_file),
         m45_m52=read_json(args.m45_m52),
         manual_trial=read_json(args.manual_trial) if args.manual_trial else None,
         rollout=read_json(args.rollout) if args.rollout else None,

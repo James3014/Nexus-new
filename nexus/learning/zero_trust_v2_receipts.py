@@ -140,3 +140,147 @@ def stamp_runtime_signed_behavior_bundle(
         "artifact_hash": artifact_hash,
     }
     return {"status": "PASS", "blockers": [], "bundle": stamped, "receipt": receipt}
+
+
+# Intermediate-report signatures (#3374). A purpose different from receipts and attestations, and
+# a report kind inside the signed content, so a signature made for one thing cannot verify as
+# another. The signature covers only the fields the combining report acts on.
+REPORT_SIGNATURE_PURPOSE = "nexus.zero_trust_v2.report"
+REPORT_SIGNING_SECRET_ENV = "NEXUS_ZERO_TRUST_V2_RECEIPT_SIGNING_SECRET"
+REPORT_KIND_M45_M52 = "m45_m52_completion"
+REPORT_KIND_MANUAL_TRIAL = "manual_trial"
+REPORT_KIND_ROLLOUT = "p0_rollout"
+REPORT_KIND_RUNTIME_APPLY = "runtime_apply_decision"
+REPORT_KIND_POST_APPLY_SMOKE = "post_apply_smoke"
+REPORT_KINDS = (
+    REPORT_KIND_M45_M52,
+    REPORT_KIND_MANUAL_TRIAL,
+    REPORT_KIND_ROLLOUT,
+    REPORT_KIND_RUNTIME_APPLY,
+    REPORT_KIND_POST_APPLY_SMOKE,
+)
+
+
+def load_signing_secret(path: str | None = None) -> str:
+    """Environment variable first, then the named file; empty when neither gives a key. Never
+    creates a key."""
+    import os
+    from pathlib import Path
+
+    env_secret = os.environ.get(REPORT_SIGNING_SECRET_ENV, "").strip()
+    if env_secret:
+        return env_secret
+    if path and Path(path).is_file():
+        return Path(path).read_text(encoding="utf-8").strip()
+    return ""
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def report_signed_fields(kind: str, report: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The fields of ``report`` that the combining report uses, or None for an unknown kind."""
+    summary = _dict(report.get("summary"))
+    if kind == REPORT_KIND_M45_M52:
+        blockers: set[str] = set()
+        for item in _list(report.get("m45_behavior_run_results")):
+            if isinstance(item, Mapping):
+                blockers.update(str(b) for b in _list(item.get("blockers")) if str(b))
+        for item in _list(_dict(report.get("m46_receipt_import_gate")).get("dominant_blockers")):
+            if isinstance(item, Mapping) and item.get("reason"):
+                blockers.add(str(item["reason"]))
+        return {
+            "blockers": sorted(blockers),
+            "m45_clean_v2_receipt_count": summary.get("m45_clean_v2_receipt_count"),
+            "m51_v2_ready_capability_count": summary.get("m51_v2_ready_capability_count"),
+        }
+    if kind == REPORT_KIND_MANUAL_TRIAL:
+        return {
+            "status": report.get("status"),
+            "manual_apply_trial_ready": summary.get("manual_apply_trial_ready"),
+            "blockers": report.get("blockers"),
+        }
+    if kind == REPORT_KIND_ROLLOUT:
+        return {
+            "status": report.get("status"),
+            "p0_rollout_complete": summary.get("p0_rollout_complete"),
+            "p1_p2_rollout_complete": summary.get("p1_p2_rollout_complete"),
+        }
+    if kind == REPORT_KIND_RUNTIME_APPLY:
+        return {
+            "status": report.get("status"),
+            "runtime_update_allowed": summary.get("runtime_update_allowed"),
+            "v2_default_applied_count": summary.get("v2_default_applied_count"),
+            "blockers": report.get("blockers"),
+        }
+    if kind == REPORT_KIND_POST_APPLY_SMOKE:
+        return {
+            "status": report.get("status"),
+            "case_count": summary.get("case_count"),
+            "pass_count": summary.get("pass_count"),
+        }
+    return None
+
+
+def _report_signature_value(
+    kind: str, fields: Mapping[str, Any], secret: str, purpose: str = REPORT_SIGNATURE_PURPOSE
+) -> str:
+    digest = canonical_json_hash({
+        "signature_purpose": purpose,
+        "report_kind": kind,
+        "fields": dict(fields),
+    })
+    return hmac.new(secret.encode("utf-8"), digest.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def sign_report(report: Mapping[str, Any], *, kind: str, secret: str) -> dict[str, Any]:
+    """A copy of ``report`` with ``report_signature`` over the fields the combining report uses."""
+    fields = report_signed_fields(kind, report)
+    if fields is None or not secret:
+        raise ValueError("cannot sign report: unknown kind or empty key")
+    signed = {key: value for key, value in report.items() if key != "report_signature"}
+    signed["report_signature"] = {
+        "signature_purpose": REPORT_SIGNATURE_PURPOSE,
+        "report_kind": kind,
+        "algorithm": "hmac-sha256",
+        "fields": fields,
+        "signature": _report_signature_value(kind, fields, secret),
+    }
+    return signed
+
+
+def sign_report_if_keyed(
+    report: Mapping[str, Any], *, kind: str, secret: str | None
+) -> dict[str, Any]:
+    """Unchanged copy when no key is given; otherwise signed."""
+    if not secret:
+        return dict(report)
+    return sign_report(report, kind=kind, secret=secret)
+
+
+def verify_report_signature(report: Any, *, kind: str, secret: str | None) -> bool:
+    """True only when the signature has the report purpose and the expected kind, the signed
+    fields equal what the report holds now, and the HMAC matches."""
+    if not secret or not isinstance(report, Mapping):
+        return False
+    sig = report.get("report_signature")
+    if not isinstance(sig, Mapping):
+        return False
+    if sig.get("signature_purpose") != REPORT_SIGNATURE_PURPOSE:
+        return False
+    if sig.get("report_kind") != kind or sig.get("algorithm") != "hmac-sha256":
+        return False
+    current = report_signed_fields(kind, report)
+    if current is None or sig.get("fields") != current:
+        return False
+    # The digest covers the purpose and kind the signature declares, so the two checks above are
+    # what bind it to this use.
+    expected = _report_signature_value(
+        str(sig.get("report_kind")), current, secret, str(sig.get("signature_purpose"))
+    )
+    return hmac.compare_digest(expected, str(sig.get("signature") or ""))

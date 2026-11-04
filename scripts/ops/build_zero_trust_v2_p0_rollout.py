@@ -85,13 +85,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--promotion-report", default=str(DEFAULT_PROMOTION))
     parser.add_argument("--manual-trial", default="")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--signing-secret-file", default="")
     args = parser.parse_args(argv)
+    from nexus.learning.zero_trust_v2_receipts import (
+        REPORT_KIND_ROLLOUT,
+        load_signing_secret,
+        sign_report_if_keyed,
+    )
+
     result = build_zero_trust_v2_p0_rollout(
         promotion_report=read_json(args.promotion_report),
         manual_trial=read_json(args.manual_trial) if args.manual_trial else None,
     )
+    result = sign_report_if_keyed(
+        result, kind=REPORT_KIND_ROLLOUT, secret=load_signing_secret(args.signing_secret_file)
+    )
     write_json(args.output, result)
-    print(json.dumps({"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {"status": result["status"], "output": args.output, **result["summary"]}, sort_keys=True
+        )
+    )
     return 0
 
 
