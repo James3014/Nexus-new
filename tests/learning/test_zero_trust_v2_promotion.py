@@ -348,3 +348,13 @@ def test_3362_complete_row_with_distinct_proofs_is_still_ready() -> None:
 
     assert verdict["status"] == READY_FOR_MANUAL_APPLY
     assert verdict["v2_evidence_count"] == 4
+
+
+def test_3362_mismatch_on_attached_proof_blocks_promotion() -> None:
+    row = _complete_v2_row()
+    row["signed_proofs"][0] = {**row["signed_proofs"][0], "v2_trust_mismatch_count": 1}
+
+    verdict = evaluate_zero_trust_v2_promotion_candidate(row, signing_secret=SECRET)
+
+    assert verdict["status"] == BLOCKED
+    assert "v2_trust_mismatch_nonzero" in verdict["reasons"]

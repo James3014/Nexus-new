@@ -154,7 +154,8 @@ def derive_zero_trust_v2_signed_counts(
     """Per candidate, the v2 evidence and negative-control counts derived only from verified,
     de-duplicated signed receipts: each proof counts once, whatever the row columns say (#3355),
     and each signed identity (capability, source skill, row, arm) counts once across rounds and
-    signatures; the merged repeats are listed, not dropped silently (#3362). Shared by the accumulation report and the promotion evaluator."""
+    signatures; the merged repeats are listed, not dropped silently (#3362). Shared by the
+    accumulation report and the promotion evaluator."""
     by_key: dict[tuple[str, str], dict[str, Any]] = {}
     seen: set[str] = set()
     seen_identities: set[tuple[str, str, str, str]] = set()
@@ -169,6 +170,10 @@ def derive_zero_trust_v2_signed_counts(
             item["rejected_row_refs"].append(row.get("row_id"))
             continue
         item = by_key.setdefault(proof["key"], _new_counts())
+        # Not signed; it can only block, and the producer always writes 0. Out-of-range values
+        # reject the row above, so a negative value cannot cancel another row's mismatch; a
+        # repeat still adds its mismatch, so merging repeats can only block more (#3362).
+        item["v2_trust_mismatch_count"] += mismatch
         if proof["proof_id"] in seen:
             item["duplicate_proof_count"] += 1
             continue
@@ -187,9 +192,6 @@ def derive_zero_trust_v2_signed_counts(
         item["v2_evidence_count"] += credited_v2
         if int(row.get("v2_evidence_count") or 0) != credited_v2:
             item["unsigned_count_mismatch_row_refs"].append(proof["row_id"])
-        # Not signed; it can only block, and the producer always writes 0. Out-of-range values
-        # reject the row above, so a negative value cannot cancel another row's mismatch (#3362).
-        item["v2_trust_mismatch_count"] += mismatch
     return by_key
 
 

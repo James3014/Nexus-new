@@ -398,3 +398,16 @@ def test_3362_non_integer_mismatch_value_is_refused() -> None:
         ])
         assert candidate["rejected_row_refs"] == ["a"], value
         assert candidate["v2_evidence_count"] == 0, value
+
+
+def test_3362_repeated_row_still_adds_its_mismatch() -> None:
+    first = _signed_row("a")
+    base = [_signed_row("b"), _signed_row("c"), _negative_row("neg")]
+    for repeat in (
+        {**first, "v2_trust_mismatch_count": 1},
+        {**_resigned(first, "run-2"), "v2_trust_mismatch_count": 1},
+    ):
+        candidate = _accumulate_rows([first, repeat, *base])
+        assert candidate["v2_evidence_count"] == 3
+        assert candidate["v2_trust_mismatch_count"] == 1
+        assert candidate["status"] == "BLOCKED"
