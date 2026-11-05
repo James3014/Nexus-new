@@ -43,6 +43,8 @@ HERMES_CORE_COMPLETION = ROOT / "scripts" / "ops" / "nexus-hermes-core-completio
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
 HERMES_OBSERVE_POLICY = ROOT / "scripts" / "ops" / "nexus-hermes-soak-observe-policy.json"
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
+ENGINE_INIT = ROOT / "nexus" / "engine" / "__init__.py"
+UNTRUSTED_TREE_CLEANUP = ROOT / "nexus" / "engine" / "untrusted_tree_cleanup.py"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -163,6 +165,8 @@ def _make_source_repo(tmp_path: Path) -> Path:
             ROOT / "nexus/services/workflow_doctor.py",
             "nexus/services/workflow_doctor.py",
         ),
+        (ENGINE_INIT, "nexus/engine/__init__.py"),
+        (UNTRUSTED_TREE_CLEANUP, "nexus/engine/untrusted_tree_cleanup.py"),
         *[(ROOT / rel, rel) for rel in _EXECUTORS_RUNTIME_PATHS],
         # #3052: cli_worker kills its process group through nexus.core.argv_command
         (ROOT / "nexus/core/__init__.py", "nexus/core/__init__.py"),
