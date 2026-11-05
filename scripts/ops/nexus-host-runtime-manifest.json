@@ -140,6 +140,14 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/engine/__init__.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/engine/untrusted_tree_cleanup.py",
+      "mode": "0644"
+    },
+    {
       "path": "nexus/executors/__init__.py",
       "mode": "0644"
     },
