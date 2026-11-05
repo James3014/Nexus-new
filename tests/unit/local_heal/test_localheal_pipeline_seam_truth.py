@@ -75,6 +75,17 @@ def _build_provider_mock(output_text: str = "def foo_func():\n    return 42\n"):
     return mock
 
 
+@pytest.fixture
+def heal_source(tmp_path, monkeypatch):
+    source = tmp_path / "heal_source"
+    source.mkdir()
+    (source / "a.py").write_text("def f():\n    pass\n")
+    (source / "verify.py").write_text("pass\n")
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+    monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    return str(source)
+
+
 class TestLocalhealPipelineTopologyBridgeInvocation:
     """Test 1: Verify topology routes through bridge, not full pipeline."""
 
@@ -110,7 +121,7 @@ class TestLocalhealPipelineTopologyBridgeInvocation:
 class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
     """Test 2: Bridge NOW calls HealPipeline.run() (B1), but Orchestrator.run() is reached via pipeline."""
 
-    def test_localheal_pipeline_topology_calls_heal_pipeline_run(self):
+    def test_localheal_pipeline_topology_calls_heal_pipeline_run(self, heal_source):
         """Bridge now calls HealPipeline.run() (B1 wiring)."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -126,7 +137,7 @@ class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
                 result = LocalHealPipelineCapabilityExecutor().execute(
                     LocalModelCapabilityContext(
                         task_id="t_bridge",
-                        source_root="/tmp",
+                        source_root=heal_source,
                         problem_statement="fix bug",
                         target_file="a.py",
                         target_symbol="f",
@@ -174,7 +185,7 @@ class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
                 # Orchestrator is called internally by pipeline.run()
                 pass
 
-    def test_localheal_pipeline_passes_python_executable_from_route_context(self):
+    def test_localheal_pipeline_passes_python_executable_from_route_context(self, heal_source):
         """Bridge must forward task-scoped python_executable into HealContext."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -194,7 +205,7 @@ class TestLocalhealPipelineTopologyDoesNotClaimFullExecution:
                 LocalHealPipelineCapabilityExecutor().execute(
                     LocalModelCapabilityContext(
                         task_id="t_bridge_py",
-                        source_root="/tmp",
+                        source_root=heal_source,
                         problem_statement="fix bug",
                         target_file="a.py",
                         target_symbol="f",
@@ -479,7 +490,7 @@ class TestLocalhealPipelineBridgeUsesRealProvider:
 class TestHealPipelineRunInvocationTruth:
     """A3.1/B1: Verify HealPipeline.run() is actually called."""
 
-    def test_localheal_pipeline_calls_healpipeline_run(self):
+    def test_localheal_pipeline_calls_healpipeline_run(self, heal_source):
         """HealPipeline.run() IS called (B1 wiring)."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -495,7 +506,7 @@ class TestHealPipelineRunInvocationTruth:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_a31_run",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -512,7 +523,7 @@ class TestHealPipelineRunInvocationTruth:
                 pipeline_run_mock.assert_called_once()
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
 
-    def test_localheal_pipeline_instantiation_not_equal_to_execution(self):
+    def test_localheal_pipeline_instantiation_not_equal_to_execution(self, heal_source):
         """Instantiation alone does not constitute execution — but B1 now also calls .run()."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -528,7 +539,7 @@ class TestHealPipelineRunInvocationTruth:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_a31_init",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -548,7 +559,7 @@ class TestHealPipelineRunInvocationTruth:
                 assert result.telemetries.get("world_c_receipt_valid") is False
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
 
-    def test_localheal_pipeline_actual_execution_false_when_run_raises(self):
+    def test_localheal_pipeline_actual_execution_false_when_run_raises(self, heal_source):
         """localheal_pipeline_actual_execution must be False when pipeline.run() raises."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -559,7 +570,7 @@ class TestHealPipelineRunInvocationTruth:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_a31_flag",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -579,7 +590,7 @@ class TestHealPipelineRunInvocationTruth:
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
                 assert result.telemetries.get("localheal_pipeline_run_success") is False
 
-    def test_localheal_pipeline_does_not_claim_retry_invoked_without_run(self):
+    def test_localheal_pipeline_does_not_claim_retry_invoked_without_run(self, heal_source):
         """semantic_retry_invoked must be False when .run() raises."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -590,7 +601,7 @@ class TestHealPipelineRunInvocationTruth:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_a31_retry",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -666,7 +677,7 @@ class TestPipelineTelemetrySemanticsB2:
                 assert result.telemetries.get("localheal_pipeline_instantiated") is True
                 assert result.telemetries.get("localheal_pipeline_actual_execution") is False
 
-    def test_pipeline_run_called_does_not_mean_run_success(self):
+    def test_pipeline_run_called_does_not_mean_run_success(self, heal_source):
         """run_called=True does not imply run_success=True."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -677,7 +688,7 @@ class TestPipelineTelemetrySemanticsB2:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b2_run",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -690,10 +701,12 @@ class TestPipelineTelemetrySemanticsB2:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
                 assert result.telemetries.get("localheal_pipeline_run_success") is False
 
-    def test_pipeline_actual_execution_requires_run_success(self):
+    def test_pipeline_actual_execution_requires_run_success(self, heal_source):
         """actual_execution=True only when run_success=True."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -709,7 +722,7 @@ class TestPipelineTelemetrySemanticsB2:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b2_exec",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -721,6 +734,8 @@ class TestPipelineTelemetrySemanticsB2:
                     provider=provider,
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                pipeline_run_mock.assert_called()
 
                 assert result.telemetries.get("localheal_pipeline_run_success") is True
                 assert result.telemetries.get("localheal_pipeline_actual_execution") is False
@@ -758,7 +773,7 @@ class TestPipelineTelemetrySemanticsB2:
                 # semantic_retry_invoked is False by default — only set by orchestrator telemetry
                 assert result.telemetries.get("semantic_retry_invoked") is False
 
-    def test_semantic_retry_invoked_comes_from_orchestrator_telemetry(self):
+    def test_semantic_retry_invoked_comes_from_orchestrator_telemetry(self, heal_source):
         """shared pipeline truth should expose real semantic retry usage."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -776,7 +791,7 @@ class TestPipelineTelemetrySemanticsB2:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b2_retry_truth",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -789,11 +804,13 @@ class TestPipelineTelemetrySemanticsB2:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 assert result.telemetries.get("semantic_retry_invoked") is True
                 assert result.telemetries.get("semantic_retry_count") == 1
                 assert result.telemetries.get("same_span_retry") is True
 
-    def test_structured_retry_packet_available_comes_from_pipeline_errors(self):
+    def test_structured_retry_packet_available_comes_from_pipeline_errors(self, heal_source):
         """shared pipeline truth should expose structured retry packet availability."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -811,7 +828,7 @@ class TestPipelineTelemetrySemanticsB2:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b2_packet_truth",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -824,9 +841,11 @@ class TestPipelineTelemetrySemanticsB2:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 assert result.telemetries.get("structured_retry_packet_available") is True
 
-    def test_verifier_command_truth_comes_from_pipeline_context(self):
+    def test_verifier_command_truth_comes_from_pipeline_context(self, heal_source):
         """shared pipeline truth should expose verifier_command presence from route_context."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -846,7 +865,7 @@ class TestPipelineTelemetrySemanticsB2:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b2_verifier_truth",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -859,6 +878,8 @@ class TestPipelineTelemetrySemanticsB2:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 assert result.telemetries.get("verifier_command_present") is True
                 assert result.telemetries.get("verifier_command_source") == "route_context"
 
@@ -866,7 +887,7 @@ class TestPipelineTelemetrySemanticsB2:
 class TestPipelineResultProjectionB3:
     """B3: Project HealPipeline result into executor response."""
 
-    def test_pipeline_result_non_empty_final_patch_projects_candidate_hash(self):
+    def test_pipeline_result_non_empty_final_patch_projects_candidate_hash(self, heal_source):
         """Non-empty final_patch from pipeline becomes candidate_patch."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -882,7 +903,7 @@ class TestPipelineResultProjectionB3:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b3_patch",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -894,6 +915,8 @@ class TestPipelineResultProjectionB3:
                     provider=provider,
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                pipeline_run_mock.assert_called()
 
                 # Contract since 339551f88 (canonical World C projection): raw pipeline
                 # patch text is diagnostic only. Without a valid World C receipt (this
@@ -934,7 +957,7 @@ class TestPipelineResultProjectionB3:
                 assert result.telemetries.get("pipeline_final_patch") == ""
                 assert result.telemetries.get("pipeline_solve_eligible") is False
 
-    def test_pipeline_verification_failure_uses_preserved_pre_verification_patch(self):
+    def test_pipeline_verification_failure_uses_preserved_pre_verification_patch(self, heal_source):
         """Verification-failed pipeline should preserve candidate truth for downstream isolation."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -951,7 +974,7 @@ class TestPipelineResultProjectionB3:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b3_preserved_patch",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -964,6 +987,8 @@ class TestPipelineResultProjectionB3:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 # Contract since 339551f88: the preserved pre-verification patch stays
                 # visible as raw diagnostics only; no canonical candidate without a
                 # valid World C receipt.
@@ -972,7 +997,7 @@ class TestPipelineResultProjectionB3:
                 assert result.telemetries.get("pipeline_solve_eligible") is False
                 assert result.telemetries.get("pipeline_failure_reason") == "LOGIC_REGRESSION:VERIFICATION_FAILED"
 
-    def test_pipeline_result_failure_reason_projected(self):
+    def test_pipeline_result_failure_reason_projected(self, heal_source):
         """Pipeline failure_reason is projected into telemetry."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -988,7 +1013,7 @@ class TestPipelineResultProjectionB3:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b3_fail",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -1001,9 +1026,11 @@ class TestPipelineResultProjectionB3:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
+                pipeline_run_mock.assert_called()
+
                 assert result.telemetries.get("pipeline_failure_reason") == "verifier_rejected"
 
-    def test_pipeline_syntax_error_is_classified_without_provider_diag(self):
+    def test_pipeline_syntax_error_is_classified_without_provider_diag(self, heal_source):
         """Syntax failure with patch output should stay syntax-classified, not natural-language downgraded."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -1035,7 +1062,7 @@ class TestPipelineResultProjectionB3:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b3_syntax",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -1047,6 +1074,8 @@ class TestPipelineResultProjectionB3:
                     provider=provider,
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+                pipeline_run_mock.assert_called()
 
                 assert result.telemetries.get("output_class") == "SEARCH_REPLACE_SYNTAX_ERROR"
                 assert result.telemetries.get("parser_error_kind") == "SYNTAX_ERROR"
@@ -1082,7 +1111,9 @@ class TestPipelineResultProjectionB3:
 class TestPlannerOwnedOrchestratorSelectionB6:
     """B6: Orchestrator selection must be planner-owned, not env-driven."""
 
-    def test_pipeline_bridge_ignores_nexus_use_committee_env_when_signal_snapshot_disables_committee(self):
+    def test_pipeline_bridge_ignores_nexus_use_committee_env_when_signal_snapshot_disables_committee(
+        self, heal_source
+    ):
         """Env NEXUS_USE_COMMITTEE is ignored when signal_snapshot disables committee."""
         from nexus.services.local_heal.pipeline import HealPipeline
         from unittest.mock import patch as _patch
@@ -1100,7 +1131,7 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                 with patch.object(HealPipeline, "run", pipeline_run_mock):
                     ctx = LocalModelCapabilityContext(
                         task_id="t_b6_no_committee",
-                        source_root="/tmp",
+                        source_root=heal_source,
                         problem_statement="fix bug",
                         target_file="a.py",
                         target_symbol="f",
@@ -1120,7 +1151,9 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                     # Pipeline was called — env was ignored because signal_snapshot said no committee
                     pipeline_run_mock.assert_called_once()
 
-    def test_pipeline_bridge_uses_committee_when_signal_snapshot_enables_committee(self):
+    def test_pipeline_bridge_uses_committee_when_signal_snapshot_enables_committee(
+        self, heal_source
+    ):
         """Signal_snapshot.local_committee_enabled=True enables committee path."""
         from nexus.services.local_heal.pipeline import HealPipeline
         from unittest.mock import patch as _patch
@@ -1138,7 +1171,7 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                 with patch.object(HealPipeline, "run", pipeline_run_mock):
                     ctx = LocalModelCapabilityContext(
                         task_id="t_b6_committee",
-                        source_root="/tmp",
+                        source_root=heal_source,
                         problem_statement="fix bug",
                         target_file="a.py",
                         target_symbol="f",
@@ -1190,7 +1223,7 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                 # Bridge doesn't set route_truth_source
                 assert "route_truth_source" not in result.telemetries
 
-    def test_pipeline_bridge_missing_signal_snapshot_fail_closed(self):
+    def test_pipeline_bridge_missing_signal_snapshot_fail_closed(self, heal_source):
         """Missing signal_snapshot in route_context fails closed."""
         from nexus.services.local_heal.pipeline import HealPipeline
 
@@ -1206,7 +1239,7 @@ class TestPlannerOwnedOrchestratorSelectionB6:
             with patch.object(HealPipeline, "run", pipeline_run_mock):
                 ctx = LocalModelCapabilityContext(
                     task_id="t_b6_missing",
-                    source_root="/tmp",
+                    source_root=heal_source,
                     problem_statement="fix bug",
                     target_file="a.py",
                     target_symbol="f",
@@ -1222,6 +1255,39 @@ class TestPlannerOwnedOrchestratorSelectionB6:
                 # Pipeline still runs — committee defaults to False
                 pipeline_run_mock.assert_called_once()
                 assert result.telemetries.get("localheal_pipeline_run_called") is True
+
+    def test_world_c_still_refuses_ephemeral_source_without_opt_in(self, tmp_path, monkeypatch):
+        from nexus.services.local_heal.pipeline import HealPipeline
+
+        source = tmp_path / "ephemeral_source"
+        source.mkdir()
+        (source / "a.py").write_text("def f():\n    pass\n")
+        monkeypatch.delenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", raising=False)
+        monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+        pipeline_run_mock = MagicMock()
+        provider = _build_provider_mock()
+
+        with patch.object(HealPipeline, "__init__", return_value=None):
+            with patch.object(HealPipeline, "run", pipeline_run_mock):
+                ctx = LocalModelCapabilityContext(
+                    task_id="t_ephemeral_refusal",
+                    source_root=str(source),
+                    problem_statement="fix bug",
+                    target_file="a.py",
+                    target_symbol="f",
+                    selected_capabilities=("repair_loop",),
+                    execution_topology="localheal_pipeline",
+                    evidence_refs=("e1",),
+                    source_anchor={"present": False},
+                    route_context={},
+                    provider=provider,
+                )
+                result = LocalHealPipelineCapabilityExecutor().execute(ctx)
+
+        pipeline_run_mock.assert_not_called()
+        assert "World C source root must not be ephemeral OS temp" in result.telemetries.get(
+            "path_a_failure_reason", ""
+        )
 
 
 class TestProtocolModeEnvDoesNotLeak:
