@@ -8,6 +8,7 @@ macOS CI job that runs the verifier against the physical ``/usr/bin/sandbox-exec
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -201,7 +202,9 @@ def _fake_sandbox(tmp_path: Path, body: str) -> Path:
     return fake
 
 
-def test_sandbox_binary_check_rejects_missing_shadowed_or_user_owned(tmp_path: Path) -> None:
+def test_sandbox_binary_check_rejects_missing_shadowed_or_user_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with pytest.raises(v.WitnessError) as exc:
         v.check_sandbox_binary(str(tmp_path / "absent"))
     assert exc.value.code == "SANDBOX_EXEC_MISSING"
@@ -218,18 +221,35 @@ def test_sandbox_binary_check_rejects_missing_shadowed_or_user_owned(tmp_path: P
         v.check_sandbox_binary(str(fake), which=lambda _name: str(fake))
     assert exc.value.code == "SANDBOX_EXEC_NOT_ROOT_OWNED"
 
-    # A real root-owned regular executable that is not what PATH resolves to.
-    root_owned = next(
-        path
-        for path in ("/usr/bin/env", "/usr/bin/true", "/bin/ls")
-        if not Path(path).is_symlink() and Path(path).is_file() and Path(path).stat().st_uid == 0
-    )
+    # A controlled executable with root ownership supplied only to this check.
+    real_lstat = os.lstat
+
+    def lstat_with_root_owned_fake(path: str | os.PathLike[str]) -> os.stat_result:
+        info = real_lstat(path)
+        if os.fspath(path) == str(fake):
+            fields = list(info)
+            fields[4] = 0
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(v.os, "lstat", lstat_with_root_owned_fake)
+    elsewhere = tmp_path / "other" / "sandbox-exec"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    elsewhere.chmod(0o755)
     with pytest.raises(v.WitnessError) as exc:
-        v.check_sandbox_binary(root_owned, which=lambda _name: str(fake))
+        v.check_sandbox_binary(str(fake), which=lambda _name: str(elsewhere))
     assert exc.value.code == "SANDBOX_EXEC_PATH_SHADOWED"
     with pytest.raises(v.WitnessError) as exc:
-        v.check_sandbox_binary(root_owned, which=lambda _name: None)
+        v.check_sandbox_binary(str(fake), which=lambda _name: None)
     assert exc.value.code == "SANDBOX_EXEC_PATH_SHADOWED"
+
+    result = v.check_sandbox_binary(str(fake), which=lambda _name: str(fake))
+    assert result == {
+        "path": str(fake),
+        "sha256": hashlib.sha256(fake.read_bytes()).hexdigest(),
+        "size": fake.stat().st_size,
+    }
 
 
 def test_canary_rejects_a_sandbox_that_does_not_confine(tmp_path: Path) -> None:
