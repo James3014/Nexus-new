@@ -7,8 +7,10 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -117,6 +119,9 @@ class ControlledIntegrationManager:
         # store (the staging verifier runs unsandboxed) must not change what any
         # Controller call reads or checks out (#3226).
         git_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        # ``GIT_CONFIG`` redirects only ``git config`` to one file: kept, it would hide
+        # repository config from the merge-driver check while the merge still reads it (#3383).
+        git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
         return subprocess.run(
@@ -142,6 +147,82 @@ class ControlledIntegrationManager:
         return result.stdout.strip()
 
     @classmethod
+    def _refuse_custom_merge_drivers(cls, cwd: Path) -> None:
+        """Refuse when the config a merge in ``cwd`` would read defines a custom merge driver.
+
+        A ``merge.<name>.driver`` command runs during the content merge whenever an
+        attribute (committed, ``info/attributes``, ``core.attributesFile``) or
+        ``merge.default`` selects it, so a driver planted in repository, worktree or
+        included config, or in inherited ``GIT_CONFIG_COUNT``/``GIT_CONFIG_PARAMETERS``,
+        would execute during integration (#3383).  Governed integration admits only
+        Git's built-in drivers (text, binary, union): any ``merge.<name>.*`` key is
+        refused.  So is ``merge.renormalize`` with a ``filter.<name>`` command, which
+        the content merge would run too.  The check runs under the same sanitised
+        environment and ``cwd`` as the merge; an unreadable config is refused too.
+        """
+        listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
+        if listed.returncode != 0:
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: git config could not be read; integration refused"
+            )
+        drivers = sorted({
+            name
+            for name in listed.stdout.split("\0")
+            if name.lower().startswith("merge.") and name.count(".") >= 2
+        })
+        renormalize = cls._run_sanitised_git(
+            ["config", "--type=bool", "--get", "merge.renormalize"], cwd
+        ).stdout.strip()
+        if renormalize == "true":
+            drivers += sorted({
+                name
+                for name in listed.stdout.split("\0")
+                if name.lower().startswith("filter.")
+                and name.lower().rsplit(".", 1)[-1] in {"clean", "smudge", "process"}
+            })
+        if drivers:
+            shown = ", ".join(repr(name[:80]) for name in drivers[:5])
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: governed integration does not run external "
+                f"merge drivers; configured: {shown}"
+            )
+
+    @classmethod
+    def _isolated_merge_tree(
+        cls, head: str, candidate: str, controller_root: Path
+    ) -> subprocess.CompletedProcess[str]:
+        """``merge-tree`` over the Controller's objects, outside its config (#3383).
+
+        The merge runs in a fresh private ``GIT_DIR`` that shares only the object
+        store (and ``shallow``): no repository, worktree or included config, no
+        ``info/attributes``, no ``core.attributesFile`` and no inherited ``GIT_*``
+        environment take part, so nothing written after the driver check can name a
+        merge driver or filter command for it.  Attributes come from the head only.
+        """
+        git_path = ["rev-parse", "--path-format=absolute", "--git-path"]
+        objects = cls._git([*git_path, "objects"], controller_root)
+        shallow = Path(cls._git([*git_path, "shallow"], controller_root))
+        object_format = cls._git(["rev-parse", "--show-object-format"], controller_root)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+        env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        with tempfile.TemporaryDirectory(prefix="nexus-merge-tree-") as scratch:
+            git_dir = Path(scratch) / "merge.git"
+            subprocess.run(
+                ["git", "init", "-q", "--bare", "--template=", f"--object-format={object_format}", str(git_dir)],
+                cwd=scratch, env=env, capture_output=True, text=True, check=True,
+            )  # fmt: skip
+            if shallow.is_file():
+                shutil.copyfile(shallow, git_dir / "shallow")
+            env.update(GIT_DIR=str(git_dir), GIT_OBJECT_DIRECTORY=objects)
+            return subprocess.run(
+                ["git", "-c", f"core.hooksPath={os.devnull}", "-c", f"core.attributesFile={os.devnull}",
+                 "-c", "merge.renormalize=false", f"--attr-source={head}",
+                 "merge-tree", "--write-tree", "--no-messages", head, candidate],
+                cwd=scratch, env=env, capture_output=True, text=True,
+            )  # fmt: skip
+
+    @classmethod
     def _controller_merge_commit(cls, head: str, candidate: str, controller_root: Path) -> str:
         """The staging merge commit, computed by the Controller from objects alone (#3186).
 
@@ -158,17 +239,8 @@ class ControlledIntegrationManager:
                 "staging merge result is not the expected head merged with the candidate: "
                 "the candidate is already on the head"
             )
-        merged = cls._run_sanitised_git(
-            [
-                f"--attr-source={head}",
-                "merge-tree",
-                "--write-tree",
-                "--no-messages",
-                head,
-                candidate,
-            ],
-            controller_root,
-        )
+        cls._refuse_custom_merge_drivers(controller_root)
+        merged = cls._isolated_merge_tree(head, candidate, controller_root)
         if merged.returncode != 0:
             raise RuntimeError(
                 "git merge-tree refused: the candidate does not merge cleanly onto the head"
@@ -176,6 +248,9 @@ class ControlledIntegrationManager:
         tree = merged.stdout.split("\n", 1)[0].strip()
         if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tree) is None:
             raise RuntimeError("git merge-tree returned no usable tree id")
+        # A driver planted while merge-tree ran never reached it, and still yields no
+        # staging commit.
+        cls._refuse_custom_merge_drivers(controller_root)
         return cls._git(
             ["commit-tree", tree, "-p", head, "-p", candidate, "-m", f"Merge commit '{candidate}'"],
             controller_root,
@@ -841,7 +916,14 @@ class ControlledIntegrationManager:
         removed = False
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
         try:
-            self._git(["merge", "--no-ff", "--no-edit", candidate_sha], integration_path)
+            # The same isolated merge as the authorized path (#3383): the merge commit
+            # is computed from objects alone, so config written after the driver check
+            # never reaches a content merge; the work tree only fast-forwards to it.
+            self._refuse_custom_merge_drivers(integration_path)
+            merged = self._controller_merge_commit(
+                integration_base_sha, candidate_sha, controller_root
+            )
+            self._git(["merge", "--ff-only", merged], integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
                 raise RuntimeError("repository carries replacement refs; integration refused")
