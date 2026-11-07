@@ -183,6 +183,14 @@ def evaluate_operation_continuity(
             reason="ATTEMPT_ID_MISMATCH",
         )
 
+    if record.get("source_attribution_state") == "UNAVAILABLE":
+        return _decision(
+            expectation,
+            disposition=DISPOSITION_BLOCKED,
+            terminal=False,
+            reason="SOURCE_ATTRIBUTION_UNAVAILABLE",
+        )
+
     observed_repository = str(record.get("repo_root") or record.get("repository") or "")
     if expectation.repository and not _repo_matches(expectation.repository, observed_repository):
         return _decision(

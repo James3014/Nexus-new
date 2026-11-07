@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pytest
 
+import nexus.services.direct_operation_journal as direct_operation_journal
 from nexus.services.direct_operation_journal import (
     DirectOperationJournal,
     DirectOperationJournalError,
     public_operation_view,
+    source_baseline_sha256,
 )
 from nexus.services.live_execution_provenance import PRODUCER_SCHEMA_DEV_MCP_V1
 from nexus.services.operation_continuity import (
@@ -67,6 +69,9 @@ def _journal(tmp_path: Path, *, lineage: bool = True) -> DirectOperationJournal:
         runtime_revision="test-runtime",
         initial_fields=initial_fields,
     )
+    # This helper models ordinary, attributed source records; tests for
+    # unavailable attribution construct that state explicitly.
+    journal.update(OPERATION_ID, source_attribution_state="ATTRIBUTED")
     return journal
 
 
@@ -152,6 +157,81 @@ def test_transport_session_replacement_does_not_change_logical_operation_identit
     assert first.retry_permitted is second.retry_permitted is False
     assert first.details["transport_evidence"]["provider_session_id"] == "chat-session-alpha"
     assert second.details["transport_evidence"]["provider_session_id"] == "chat-session-beta"
+
+
+@pytest.mark.parametrize("failure", ["git_status", "path_decode"])
+def test_source_attribution_failure_blocks_continuity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    journal = _journal(tmp_path)
+    baseline = {"schema": direct_operation_journal.SOURCE_BASELINE_SCHEMA, "entries": {}}
+    monkeypatch.setattr(
+        direct_operation_journal,
+        "_git_identity",
+        lambda *args, **kwargs: (str(tmp_path), BASE_HEAD),
+    )
+    journal.update(
+        OPERATION_ID,
+        repo_root=str(tmp_path),
+        source_baseline=baseline,
+        source_baseline_sha256=source_baseline_sha256(baseline),
+    )
+
+    # Both git status and path decoding failures are represented by the journal
+    # snapshot function as an unavailable delta.
+    monkeypatch.setattr(
+        "nexus.services.direct_operation_journal.observed_changed_paths_since",
+        lambda *args, **kwargs: None,
+    )
+    record = journal.mark_terminal(
+        OPERATION_ID,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(tmp_path),
+    )
+    assert record["source_attribution_state"] == "UNAVAILABLE"
+    assert record["observed_changed_paths"] == []
+
+    decision = evaluate_operation_continuity(_expectation(repository=str(tmp_path)), record)
+
+    assert decision.disposition == DISPOSITION_BLOCKED
+    assert decision.reason == "SOURCE_ATTRIBUTION_UNAVAILABLE"
+    assert decision.retry_permitted is False
+
+
+def test_attributed_no_change_keeps_existing_continuity_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    journal = _journal(tmp_path)
+    baseline = {"schema": direct_operation_journal.SOURCE_BASELINE_SCHEMA, "entries": {}}
+    monkeypatch.setattr(
+        direct_operation_journal,
+        "_git_identity",
+        lambda *args, **kwargs: (str(tmp_path), BASE_HEAD),
+    )
+    journal.update(
+        OPERATION_ID,
+        repo_root=str(tmp_path),
+        source_baseline=baseline,
+        source_baseline_sha256=source_baseline_sha256(baseline),
+    )
+    monkeypatch.setattr(
+        "nexus.services.direct_operation_journal.observed_changed_paths_since",
+        lambda *args, **kwargs: [],
+    )
+    record = journal.mark_terminal(
+        OPERATION_ID,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(tmp_path),
+    )
+
+    decision = evaluate_operation_continuity(_expectation(repository=str(tmp_path)), record)
+
+    assert record["source_attribution_state"] == "ATTRIBUTED"
+    assert record["observed_changed_paths"] == []
+    assert decision.disposition == DISPOSITION_STOP
+    assert decision.reason == "TERMINAL_PHYSICAL_EFFECT_COMPLETED"
 
 
 @pytest.mark.parametrize(
