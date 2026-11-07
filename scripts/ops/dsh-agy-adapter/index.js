@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdir, mkdtemp, open, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -8,6 +8,8 @@ import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 
 const execFileP = promisify(execFile)
 const DISPATCH = process.env.NEXUS_AGY_DISPATCH || join(homedir(), '.local/bin/nexus-agy-dispatch')
+const HOST_SUBPROCESS_TIMEOUT_MS = Number(process.env.NEXUS_DSH_HOST_SUBPROCESS_TIMEOUT_MS) || 10_000
+const PROCESS_GROUP_KILL_GRACE_MS = 200
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'OUTCOME_UNKNOWN'])
 const NATIVE_TOOL_DENIES = Object.freeze(['command(*)', 'read_file(*)', 'write_file(*)'])
 // Transport-effective budget (#1666), not the model's native window. DSH compacts at
@@ -16,6 +18,64 @@ const NATIVE_TOOL_DENIES = Object.freeze(['command(*)', 'read_file(*)', 'write_f
 // at or below ~75k provider tokens, under where Agy's own summarizer took over (~108k-116k).
 const ADVERTISED_CONTEXT_WINDOW = 131072
 const DEFAULT_MAX_TOKENS = 32768
+
+// execFile drops the `detached` option, so spawn the child ourselves: it must lead its
+// own process group for the timeout to reap dispatcher descendants.
+function execFileWithHostTimeout(file, args, options = {}) {
+  const maxBuffer = options.maxBuffer ?? 1024 * 1024
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { ...options, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    let overflow = false
+    let settled = false
+    const killGroup = (signal) => {
+      try { process.kill(-child.pid, signal) } catch {}
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      killGroup('SIGTERM')
+      setTimeout(() => killGroup('SIGKILL'), PROCESS_GROUP_KILL_GRACE_MS).unref()
+    }, HOST_SUBPROCESS_TIMEOUT_MS)
+    const collect = (name) => (chunk) => {
+      if (name === 'out') stdout += chunk
+      else stderr += chunk
+      if (!overflow && stdout.length + stderr.length > maxBuffer) {
+        overflow = true
+        killGroup('SIGKILL')
+      }
+    }
+    child.stdout.setEncoding('utf8').on('data', collect('out'))
+    child.stderr.setEncoding('utf8').on('data', collect('err'))
+    const finish = (error, code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (timedOut) {
+        killGroup('SIGKILL')
+        error = new Error(`${file} exceeded host timeout of ${HOST_SUBPROCESS_TIMEOUT_MS}ms`)
+        error.code = 'ETIMEDOUT'
+        error.killed = true
+      } else if (overflow) {
+        error = new Error('stdout/stderr maxBuffer length exceeded')
+        error.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      } else if (!error && code !== 0) {
+        error = new Error(`Command failed: ${file}\n${stderr}`)
+        error.code = code
+      }
+      if (error) {
+        error.stdout = stdout
+        error.stderr = stderr
+        reject(error)
+      } else {
+        resolve({ stdout, stderr })
+      }
+    }
+    child.on('error', (error) => finish(error, null))
+    child.on('close', (code) => finish(null, code))
+  })
+}
 
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -715,7 +775,7 @@ export class AgyPoolAdapter extends LlmAdapter {
       if (sessionRef !== null) argv.push('--evidence-ref', sessionRef)
       // Reserve the physical call slot durably before any dispatch.
       await reserveProviderCall(options)
-      const { stdout } = await execFileP(DISPATCH, argv, { maxBuffer: 4 * 1024 * 1024 })
+      const { stdout } = await execFileWithHostTimeout(DISPATCH, argv, { maxBuffer: 4 * 1024 * 1024 })
       started = JSON.parse(stdout)
     } catch (error) {
       await rm(scratchCwd, { recursive: true, force: true }).catch(() => {})
@@ -754,7 +814,7 @@ export class AgyPoolAdapter extends LlmAdapter {
           { cause: error },
         )
       }
-      const { stdout } = await execFileP(
+      const { stdout } = await execFileWithHostTimeout(
         DISPATCH,
         ['--status', operationId],
         { maxBuffer: 4 * 1024 * 1024 },

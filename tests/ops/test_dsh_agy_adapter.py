@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +29,7 @@ def _run_node(
     extra_env: dict[str, str] | None = None,
     script: list[dict] | None = None,
     wait: bool = True,
+    run_timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.Popen[str]:
     runtime = tmp_path / "runtime"
     adapter = runtime / "node_modules" / "@nexus" / "dsh-llm-agy-pilot"
@@ -60,6 +62,11 @@ def _run_node(
         "import json, os, sys\n"
         "args=sys.argv[1:]\n"
         f"ops={str(ops_dir)!r}\n"
+        "if os.environ.get('FAKE_HANG') == '1':\n"
+        "    import subprocess, time\n"
+        "    child=subprocess.Popen(['sleep','30'])\n"
+        "    open(os.environ['FAKE_CHILD_PID'], 'w').write(str(child.pid))\n"
+        "    time.sleep(30)\n"
         "if args[:1]==['--status']:\n"
         "    print(open(os.path.join(ops,args[1]+'.json')).read())\n"
         "    sys.exit(0)\n"
@@ -147,7 +154,13 @@ def _run_node(
             text=True,
         )
     return subprocess.run(
-        ["node", str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, check=False
+        ["node", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=run_timeout,
     )
 
 
@@ -1434,3 +1447,32 @@ def test_dsh_agy_exhausted_retry_2618_shares_budget_with_busy_waits(tmp_path: Pa
     assert tight.returncode == 3
     assert json.loads(tight.stdout)["code"] == POOL_EXHAUSTED
     assert len(_attempts(tmp_path / "tight")) == 2
+
+
+def test_dispatch_start_timeout_kills_process_group(tmp_path: Path) -> None:
+    child_pid_file = tmp_path / "child.pid"
+    started = time.monotonic()
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"text","text":"unused"}',
+        extra_env={
+            "FAKE_HANG": "1",
+            "FAKE_CHILD_PID": str(child_pid_file),
+            "NEXUS_DSH_HOST_SUBPROCESS_TIMEOUT_MS": "500",
+        },
+        run_timeout=12,
+    )
+    assert time.monotonic() - started < 12
+    assert isinstance(proc, subprocess.CompletedProcess)
+    assert proc.returncode == 3
+    assert json.loads(proc.stdout)["code"] == "AGY_DISPATCH_START_FAILED"
+    child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("dispatcher descendant survived host timeout")
