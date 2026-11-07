@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -796,4 +797,53 @@ def test_controlled_integration_refuses_a_verifier_that_writes_a_replacement_ref
         )
 
     assert _git(repo, "rev-parse", "nexus/integration/test") == base
+    assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def test_controlled_integration_refuses_a_custom_merge_driver_without_running_it(
+    tmp_path, monkeypatch
+):
+    """The compatibility ``merge --no-ff`` path refuses a configured merge driver
+    before merging: the driver never runs and the integration branch stays put (#3383)."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    for name in ("GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_ATTR_SOURCE"):
+        monkeypatch.delenv(name, raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("a\nb\nc\nd\ne\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration/test", base)
+    _git(repo, "branch", "nexus/task/integration-task", base)
+    head_side = tmp_path / "head-side"
+    _git(repo, "worktree", "add", str(head_side), "nexus/integration/test")
+    (head_side / "README").write_text("a\nb\nc\nd\nHEAD\n")
+    _git(head_side, "commit", "-am", "integration branch edits README")
+    _git(repo, "worktree", "remove", str(head_side))
+    integration_head = _git(repo, "rev-parse", "nexus/integration/test")
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
+    (target / "README").write_text("a\nCAND\nc\nd\ne\n")
+    _git(target, "commit", "-am", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    marker = tmp_path / "DRIVER_RAN"
+    _git(repo, "config", "merge.poc.driver", f"touch {marker}")
+    (repo / ".git" / "info" / "attributes").write_text("* merge=poc\n")
+
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(
+            _candidate_state(repo, base, candidate, tree),
+            integration_branch="nexus/integration/test",
+        )
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", "nexus/integration/test") == integration_head
     assert not (tmp_path / "integrations" / "integration-task").exists()

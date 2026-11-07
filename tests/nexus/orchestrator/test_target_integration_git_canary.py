@@ -1,6 +1,8 @@
 import dataclasses
 import hashlib
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -668,3 +670,247 @@ def test_merge_attributes_come_from_the_head_not_the_controller_checkout(tmp_pat
     assert (controller / ".gitattributes").exists()
     with pytest.raises(RuntimeError, match="does not merge cleanly"):
         ControlledIntegrationManager._controller_merge_commit(head, candidate, controller)
+
+
+# --- #3383: external merge drivers never run during governed integration ------------
+
+_CUSTOM_DRIVER_SOURCES = (
+    "repo-config",
+    "worktree-config",
+    "included-config",
+    "merge-default",
+    "head-committed-attributes",
+    "info-attributes",
+    "repo-core-attributes-file",
+    "env-git-config-count",
+    "env-git-config-parameters",
+    "env-git-config-hides-repo-config",
+)
+
+
+@pytest.fixture
+def isolated_git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No real user or system Git config, and no inherited Git config environment."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    for name in ("GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_ATTR_SOURCE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _driver_repo(tmp_path: Path, attributes: str | None) -> tuple[Path, str, str]:
+    """Head and candidate both edit ``f.txt`` (different lines), so a content merge runs."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.name", "t")
+    git(root, "config", "user.email", "t@example.invalid")
+    (root / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    if attributes is not None:
+        (root / ".gitattributes").write_text(attributes)
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    git(root, "checkout", "-q", "-b", "cand")
+    (root / "f.txt").write_text("a\nCAND\nc\nd\ne\n")
+    git(root, "commit", "-qam", "cand")
+    candidate = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    (root / "f.txt").write_text("a\nb\nc\nd\nHEAD\n")
+    git(root, "commit", "-qam", "head")
+    return root, git(root, "rev-parse", "HEAD"), candidate
+
+
+def _plant_driver(tmp_path: Path, root: Path, source: str, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Install a ``poc`` merge driver through ``source``; it creates the returned marker."""
+    marker = tmp_path / "DRIVER_RAN"
+    command = f"touch {shlex.quote(str(marker))}"
+    selector = tmp_path / "selector.attributes"
+    selector.write_text("* merge=poc\n")
+    if source == "repo-config":
+        git(root, "config", "merge.poc.driver", command)
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+    elif source == "worktree-config":
+        git(root, "config", "extensions.worktreeConfig", "true")
+        git(root, "config", "--worktree", "merge.poc.driver", command)
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+    elif source == "included-config":
+        included = tmp_path / "included.cfg"
+        git(root, "config", "--file", str(included), "merge.poc.driver", command)
+        git(root, "config", "include.path", str(included))
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+    elif source == "merge-default":
+        git(root, "config", "merge.poc.driver", command)
+        git(root, "config", "merge.default", "poc")
+    elif source == "head-committed-attributes":
+        git(root, "config", "merge.poc.driver", command)
+    elif source == "info-attributes":
+        git(root, "config", "merge.poc.driver", command)
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+    elif source == "repo-core-attributes-file":
+        git(root, "config", "merge.poc.driver", command)
+        git(root, "config", "core.attributesFile", str(selector))
+    elif source == "env-git-config-count":
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "merge.poc.driver")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", command)
+    elif source == "env-git-config-parameters":
+        assert "'" not in command
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+        monkeypatch.setenv("GIT_CONFIG_PARAMETERS", f"'merge.poc.driver'='{command}'")
+    elif source == "env-git-config-hides-repo-config":
+        git(root, "config", "merge.poc.driver", command)
+        shutil.copy(selector, root / ".git" / "info" / "attributes")
+        empty = tmp_path / "empty.cfg"
+        empty.write_text("")
+        monkeypatch.setenv("GIT_CONFIG", str(empty))
+    else:  # pragma: no cover - parametrisation guard
+        raise AssertionError(source)
+    return marker
+
+
+def _raw_merge_tree(root: Path, head: str, candidate: str) -> None:
+    """The pre-#3383 staging merge argv under the same sanitised environment."""
+    environment = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", f"--attr-source={head}", "merge-tree",
+         "--write-tree", "--no-messages", head, candidate],
+        cwd=root, env=environment, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize("source", _CUSTOM_DRIVER_SOURCES)
+def test_a_custom_merge_driver_from_any_config_source_is_refused_and_never_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_git_env: None, source: str
+):
+    """#3383: the positive control proves the planted driver is live for the exact
+    staging merge argv; the Controller then refuses before any merge runs."""
+    attributes = "* merge=poc\n" if source == "head-committed-attributes" else None
+    root, head, candidate = _driver_repo(tmp_path, attributes)
+    marker = _plant_driver(tmp_path, root, source, monkeypatch)
+
+    _raw_merge_tree(root, head, candidate)
+    assert marker.exists(), "positive control: the planted driver must run without the guard"
+    marker.unlink()
+
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+        ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+    assert not marker.exists()
+
+
+def test_without_the_guard_the_planted_driver_runs_in_the_staging_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_git_env: None
+):
+    """#3383 reverse check: with the refusal removed, the real staging merge executes the
+    driver, so the refusal test above fails for the reason it guards against."""
+    root, head, candidate = _driver_repo(tmp_path, None)
+    marker = _plant_driver(tmp_path, root, "repo-config", monkeypatch)
+    monkeypatch.setattr(
+        ControlledIntegrationManager,
+        "_refuse_custom_merge_drivers",
+        classmethod(lambda cls, cwd: None),
+    )
+    ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+    assert marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("attributes", "config", "merges"),
+    [
+        (None, (), True),
+        ("f.txt merge=text\n", (), True),
+        ("f.txt merge=union\n", (), True),
+        (None, (("merge.default", "union"), ("merge.renames", "true")), True),
+        ("f.txt merge=binary\n", (), False),
+        ("f.txt -merge\n", (), False),
+    ],
+    ids=["unspecified", "text", "union", "builtin-default-and-merge-keys", "binary", "unset"],
+)
+def test_builtin_merge_drivers_and_merge_settings_keep_their_behaviour(
+    tmp_path: Path, isolated_git_env: None, attributes, config, merges
+):
+    """#3383: only ``merge.<name>.*`` driver definitions are refused; Git's built-in
+    drivers and two-level ``merge.*`` settings merge (or conflict) exactly as
+    ``git merge --no-ff`` at the head does."""
+    root, head, candidate = _driver_repo(tmp_path, attributes)
+    for key, value in config:
+        git(root, "config", key, value)
+    reference = tmp_path / "reference"
+    git(root, "worktree", "add", "-q", "--detach", str(reference), head)
+    reference_ok = (
+        subprocess.run(
+            ["git", "merge", "--no-ff", "--no-edit", candidate], cwd=reference, capture_output=True
+        ).returncode
+        == 0
+    )
+    assert reference_ok is merges
+    if merges:
+        sha = ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+        assert git(root, "rev-parse", f"{sha}^{{tree}}") == git(
+            reference, "rev-parse", "HEAD^{tree}"
+        )
+    else:
+        with pytest.raises(RuntimeError, match="does not merge cleanly"):
+            ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+
+
+def test_a_driver_planted_while_the_staging_merge_runs_yields_no_staging_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_git_env: None
+):
+    """#3383 config race: a driver written after the pre-merge check is caught by the
+    post-merge check, before ``commit-tree`` records any staging commit."""
+    root, head, candidate = _driver_repo(tmp_path, None)
+    real_run = ControlledIntegrationManager._run_sanitised_git
+    calls: list[str] = []
+
+    def racing_run(args, cwd):
+        result = real_run(args, cwd)
+        calls.append(args[1] if args[0].startswith("--attr-source=") else args[0])
+        if "merge-tree" in args:
+            git(root, "config", "merge.poc.driver", "true")
+        return result
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_run_sanitised_git", staticmethod(racing_run)
+    )
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+        ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+    assert "merge-tree" in calls
+    assert "commit-tree" not in calls
+
+
+def test_an_unreadable_config_is_refused_before_the_merge(tmp_path: Path, isolated_git_env: None):
+    root, head, candidate = _driver_repo(tmp_path, None)
+    with (root / ".git" / "config").open("a") as config:
+        config.write("[broken\n")
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+        ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+
+
+def test_a_custom_merge_driver_fails_the_authorized_integration_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_git_env: None
+):
+    """#3383 end to end: a driver in the Controller's repository config is refused
+    with no staging commit, the integration branch unmoved and the driver never run."""
+    root, base, candidate = make_repo(tmp_path)
+    (root / "value.txt").write_text("base\n\n\n\nhead\n")
+    git(root, "commit", "-qam", "head edits the same file")
+    head = git(root, "rev-parse", "HEAD")
+    marker = _plant_driver(tmp_path, root, "info-attributes", monkeypatch)
+    receipt = acceptance(candidate)
+    auth = authorization(root, head, candidate, receipt)
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED") as refused:
+        integrate(
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            acceptance_receipt=receipt,
+            auth=auth,
+        )
+    assert not marker.exists()
+    assert _integration_head(root) == head
+    error = refused.value
+    if isinstance(error, IntegrationExecutionError):
+        assert error.merge_performed is False
+        assert error.staging_commit_sha in (None, "")

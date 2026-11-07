@@ -117,6 +117,9 @@ class ControlledIntegrationManager:
         # store (the staging verifier runs unsandboxed) must not change what any
         # Controller call reads or checks out (#3226).
         git_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        # ``GIT_CONFIG`` redirects only ``git config`` to one file: kept, it would hide
+        # repository config from the merge-driver check while the merge still reads it (#3383).
+        git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
         return subprocess.run(
@@ -142,6 +145,36 @@ class ControlledIntegrationManager:
         return result.stdout.strip()
 
     @classmethod
+    def _refuse_custom_merge_drivers(cls, cwd: Path) -> None:
+        """Refuse when the config a merge in ``cwd`` would read defines a custom merge driver.
+
+        A ``merge.<name>.driver`` command runs during the content merge whenever an
+        attribute (committed, ``info/attributes``, ``core.attributesFile``) or
+        ``merge.default`` selects it, so a driver planted in repository, worktree or
+        included config, or in inherited ``GIT_CONFIG_COUNT``/``GIT_CONFIG_PARAMETERS``,
+        would execute during integration (#3383).  Governed integration admits only
+        Git's built-in drivers (text, binary, union): any ``merge.<name>.*`` key is
+        refused.  The check runs under the same sanitised environment and ``cwd`` as
+        the merge; an unreadable config is refused too.
+        """
+        listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
+        if listed.returncode != 0:
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: git config could not be read; integration refused"
+            )
+        drivers = sorted({
+            name
+            for name in listed.stdout.split("\0")
+            if name.lower().startswith("merge.") and name.count(".") >= 2
+        })
+        if drivers:
+            shown = ", ".join(repr(name[:80]) for name in drivers[:5])
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: governed integration does not run external "
+                f"merge drivers; configured: {shown}"
+            )
+
+    @classmethod
     def _controller_merge_commit(cls, head: str, candidate: str, controller_root: Path) -> str:
         """The staging merge commit, computed by the Controller from objects alone (#3186).
 
@@ -158,6 +191,7 @@ class ControlledIntegrationManager:
                 "staging merge result is not the expected head merged with the candidate: "
                 "the candidate is already on the head"
             )
+        cls._refuse_custom_merge_drivers(controller_root)
         merged = cls._run_sanitised_git(
             [
                 f"--attr-source={head}",
@@ -176,6 +210,8 @@ class ControlledIntegrationManager:
         tree = merged.stdout.split("\n", 1)[0].strip()
         if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tree) is None:
             raise RuntimeError("git merge-tree returned no usable tree id")
+        # A driver planted while merge-tree ran still yields no staging commit.
+        cls._refuse_custom_merge_drivers(controller_root)
         return cls._git(
             ["commit-tree", tree, "-p", head, "-p", candidate, "-m", f"Merge commit '{candidate}'"],
             controller_root,
@@ -841,7 +877,9 @@ class ControlledIntegrationManager:
         removed = False
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
         try:
+            self._refuse_custom_merge_drivers(integration_path)
             self._git(["merge", "--no-ff", "--no-edit", candidate_sha], integration_path)
+            self._refuse_custom_merge_drivers(integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
                 raise RuntimeError("repository carries replacement refs; integration refused")
