@@ -123,7 +123,35 @@ class ControlledIntegrationManager:
         # repository config from the merge-driver check while the merge still reads it (#3383).
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
-        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
+        listed = subprocess.run(
+            ["git", "config", "--list", "--show-origin", "-z"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=git_env,
+        )
+        if listed.returncode != 0:
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: git config could not be read; integration refused"
+            )
+        records = listed.stdout.split("\0")
+        configured_hooks = []
+        # --show-origin -z emits alternating origin NUL and key/newline/value NUL
+        # records. Split only on the first newline: values may contain either
+        # newlines or equals signs and must never be interpreted as config keys.
+        for index in range(1, len(records), 2):
+            record = records[index]
+            key, _separator, _value = record.partition("\n")
+            if key.lower().startswith("hook."):
+                configured_hooks.append(key)
+        if configured_hooks:
+            shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
+            raise RuntimeError(
+                "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
+                f"hooks; configured: {shown}"
+            )
+        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}"]
+        git_cmd.extend(args)
         return subprocess.run(
             git_cmd,
             cwd=cwd,
@@ -148,7 +176,7 @@ class ControlledIntegrationManager:
 
     @classmethod
     def _refuse_custom_merge_drivers(cls, cwd: Path) -> None:
-        """Refuse when the config a merge in ``cwd`` would read defines a custom merge driver.
+        """Refuse config-based hooks and custom merge drivers visible in ``cwd``.
 
         A ``merge.<name>.driver`` command runs during the content merge whenever an
         attribute (committed, ``info/attributes``, ``core.attributesFile``) or
@@ -157,8 +185,10 @@ class ControlledIntegrationManager:
         would execute during integration (#3383).  Governed integration admits only
         Git's built-in drivers (text, binary, union): any ``merge.<name>.*`` key is
         refused.  So is ``merge.renormalize`` with a ``filter.<name>`` command, which
-        the content merge would run too.  The check runs under the same sanitised
-        environment and ``cwd`` as the merge; an unreadable config is refused too.
+        the content merge would run too. Git's config-based ``hook.<name>.*`` keys
+        are refused because commands such as ``hook.<name>.command`` can run during
+        a merge. The check runs under the same sanitised environment and ``cwd`` as
+        the merge; an unreadable config is refused too.
         """
         listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
         if listed.returncode != 0:
@@ -170,6 +200,17 @@ class ControlledIntegrationManager:
             for name in listed.stdout.split("\0")
             if name.lower().startswith("merge.") and name.count(".") >= 2
         })
+        hooks = sorted({
+            name
+            for name in listed.stdout.split("\0")
+            if name.lower().startswith("hook.") and name.count(".") >= 2
+        })
+        if hooks:
+            shown = ", ".join(repr(name[:80]) for name in hooks[:5])
+            raise RuntimeError(
+                "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
+                f"hooks; configured: {shown}"
+            )
         renormalize = cls._run_sanitised_git(
             ["config", "--type=bool", "--get", "merge.renormalize"], cwd
         ).stdout.strip()
@@ -911,6 +952,7 @@ class ControlledIntegrationManager:
         if reuse_controller_worktree:
             integration_path = controller_root
         else:
+            self._refuse_custom_merge_drivers(controller_root)
             add_args = ["worktree", "add", str(integration_path), integration_branch]
             self._git(add_args, controller_root)
         removed = False
@@ -923,16 +965,20 @@ class ControlledIntegrationManager:
             merged = self._controller_merge_commit(
                 integration_base_sha, candidate_sha, controller_root
             )
+            self._refuse_custom_merge_drivers(integration_path)
             self._git(["merge", "--ff-only", merged], integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
                 raise RuntimeError("repository carries replacement refs; integration refused")
             integration_sha = self._git(["rev-parse", "HEAD"], integration_path)
-        except Exception:
+        except Exception as exc:
             self._git_status(["merge", "--abort"], integration_path)
             self._git_status(["reset", "--merge", integration_base_sha], integration_path)
             if not reuse_controller_worktree:
-                self._git(["worktree", "remove", str(integration_path)], controller_root)
+                try:
+                    self._git(["worktree", "remove", str(integration_path)], controller_root)
+                except Exception:
+                    exc.add_note(f"integration worktree left behind: {integration_path}")
             raise
         if not reuse_controller_worktree:
             self._git(["worktree", "remove", str(integration_path)], controller_root)
@@ -1091,6 +1137,7 @@ class ControlledIntegrationManager:
         ):
             raise RuntimeError("post-apply verification Target already exists")
         staging_path.parent.mkdir(parents=True, exist_ok=True)
+        self._refuse_custom_merge_drivers(controller_root)
         self._git(["worktree", "add", "--detach", str(staging_path), expected_head], controller_root)
         owned_worktrees: list[Path] = [staging_path]
         staging_sha = ""
@@ -1143,6 +1190,7 @@ class ControlledIntegrationManager:
                         raise RuntimeError(
                             f"INTEGRATION_BRANCH_REFUSED_AT_APPLY: {exc}"
                         ) from exc
+                    self._refuse_custom_merge_drivers(controller_root)
                     self._git(["merge", "--ff-only", staging_sha], controller_root)
                 else:
                     # Whatever the shape, the branch rules are re-proved right
@@ -1177,6 +1225,7 @@ class ControlledIntegrationManager:
                         raise RuntimeError(
                             f"{refused}: staging merge result does not descend from the head"
                         )
+                    self._refuse_custom_merge_drivers(controller_root)
                     self._git(
                         ["update-ref", "--no-deref", branch_ref, staging_sha, expected_head],
                         controller_root,
