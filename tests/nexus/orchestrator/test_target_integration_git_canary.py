@@ -843,14 +843,16 @@ def test_without_the_guard_the_isolated_staging_merge_still_never_runs_the_drive
         ("f.txt merge=binary\n", (), False),
         ("f.txt -merge\n", (), False),
     ],
-    ids=["unspecified", "text", "union", "builtin-default-and-merge-keys", "binary", "unset"],
+    ids=["unspecified", "text", "union", "merge-settings-not-refused", "binary", "unset"],
 )
 def test_builtin_merge_drivers_and_merge_settings_keep_their_behaviour(
     tmp_path: Path, isolated_git_env: None, attributes, config, merges
 ):
     """#3383: only ``merge.<name>.*`` driver definitions are refused; Git's built-in
-    drivers and two-level ``merge.*`` settings merge (or conflict) exactly as
-    ``git merge --no-ff`` at the head does."""
+    drivers merge (or conflict) as ``git merge --no-ff`` at the head does.  Two-level
+    ``merge.*`` settings are not refused, but the isolated staging merge does not read
+    them: its result is fixed by the objects and the head's attributes, and the edits
+    in the ``merge-settings-not-refused`` case merge to the same tree either way."""
     root, head, candidate = _driver_repo(tmp_path, attributes)
     for key, value in config:
         git(root, "config", key, value)
@@ -899,6 +901,41 @@ def test_a_driver_planted_after_the_check_never_runs_and_yields_no_staging_commi
         ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
     assert planted and not planted[0].exists()
     assert "commit-tree" not in calls
+
+
+def test_a_shallow_controller_merges_when_the_merge_base_is_on_the_shallow_boundary(
+    tmp_path: Path, isolated_git_env: None
+):
+    """#3383: the private merge dir carries the Controller's ``shallow`` list, so a
+    merge base on the shallow boundary is not read as having a missing parent."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    git(origin, "config", "user.name", "t")
+    git(origin, "config", "user.email", "t@example.invalid")
+    (origin / "f.txt").write_text("root\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "root")
+    (origin / "f.txt").write_text("a\nb\nc\nd\ne\n")
+    git(origin, "commit", "-qam", "base")
+    base = git(origin, "rev-parse", "HEAD")
+    git(origin, "checkout", "-q", "-b", "cand")
+    (origin / "f.txt").write_text("a\nCAND\nc\nd\ne\n")
+    git(origin, "commit", "-qam", "cand")
+    candidate = git(origin, "rev-parse", "HEAD")
+    git(origin, "checkout", "-q", "main")
+    (origin / "f.txt").write_text("a\nb\nc\nd\nHEAD\n")
+    git(origin, "commit", "-qam", "head")
+    head = git(origin, "rev-parse", "HEAD")
+    root = tmp_path / "shallow"
+    git(tmp_path, "clone", "-q", "--depth=2", "--no-single-branch", f"file://{origin}", str(root))
+    git(root, "config", "user.name", "t")
+    git(root, "config", "user.email", "t@example.invalid")
+    assert base in (root / ".git" / "shallow").read_text().split()
+
+    sha = ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
+    assert git(root, "show", f"{sha}:f.txt") == "a\nCAND\nc\nd\nHEAD"
+    assert git(root, "rev-list", "--parents", "-n", "1", sha).split()[1:] == [head, candidate]
 
 
 def test_an_unreadable_config_is_refused_before_the_merge(tmp_path: Path, isolated_git_env: None):

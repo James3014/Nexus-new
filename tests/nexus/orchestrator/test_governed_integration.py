@@ -800,11 +800,9 @@ def test_controlled_integration_refuses_a_verifier_that_writes_a_replacement_ref
     assert not (tmp_path / "integrations" / "integration-task").exists()
 
 
-def test_controlled_integration_refuses_a_custom_merge_driver_without_running_it(
-    tmp_path, monkeypatch
-):
-    """The compatibility ``merge --no-ff`` path refuses a configured merge driver
-    before merging: the driver never runs and the integration branch stays put (#3383)."""
+def _legacy_driver_repo(tmp_path, monkeypatch):
+    """Integration branch and candidate edit different lines of README, so the
+    compatibility path runs a real content merge (#3383)."""
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     for name in ("GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_ATTR_SOURCE"):
@@ -825,25 +823,89 @@ def test_controlled_integration_refuses_a_custom_merge_driver_without_running_it
     (head_side / "README").write_text("a\nb\nc\nd\nHEAD\n")
     _git(head_side, "commit", "-am", "integration branch edits README")
     _git(repo, "worktree", "remove", str(head_side))
-    integration_head = _git(repo, "rev-parse", "nexus/integration/test")
     target = tmp_path / "target"
     _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
     (target / "README").write_text("a\nCAND\nc\nd\ne\n")
     _git(target, "commit", "-am", "candidate")
     candidate = _git(target, "rev-parse", "HEAD")
     tree = _git(target, "rev-parse", "HEAD^{tree}")
+    return repo, _candidate_state(repo, base, candidate, tree)
+
+
+def _plant_legacy_driver(tmp_path, repo):
     marker = tmp_path / "DRIVER_RAN"
     _git(repo, "config", "merge.poc.driver", f"touch {marker}")
     (repo / ".git" / "info" / "attributes").write_text("* merge=poc\n")
+    return marker
+
+
+def test_controlled_integration_refuses_a_custom_merge_driver_without_running_it(
+    tmp_path, monkeypatch
+):
+    """The compatibility path refuses a configured merge driver before merging: the
+    driver never runs and the integration branch stays put (#3383)."""
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    integration_head = _git(repo, "rev-parse", "nexus/integration/test")
+    marker = _plant_legacy_driver(tmp_path, repo)
 
     with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
         ControlledIntegrationManager(
             integration_root=tmp_path / "integrations"
-        ).integrate_task_state(
-            _candidate_state(repo, base, candidate, tree),
-            integration_branch="nexus/integration/test",
-        )
+        ).integrate_task_state(state, integration_branch="nexus/integration/test")
 
     assert not marker.exists()
     assert _git(repo, "rev-parse", "nexus/integration/test") == integration_head
     assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def test_controlled_integration_driver_planted_after_the_check_never_runs(tmp_path, monkeypatch):
+    """#3383 check-then-use race on the compatibility path: a driver written right
+    after the first driver check passes never runs, and the branch stays put."""
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    integration_head = _git(repo, "rev-parse", "nexus/integration/test")
+    real_check = ControlledIntegrationManager._refuse_custom_merge_drivers.__func__
+    planted: list = []
+
+    def racing_check(cls, cwd):
+        real_check(cls, cwd)
+        if not planted:
+            planted.append(_plant_legacy_driver(tmp_path, repo))
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_refuse_custom_merge_drivers", classmethod(racing_check)
+    )
+    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch="nexus/integration/test")
+
+    assert planted and not planted[0].exists()
+    assert _git(repo, "rev-parse", "nexus/integration/test") == integration_head
+    assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def test_controlled_integration_merge_never_reads_controller_driver_config(tmp_path, monkeypatch):
+    """#3383: with the refusal removed, the compatibility path still merges outside the
+    Controller's config: the planted driver never runs and the built-in merge lands."""
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    integration_head = _git(repo, "rev-parse", "nexus/integration/test")
+    candidate = state["promotion_packet"]["candidate_commit_sha"]
+    marker = _plant_legacy_driver(tmp_path, repo)
+    monkeypatch.setattr(
+        ControlledIntegrationManager,
+        "_refuse_custom_merge_drivers",
+        classmethod(lambda cls, cwd: None),
+    )
+
+    receipt = ControlledIntegrationManager(
+        integration_root=tmp_path / "integrations"
+    ).integrate_task_state(state, integration_branch="nexus/integration/test")
+
+    assert not marker.exists()
+    merged = receipt.integration_commit_sha
+    assert _git(repo, "rev-parse", "nexus/integration/test") == merged
+    assert _git(repo, "rev-list", "--parents", "-n", "1", merged).split()[1:] == [
+        integration_head,
+        candidate,
+    ]
+    assert _git(repo, "show", f"{merged}:README") == "a\nCAND\nc\nd\nHEAD"

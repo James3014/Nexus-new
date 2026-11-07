@@ -916,9 +916,14 @@ class ControlledIntegrationManager:
         removed = False
         integration_base_sha = self._git(["rev-parse", "HEAD"], integration_path)
         try:
+            # The same isolated merge as the authorized path (#3383): the merge commit
+            # is computed from objects alone, so config written after the driver check
+            # never reaches a content merge; the work tree only fast-forwards to it.
             self._refuse_custom_merge_drivers(integration_path)
-            self._git(["merge", "--no-ff", "--no-edit", candidate_sha], integration_path)
-            self._refuse_custom_merge_drivers(integration_path)
+            merged = self._controller_merge_commit(
+                integration_base_sha, candidate_sha, controller_root
+            )
+            self._git(["merge", "--ff-only", merged], integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
                 raise RuntimeError("repository carries replacement refs; integration refused")
