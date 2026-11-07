@@ -2680,8 +2680,13 @@ def _identity_git(
     if timeout is None:
         timeout = HOST_SUBPROCESS_TIMEOUT_SECONDS
     return _host_run(
-        ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True,
-        check=False, timeout=timeout,
+        ["git", *args],
+        cwd=str(repo),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=timeout,
     )
 
 
@@ -2866,7 +2871,8 @@ def prepare_standalone_clone(
                         child.unlink(missing_ok=True)
             raise DshWorkflowError(
                 "STANDALONE_CLONE_FAILED",
-                f"git {args[0]} failed (timeout 300s): {proc.stderr.strip()[-500:]}",
+                f"git {args[0]} failed{' (timeout 300s)' if proc.returncode == 124 else ''}: "
+                f"{(proc.stderr or '').strip()[-500:]}",
             )
 
         # --no-local: independent object store, no hardlinks, no alternates, no
@@ -2990,6 +2996,7 @@ def _host_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess
         kwargs.setdefault("stdout", subprocess.PIPE)
         kwargs.setdefault("stderr", subprocess.PIPE)
     proc = subprocess.Popen(argv, start_new_session=True, **kwargs)
+    stdout = stderr = None
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
         return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
