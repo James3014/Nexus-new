@@ -852,7 +852,7 @@ def validate_red_contract(contract: Any) -> dict[str, Any]:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    return _host_run(
         ["git", "-c", "core.quotepath=off", *args],
         cwd=str(repo),
         capture_output=True,
@@ -1626,7 +1626,7 @@ def _materialize_base_tree(repo: Path, base: str, paths: list[str], dest: Path) 
         parts = Path(rel).parts
         if Path(rel).is_absolute() or ".." in parts or not parts:
             continue  # never write outside the temp tree
-        shown = subprocess.run(
+        shown = _host_run(
             ["git", "show", f"{base}:{rel}"], cwd=str(repo), capture_output=True, check=False
         )
         if shown.returncode != 0:
@@ -2673,7 +2673,7 @@ def _within(path: Path, root: Path) -> bool:
 
 def _identity_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k not in GIT_IDENTITY_ENV}
-    return subprocess.run(
+    return _host_run(
         ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True, check=False
     )
 
@@ -2968,6 +2968,38 @@ AGY_PROMPT_CHARS = re.compile(r":prompt_chars=(\d+)(?::|$)")
 AGY_MAX_OPERATIONS = 16
 AGY_MAX_MARKER_LINES = 4096
 AGY_STATUS_TIMEOUT_SECONDS = 10
+HOST_SUBPROCESS_TIMEOUT_SECONDS = 10
+
+
+def _host_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+    """Run a host-owned command with a deadline and reap its entire process group."""
+    timeout = kwargs.pop("timeout", HOST_SUBPROCESS_TIMEOUT_SECONDS)
+    kwargs.pop("check", None)
+    kwargs.pop("start_new_session", None)
+    if kwargs.pop("capture_output", False):
+        kwargs.setdefault("stdout", subprocess.PIPE)
+        kwargs.setdefault("stderr", subprocess.PIPE)
+    proc = subprocess.Popen(argv, start_new_session=True, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            stdout = stderr = None
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        final_stdout, final_stderr = proc.communicate()
+        stdout = final_stdout if final_stdout is not None else stdout
+        stderr = final_stderr if final_stderr is not None else stderr
+        return subprocess.CompletedProcess(argv, 124, stdout, stderr)
 
 
 def _agy_dispatch_bin() -> str:
@@ -3004,7 +3036,7 @@ def _unknown_operation(
 def _read_operation_status(op_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Read-only canonical status; any failure is UNKNOWN, never an invented count."""
     try:
-        proc = subprocess.run(
+        proc = _host_run(
             [_agy_dispatch_bin(), "--status", op_id],
             capture_output=True,
             text=True,
@@ -3516,7 +3548,7 @@ def _classifier_scratch() -> Path:
         ["add", ".dsh-intelligence-scratch"],
         ["-c", "user.name=nexus", "-c", "user.email=nexus@localhost", "commit", "-q", "-m", "s"],
     ):
-        subprocess.run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
+        _host_run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
     return scratch
 
 
