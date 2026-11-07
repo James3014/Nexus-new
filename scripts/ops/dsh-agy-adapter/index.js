@@ -135,7 +135,10 @@ function recordProvesNoEffect(record) {
   if (record.first_effect_at !== null) return false
   // Any contradictory effect evidence in the same record fails closed.
   if (record.provider_effect === true || record.has_unresolved_external_effect === true) return false
-  if (record.source_attribution_state === 'UNAVAILABLE') return false
+  // Allow-list: only ATTRIBUTED (or a legacy record with no attribution field) lets an
+  // empty observed_changed_paths prove no effect; any other present value fails closed.
+  const attribution = record.source_attribution_state
+  if (attribution !== undefined && attribution !== 'ATTRIBUTED') return false
   if (typeof record.scope_validation_state === 'string' && record.scope_validation_state.startsWith('VIOLATION')) return false
   const changed = record.observed_changed_paths
   if (changed !== null && changed !== undefined && !(Array.isArray(changed) && changed.length === 0)) return false
