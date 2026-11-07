@@ -8,6 +8,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 ADAPTER_DIR = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 PRE_EFFECT = "PROVIDER_PROTOCOL_INVALID_PRE_EFFECT"
@@ -189,6 +191,44 @@ def test_multiple_json_objects_fail_closed(tmp_path: Path) -> None:
     assert payload["code"] == PRE_EFFECT
     assert "exactly one JSON object" in payload["message"]
     assert payload["originalCode"] == "AGY_PROTOCOL_INVALID"
+
+
+def test_unavailable_source_attribution_is_not_pre_effect_for_invalid_payload(
+    tmp_path: Path,
+) -> None:
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"text","text":"one"}\n{"kind":"text","text":"two"}',
+        script=[
+            {
+                "record": {
+                    "source_attribution_state": "UNAVAILABLE",
+                    "observed_changed_paths": [],
+                }
+            }
+        ],
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == "PROVIDER_PROTOCOL_INVALID_EFFECT_UNPROVEN"
+
+
+def test_attributed_empty_change_set_still_pre_effect(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"text","text":"one"}\n{"kind":"text","text":"two"}',
+        script=[
+            {
+                "record": {
+                    "source_attribution_state": "ATTRIBUTED",
+                    "observed_changed_paths": [],
+                }
+            }
+        ],
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == PRE_EFFECT
 
 
 def test_unknown_action_fails_closed(tmp_path: Path) -> None:
@@ -876,6 +916,66 @@ def test_pool_busy_retry_exhausted_is_typed_and_honest(tmp_path: Path) -> None:
     assert payload["effect"] == "none"
     assert payload["failureKind"] == "AGY_ACCOUNT_POOL_BUSY"
     assert "pool" in payload["message"] and "quota" not in payload["message"].lower()
+    assert len(_attempts(tmp_path)) == 3
+
+
+def test_unavailable_source_attribution_pool_busy_is_not_typed_pre_effect(tmp_path: Path) -> None:
+    step = _pool_busy("agyop_busy")
+    step["record"].update({
+        "source_attribution_state": "UNAVAILABLE",
+        "observed_changed_paths": [],
+    })
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[step],
+        extra_env={"NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC": "0"},
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == "AGY_OPERATION_FAILED"
+    assert payload["code"] != POOL_BUSY
+    assert len(_attempts(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("attribution", ["unavailable", "PARTIAL", "SOMETHING_NEW", None, ""])
+def test_non_attributed_source_attribution_values_do_not_prove_no_effect(
+    tmp_path: Path, attribution: object
+) -> None:
+    step = _pool_busy("agyop_busy")
+    step["record"].update({
+        "source_attribution_state": attribution,
+        "observed_changed_paths": [],
+    })
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[step],
+        extra_env={"NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC": "0"},
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == "AGY_OPERATION_FAILED"
+    assert len(_attempts(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("attribution", ["ATTRIBUTED", "__missing__"])
+def test_attributed_or_legacy_record_with_empty_paths_keeps_pre_effect_behavior(
+    tmp_path: Path, attribution: str
+) -> None:
+    step = _pool_busy("agyop_busy")
+    step["record"]["observed_changed_paths"] = []
+    if attribution != "__missing__":
+        step["record"]["source_attribution_state"] = attribution
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[step],
+        extra_env={"NEXUS_DSH_AGY_BUSY_RETRY_BUDGET_SEC": "0"},
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == POOL_BUSY
     assert len(_attempts(tmp_path)) == 3
 
 
