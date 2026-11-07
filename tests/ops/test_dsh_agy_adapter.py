@@ -154,8 +154,13 @@ def _run_node(
             text=True,
         )
     return subprocess.run(
-        ["node", str(script)], cwd=tmp_path, env=env, capture_output=True, text=True,
-        check=False, timeout=run_timeout,
+        ["node", str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=run_timeout,
     )
 
 
