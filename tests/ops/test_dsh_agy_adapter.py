@@ -67,6 +67,10 @@ def _run_node(
         "    child=subprocess.Popen(['sleep','30'])\n"
         "    open(os.environ['FAKE_CHILD_PID'], 'w').write(str(child.pid))\n"
         "    time.sleep(30)\n"
+        "if os.environ.get('FAKE_EXIT_ON_TERM') == '1':\n"
+        "    import signal, time\n"
+        "    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "    time.sleep(30)\n"
         "if args[:1]==['--status']:\n"
         "    print(open(os.path.join(ops,args[1]+'.json')).read())\n"
         "    sys.exit(0)\n"
@@ -116,6 +120,10 @@ def _run_node(
         tool_schema = "[" + one + "," + one + "]"
     purpose_literal = "undefined" if purpose is None else json.dumps(purpose)
     script.write_text(
+        "import fs from 'node:fs';\n"
+        "const keepAlive=process.env.FAKE_KEEPALIVE ? setInterval(()=>{},1000) : null;\n"
+        "const originalKill=process.kill.bind(process);\n"
+        "process.kill=(pid,signal)=>{ if(process.env.FAKE_KILL_LOG) fs.appendFileSync(process.env.FAKE_KILL_LOG, signal+'\\n'); return originalKill(pid,signal); };\n"
         "import { AgyPoolAdapter } from './runtime/node_modules/@nexus/dsh-llm-agy-pilot/index.js';\n"
         "const adapter = new AgyPoolAdapter();\n"
         "const calls = Number(process.env.FAKE_CALLS ?? '1');\n"
@@ -132,7 +140,8 @@ def _run_node(
         "if (parallel) await Promise.all(Array.from({ length: calls }, runOne));\n"
         "else for (let i = 0; i < calls; i++) await runOne();\n"
         "if (calls === 1) { console.log(JSON.stringify(runs[0])); if (!runs[0].ok) process.exitCode = 3; }\n"
-        "else { console.log(JSON.stringify(runs)); }\n",
+        "else { console.log(JSON.stringify(runs)); }\n"
+        "if(keepAlive) setTimeout(()=>clearInterval(keepAlive),350);\n",
         encoding="utf-8",
     )
     env = dict(os.environ)
@@ -1476,3 +1485,24 @@ def test_dispatch_start_timeout_kills_process_group(tmp_path: Path) -> None:
         time.sleep(0.02)
     else:
         raise AssertionError("dispatcher descendant survived host timeout")
+
+
+def test_dispatch_timeout_clears_sigkill_grace_when_child_exits_on_sigterm(tmp_path: Path) -> None:
+    kill_log = tmp_path / "kills.log"
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"text","text":"unused"}',
+        extra_env={
+            "FAKE_EXIT_ON_TERM": "1",
+            "FAKE_KILL_LOG": str(kill_log),
+            "FAKE_KEEPALIVE": "1",
+            "NEXUS_DSH_HOST_SUBPROCESS_TIMEOUT_MS": "500",
+        },
+        run_timeout=12,
+    )
+    assert isinstance(proc, subprocess.CompletedProcess)
+    assert proc.returncode == 3
+    assert proc.stdout
+    time.sleep(0.15)
+    signals = kill_log.read_text(encoding="utf-8").splitlines()
+    assert signals == ["SIGTERM"]

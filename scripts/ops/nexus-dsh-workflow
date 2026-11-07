@@ -1629,6 +1629,8 @@ def _materialize_base_tree(repo: Path, base: str, paths: list[str], dest: Path) 
         shown = _host_run(
             ["git", "show", f"{base}:{rel}"], cwd=str(repo), capture_output=True, check=False
         )
+        if shown.returncode == 124:
+            raise DshWorkflowError("BASE_TREE_READ_FAILED", f"git show timed out for {rel}")
         if shown.returncode != 0:
             continue  # new file at head: nothing existed at base
         target = dest / rel
@@ -2671,10 +2673,15 @@ def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
-def _identity_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _identity_git(
+    repo: Path, *args: str, timeout: float | None = None
+) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k not in GIT_IDENTITY_ENV}
+    if timeout is None:
+        timeout = HOST_SUBPROCESS_TIMEOUT_SECONDS
     return _host_run(
-        ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True, check=False
+        ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True,
+        check=False, timeout=timeout,
     )
 
 
@@ -2846,7 +2853,7 @@ def prepare_standalone_clone(
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         def run(cwd: Path, *args: str) -> None:
-            proc = _identity_git(cwd, *args)
+            proc = _identity_git(cwd, *args, timeout=300)
             if proc.returncode == 0:
                 return
             if created:
@@ -2858,7 +2865,8 @@ def prepare_standalone_clone(
                     else:
                         child.unlink(missing_ok=True)
             raise DshWorkflowError(
-                "STANDALONE_CLONE_FAILED", f"git {args[0]} failed: {proc.stderr.strip()[-500:]}"
+                "STANDALONE_CLONE_FAILED",
+                f"git {args[0]} failed (timeout 300s): {proc.stderr.strip()[-500:]}",
             )
 
         # --no-local: independent object store, no hardlinks, no alternates, no
@@ -2974,7 +2982,9 @@ HOST_SUBPROCESS_TIMEOUT_SECONDS = 10
 def _host_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
     """Run a host-owned command with a deadline and reap its entire process group."""
     timeout = kwargs.pop("timeout", HOST_SUBPROCESS_TIMEOUT_SECONDS)
-    kwargs.pop("check", None)
+    check = kwargs.pop("check", False)
+    if check:
+        raise ValueError("_host_run does not support check=True")
     kwargs.pop("start_new_session", None)
     if kwargs.pop("capture_output", False):
         kwargs.setdefault("stdout", subprocess.PIPE)
@@ -2986,19 +2996,22 @@ def _host_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         try:
             stdout, stderr = proc.communicate(timeout=0.2)
         except subprocess.TimeoutExpired:
-            stdout = stderr = None
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        final_stdout, final_stderr = proc.communicate()
-        stdout = final_stdout if final_stdout is not None else stdout
-        stderr = final_stderr if final_stderr is not None else stderr
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        pipe.close()
+                proc.wait()
         return subprocess.CompletedProcess(argv, 124, stdout, stderr)
 
 
@@ -3548,7 +3561,12 @@ def _classifier_scratch() -> Path:
         ["add", ".dsh-intelligence-scratch"],
         ["-c", "user.name=nexus", "-c", "user.email=nexus@localhost", "commit", "-q", "-m", "s"],
     ):
-        _host_run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
+        result = _host_run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
+        if result.returncode != 0:
+            raise DshWorkflowError(
+                "CLASSIFIER_SCRATCH_GIT_FAILED",
+                f"git {' '.join(cmd)} failed with {result.returncode}",
+            )
     return scratch
 
 

@@ -62,3 +62,143 @@ def test_git_host_timeout_kills_process_group(tmp_path: Path) -> None:
         time.sleep(0.02)
     else:
         raise AssertionError("Git descendant survived host timeout")
+
+
+def _load_workflow():
+    import importlib.machinery
+    return importlib.machinery.SourceFileLoader(
+        "workflow_timeout_regression", str(WORKFLOW)
+    ).load_module()
+
+
+def test_host_timeout_preserves_sigterm_output_and_skips_sigkill(tmp_path: Path, monkeypatch) -> None:
+    import signal as signal_module
+    workflow = _load_workflow()
+    monkeypatch.setattr(workflow, "HOST_SUBPROCESS_TIMEOUT_SECONDS", 0.01)
+    calls = []
+    def record_killpg(pid, sig):
+        calls.append(sig)
+    monkeypatch.setattr(workflow.os, "killpg", record_killpg)
+    class FakeProcess:
+        pid = 123
+        stdout = stderr = None
+        def __init__(self, *_args, **_kwargs):
+            self.communicates = 0
+        def communicate(self, timeout=None):
+            self.communicates += 1
+            if self.communicates == 1:
+                raise subprocess.TimeoutExpired("fake", timeout)
+            if self.communicates == 2:
+                return b"term-out", b"term-err"
+            return None, None
+        def wait(self):
+            return 0
+    monkeypatch.setattr(workflow.subprocess, "Popen", FakeProcess)
+    result = workflow._host_run(
+        [sys.executable, "-c", "pass"],
+        capture_output=True,
+    )
+    assert result.returncode == 124
+    assert result.stdout == b"term-out"
+    assert result.stderr == b"term-err"
+    assert signal_module.SIGKILL not in calls
+
+
+def test_host_run_rejects_check_true() -> None:
+    workflow = _load_workflow()
+    try:
+        workflow._host_run([sys.executable, "-c", "pass"], check=True)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("check=True must not be silently ignored")
+
+
+def test_classifier_scratch_fails_on_git_timeout(monkeypatch, tmp_path: Path) -> None:
+    workflow = _load_workflow()
+    def make_scratch(**_):
+        path = tmp_path / "scratch"
+        path.mkdir()
+        return str(path)
+    monkeypatch.setattr(workflow.tempfile, "mkdtemp", make_scratch)
+    def fail_git(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], 124, b"", b"timeout")
+    monkeypatch.setattr(workflow, "_host_run", fail_git)
+    try:
+        workflow._classifier_scratch()
+    except workflow.DshWorkflowError as exc:
+        assert exc.code == "CLASSIFIER_SCRATCH_GIT_FAILED"
+    else:
+        raise AssertionError("classifier scratch must fail closed on timed out git")
+
+
+def test_materialize_base_tree_fails_on_git_show_timeout(monkeypatch, tmp_path: Path) -> None:
+    workflow = _load_workflow()
+    monkeypatch.setattr(
+        workflow, "_host_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 124, b"", b"timeout"),
+    )
+    try:
+        workflow._materialize_base_tree(tmp_path, "base", ["file.py"], tmp_path / "out")
+    except workflow.DshWorkflowError as exc:
+        assert exc.code == "BASE_TREE_READ_FAILED"
+    else:
+        raise AssertionError("git show timeout must not mean file absence")
+
+
+def test_standalone_clone_git_operations_use_long_timeout_and_name_it(monkeypatch, tmp_path: Path) -> None:
+    workflow = _load_workflow()
+    calls = []
+    source = Path.cwd()
+    base = "a" * 40
+
+    def record_git(cwd, *args, timeout=None):
+        calls.append((args, timeout))
+        if args[0] == "clone":
+            return subprocess.CompletedProcess(args, 124, "", "timed out")
+        if args[:1] == ("rev-parse",):
+            return subprocess.CompletedProcess(args, 0, f"{source}\n{source / '.git'}\n", "")
+        if args[:2] == ("remote", "get-url"):
+            return subprocess.CompletedProcess(args, 0, "https://github.com/James3014/Nexus-new\n", "")
+        if args[:1] == ("worktree",):
+            return subprocess.CompletedProcess(args, 0, f"worktree {source}\n", "")
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(workflow, "_identity_git", record_git)
+    monkeypatch.setattr(workflow, "_under_temp_grant", lambda _path: None)
+    try:
+        workflow.prepare_standalone_clone(
+            repository="James3014/Nexus-new", source_repo_root=source,
+            base_revision=base, target=tmp_path / "clone",
+        )
+    except workflow.DshWorkflowError as exc:
+        assert exc.code == "STANDALONE_CLONE_FAILED"
+        assert "timeout 300s" in str(exc)
+    else:
+        raise AssertionError("timed out clone must fail")
+
+    clone_call = next((args, timeout) for args, timeout in calls if args[0] == "clone")
+    assert clone_call[1] == 300
+
+    calls.clear()
+    target = tmp_path / "clone-success"
+    def complete_git(cwd, *args, timeout=None):
+        calls.append((args, timeout))
+        if args[:1] == ("rev-parse",):
+            return subprocess.CompletedProcess(args, 0, f"{source}\n{source / '.git'}\n", "")
+        if args[:2] == ("remote", "get-url"):
+            return subprocess.CompletedProcess(args, 0, "https://github.com/James3014/Nexus-new\n", "")
+        if args[:1] == ("worktree",):
+            return subprocess.CompletedProcess(args, 0, f"worktree {source}\n", "")
+        if args[:1] == ("cat-file",) and cwd == target:
+            return subprocess.CompletedProcess(args, 1, "", "missing")
+        return subprocess.CompletedProcess(args, 0, "", "")
+    monkeypatch.setattr(workflow, "_identity_git", complete_git)
+    monkeypatch.setattr(workflow, "_validate_standalone_target", lambda *_args, **_kwargs: {})
+    workflow.prepare_standalone_clone(
+        repository="James3014/Nexus-new", source_repo_root=source,
+        base_revision=base, target=target,
+    )
+    operations = {args[0] for args, _ in calls if args[0] in {"clone", "fetch", "-c"}}
+    assert operations == {"clone", "fetch", "-c"}
+    assert all(timeout == 300 for args, timeout in calls if args[0] in operations)

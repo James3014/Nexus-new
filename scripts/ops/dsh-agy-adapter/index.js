@@ -30,13 +30,15 @@ function execFileWithHostTimeout(file, args, options = {}) {
     let timedOut = false
     let overflow = false
     let settled = false
+    let killTimer
     const killGroup = (signal) => {
       try { process.kill(-child.pid, signal) } catch {}
     }
     const timer = setTimeout(() => {
       timedOut = true
       killGroup('SIGTERM')
-      setTimeout(() => killGroup('SIGKILL'), PROCESS_GROUP_KILL_GRACE_MS).unref()
+      killTimer = setTimeout(() => killGroup('SIGKILL'), PROCESS_GROUP_KILL_GRACE_MS)
+      killTimer.unref()
     }, HOST_SUBPROCESS_TIMEOUT_MS)
     const collect = (name) => (chunk) => {
       if (name === 'out') stdout += chunk
@@ -52,8 +54,8 @@ function execFileWithHostTimeout(file, args, options = {}) {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       if (timedOut) {
-        killGroup('SIGKILL')
         error = new Error(`${file} exceeded host timeout of ${HOST_SUBPROCESS_TIMEOUT_MS}ms`)
         error.code = 'ETIMEDOUT'
         error.killed = true
