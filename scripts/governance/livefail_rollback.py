@@ -41,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -145,7 +146,7 @@ class Gh:
 
     def live_failed_issues(self) -> list[int]:
         q = f"repo:{self.repo} is:issue is:open label:{LIVE_FAILED_LABEL}"
-        data = self.api("-X", "GET", "search/issues", "-f", f"q={q}", "-f", "per_page=100")
+        data = self.api("search/issues?" + urllib.parse.urlencode({"q": q, "per_page": 100}))
         return [i["number"] for i in data.get("items", [])]
 
     def comment(self, issue: int, body: str) -> None:

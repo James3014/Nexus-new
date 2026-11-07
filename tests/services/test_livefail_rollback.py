@@ -456,6 +456,11 @@ data = json.load(open(os.environ["FAKE_GH_DATA"]))
 args = sys.argv[1:]
 with open(os.environ["FAKE_GH_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
+if os.environ.get("FAKE_GH_STRICT_READ") == "1" and any(
+    arg in {"-f", "-F", "--field", "--raw-field"} for arg in args
+):
+    sys.stderr.write("ghc 只做唯讀查詢；寫入請用 gh（機器人身分）\n")
+    sys.exit(2)
 if args[:2] == ["pr", "create"]:
     body = open(args[args.index("--body-file") + 1]).read()
     with open(os.environ["FAKE_GH_LOG"] + ".body", "w") as fh:
@@ -464,7 +469,7 @@ if args[:2] == ["pr", "create"]:
     sys.exit(0)
 if args[:2] == ["issue", "comment"]:
     sys.exit(0)
-if "search/issues" in args:
+if any(arg == "search/issues" or arg.startswith("search/issues?") for arg in args):
     print(json.dumps({"items": [{"number": n} for n in data.get("search", [])]}))
     sys.exit(0)
 path = [a for a in args if a.startswith("repos/")][0]
@@ -479,7 +484,15 @@ else:
 """
 
 
-def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None, extra_comments=()):
+def _online(
+    tmp_path: Path,
+    repo: Path,
+    bad: str,
+    *extra: str,
+    head_prs=None,
+    extra_comments=(),
+    extra_env: dict | None = None,
+):
     bare = tmp_path / "origin.git"
     if not bare.exists():
         subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
@@ -526,6 +539,7 @@ def _online(tmp_path: Path, repo: Path, bad: str, *extra: str, head_prs=None, ex
             str(REPO_ROOT),
             *([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else []),
         ]),
+        **(extra_env or {}),
     }
     out = subprocess.run(
         [
@@ -788,3 +802,26 @@ def test_cli_sweep_prints_one_summary_line(tmp_path, repo):
     assert summary["sweep"][0]["outcome"] == "DRY_RUN_CLEAN"
     calls = (tmp_path / "gh.log").read_text()
     assert '"create"' not in calls and '"comment"' not in calls
+
+
+def test_cli_sweep_works_with_read_only_gh_wrapper(tmp_path, repo):
+    bad = _commit(repo, "nexus/a.py", "a = 2\n", "feat: change a (#77)")
+    (tmp_path / "deploy").mkdir()
+    out, _, _ = _online(
+        tmp_path,
+        repo,
+        bad,
+        "--sweep",
+        extra_env={"FAKE_GH_STRICT_READ": "1"},
+    )
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.strip().splitlines()
+    assert len(lines) == 1
+    summary = json.loads(lines[0])
+    assert summary["sweep"][0]["issue"] == 5
+    calls = [json.loads(line) for line in (tmp_path / "gh.log").read_text().splitlines()]
+    search_call = next(
+        call for call in calls if any(arg.startswith("search/issues?") for arg in call)
+    )
+    endpoint = next(arg for arg in search_call if arg.startswith("search/issues?"))
+    assert "q=repo%3A" in endpoint
