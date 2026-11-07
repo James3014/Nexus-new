@@ -148,7 +148,7 @@ class ControlledIntegrationManager:
 
     @classmethod
     def _refuse_custom_merge_drivers(cls, cwd: Path) -> None:
-        """Refuse when the config a merge in ``cwd`` would read defines a custom merge driver.
+        """Refuse config-based hooks and custom merge drivers visible in ``cwd``.
 
         A ``merge.<name>.driver`` command runs during the content merge whenever an
         attribute (committed, ``info/attributes``, ``core.attributesFile``) or
@@ -157,8 +157,10 @@ class ControlledIntegrationManager:
         would execute during integration (#3383).  Governed integration admits only
         Git's built-in drivers (text, binary, union): any ``merge.<name>.*`` key is
         refused.  So is ``merge.renormalize`` with a ``filter.<name>`` command, which
-        the content merge would run too.  The check runs under the same sanitised
-        environment and ``cwd`` as the merge; an unreadable config is refused too.
+        the content merge would run too. Git's config-based ``hook.<name>.*`` keys
+        are refused because commands such as ``hook.<name>.command`` can run during
+        a merge. The check runs under the same sanitised environment and ``cwd`` as
+        the merge; an unreadable config is refused too.
         """
         listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
         if listed.returncode != 0:
@@ -170,6 +172,17 @@ class ControlledIntegrationManager:
             for name in listed.stdout.split("\0")
             if name.lower().startswith("merge.") and name.count(".") >= 2
         })
+        hooks = sorted({
+            name
+            for name in listed.stdout.split("\0")
+            if name.lower().startswith("hook.") and name.count(".") >= 2
+        })
+        if hooks:
+            shown = ", ".join(repr(name[:80]) for name in hooks[:5])
+            raise RuntimeError(
+                "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
+                f"hooks; configured: {shown}"
+            )
         renormalize = cls._run_sanitised_git(
             ["config", "--type=bool", "--get", "merge.renormalize"], cwd
         ).stdout.strip()
@@ -923,6 +936,7 @@ class ControlledIntegrationManager:
             merged = self._controller_merge_commit(
                 integration_base_sha, candidate_sha, controller_root
             )
+            self._refuse_custom_merge_drivers(integration_path)
             self._git(["merge", "--ff-only", merged], integration_path)
             self._execute_manifest(admitted_verifiers, integration_path)
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
@@ -1143,6 +1157,7 @@ class ControlledIntegrationManager:
                         raise RuntimeError(
                             f"INTEGRATION_BRANCH_REFUSED_AT_APPLY: {exc}"
                         ) from exc
+                    self._refuse_custom_merge_drivers(controller_root)
                     self._git(["merge", "--ff-only", staging_sha], controller_root)
                 else:
                     # Whatever the shape, the branch rules are re-proved right
