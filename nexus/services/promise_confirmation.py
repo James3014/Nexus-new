@@ -236,7 +236,9 @@ def _parse_witness(text: str, now: datetime) -> dict[str, Any] | None:
     ok = (
         all(isinstance(w[k], str) and w[k].strip() for k in strings)
         and type(w["pr"]) is int
+        and isinstance(w["phase"], str)
         and w["phase"] in _PHASES
+        and isinstance(w["result"], str)
         and w["result"] in _RESULTS
         and isinstance(w["commit"], str)
         and _SHA40.match(w["commit"])
@@ -263,6 +265,7 @@ def _parse_confirmation(text: str) -> dict[str, Any] | None:
         return None
     if not (isinstance(c["promise_set_identity"], str) and _IDENT.match(c["promise_set_identity"])):
         return None
+    promise_ids: set[str] = set()
     for p in c["promises"]:
         if not isinstance(p, dict) or set(p) != _CONFIRM_PROMISE_KEYS:
             return None
@@ -270,6 +273,9 @@ def _parse_confirmation(text: str) -> dict[str, Any] | None:
             return None
         if type(p["counterexample_checked"]) is not bool or not isinstance(p["promise_id"], str):
             return None
+        if p["promise_id"] in promise_ids:
+            return None
+        promise_ids.add(p["promise_id"])
     return c
 
 
