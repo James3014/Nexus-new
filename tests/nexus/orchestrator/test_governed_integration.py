@@ -911,8 +911,8 @@ def test_controlled_integration_merge_never_reads_controller_driver_config(tmp_p
     assert _git(repo, "show", f"{merged}:README") == "a\nCAND\nc\nd\nHEAD"
 
 
-def _plant_config_hook(repo, marker):
-    _git(repo, "config", "hook.pm.event", "post-merge")
+def _plant_config_hook(repo, marker, event="post-merge"):
+    _git(repo, "config", "hook.pm.event", event)
     _git(repo, "config", "hook.pm.command", f"touch {marker}")
 
 
@@ -979,3 +979,107 @@ def test_authorized_integration_refuses_hook_planted_before_apply_merge(tmp_path
 
     assert not marker.exists()
     assert _git(repo, "rev-parse", branch) == base
+
+
+@pytest.mark.parametrize("event", ["post-merge", "post-checkout", "reference-transaction", "post-index-change"])
+@pytest.mark.parametrize("path", ["compat", "authorized"])
+def test_integration_refuses_config_hook_events_before_controller_git_calls(
+    tmp_path, monkeypatch, event, path
+):
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    if path == "compat":
+        repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+        branch = "nexus/integration/test"
+
+        def call():
+            return ControlledIntegrationManager(
+                integration_root=tmp_path / "integrations"
+            ).integrate_task_state(state, integration_branch=branch)
+    else:
+        repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+        _git(repo, "checkout", branch)
+
+        def call():
+            return ControlledIntegrationManager(
+                integration_root=tmp_path / "integrations"
+            ).integrate_authorized_task_state(
+                state,
+                integration_branch=branch,
+                staging_root=tmp_path / "staging",
+                apply=True,
+            )
+    original_head = _git(repo, "rev-parse", branch)
+    _plant_config_hook(repo, marker, event)
+
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        call()
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == original_head
+
+
+def test_sanitised_git_disables_config_hook_without_refuser(tmp_path):
+    repo = tmp_path / "hook-repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "branch", "hook-test")
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    _plant_config_hook(repo, marker, "post-checkout")
+
+    target = tmp_path / "linked"
+    ControlledIntegrationManager._git(["worktree", "add", str(target), "hook-test"], repo)
+
+    assert not marker.exists()
+    _git(repo, "worktree", "remove", str(target))
+
+
+def test_compat_rechecks_hook_planted_after_merge_commit(tmp_path, monkeypatch):
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    branch = "nexus/integration/test"
+    original_head = _git(repo, "rev-parse", branch)
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    real_merge = ControlledIntegrationManager._controller_merge_commit.__func__
+
+    def plant_after_merge(cls, head, candidate, controller_root):
+        merged = real_merge(cls, head, candidate, controller_root)
+        _plant_config_hook(repo, marker, "post-checkout")
+        return merged
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_controller_merge_commit", classmethod(plant_after_merge)
+    )
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch=branch)
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == original_head
+
+
+def test_compat_refusal_survives_dirty_worktree_cleanup_error(tmp_path, monkeypatch):
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    real_merge = ControlledIntegrationManager._controller_merge_commit.__func__
+
+    def dirty_and_plant(cls, head, candidate, controller_root):
+        merged = real_merge(cls, head, candidate, controller_root)
+        integration_path = tmp_path / "integrations" / "integration-task"
+        (integration_path / "untracked-dirty").write_text("dirty\n")
+        _plant_config_hook(repo, marker, "post-checkout")
+        return merged
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_controller_merge_commit", classmethod(dirty_and_plant)
+    )
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch="nexus/integration/test")
+
+    assert not marker.exists()

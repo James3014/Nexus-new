@@ -123,7 +123,24 @@ class ControlledIntegrationManager:
         # repository config from the merge-driver check while the merge still reads it (#3383).
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
-        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", *args]
+        listed = subprocess.run(
+            ["git", "config", "--list", "--name-only", "-z"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=git_env,
+        )
+        hook_names = set()
+        if listed.returncode == 0:
+            for key in listed.stdout.split("\0"):
+                lowered = key.lower()
+                last_dot = key.rfind(".")
+                if lowered.startswith("hook.") and last_dot > len("hook."):
+                    hook_names.add(key[len("hook."):last_dot].lower())
+        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}"]
+        for hook_name in sorted(hook_names):
+            git_cmd.extend(["-c", f"hook.{hook_name}.enabled=false"])
+        git_cmd.extend(args)
         return subprocess.run(
             git_cmd,
             cwd=cwd,
@@ -924,6 +941,7 @@ class ControlledIntegrationManager:
         if reuse_controller_worktree:
             integration_path = controller_root
         else:
+            self._refuse_custom_merge_drivers(controller_root)
             add_args = ["worktree", "add", str(integration_path), integration_branch]
             self._git(add_args, controller_root)
         removed = False
@@ -946,7 +964,10 @@ class ControlledIntegrationManager:
             self._git_status(["merge", "--abort"], integration_path)
             self._git_status(["reset", "--merge", integration_base_sha], integration_path)
             if not reuse_controller_worktree:
-                self._git(["worktree", "remove", str(integration_path)], controller_root)
+                try:
+                    self._git(["worktree", "remove", str(integration_path)], controller_root)
+                except Exception:
+                    pass
             raise
         if not reuse_controller_worktree:
             self._git(["worktree", "remove", str(integration_path)], controller_root)
@@ -1105,6 +1126,7 @@ class ControlledIntegrationManager:
         ):
             raise RuntimeError("post-apply verification Target already exists")
         staging_path.parent.mkdir(parents=True, exist_ok=True)
+        self._refuse_custom_merge_drivers(controller_root)
         self._git(["worktree", "add", "--detach", str(staging_path), expected_head], controller_root)
         owned_worktrees: list[Path] = [staging_path]
         staging_sha = ""
@@ -1192,6 +1214,7 @@ class ControlledIntegrationManager:
                         raise RuntimeError(
                             f"{refused}: staging merge result does not descend from the head"
                         )
+                    self._refuse_custom_merge_drivers(controller_root)
                     self._git(
                         ["update-ref", "--no-deref", branch_ref, staging_sha, expected_head],
                         controller_root,
