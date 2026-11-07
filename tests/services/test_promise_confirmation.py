@@ -1710,3 +1710,45 @@ def test_advisory_input_never_changes_reason_codes_or_recommendation(touched, ca
         assert json.dumps(rep[key], sort_keys=True) == json.dumps(baseline[key], sort_keys=True)
     assert not any(r.startswith("ENTRYPOINT") for r in rep["reason_codes"])
     assert {k: v for k, v in rep.items() if not k.startswith("entrypoint")} == baseline
+
+
+def test_confirmation_duplicate_promise_id_reject_then_accept_is_malformed():
+    body, ident = setup()
+    confirmation = {
+        "promise_set_identity": ident,
+        "commit": LIVE,
+        "confirmer": "reviewer-b",
+        "promises": [
+            {"promise_id": "P1", "verdict": "REJECT", "counterexample_checked": True, "note": "n"},
+            {"promise_id": "P1", "verdict": "ACCEPT", "counterexample_checked": True, "note": "n"},
+        ],
+    }
+    comment = {
+        "body": "<!-- NEXUS_PROMISE_CONFIRMATION_V1\n"
+        + json.dumps(confirmation)
+        + "\nNEXUS_PROMISE_CONFIRMATION_V1 -->",
+        "created_at": "2026-10-18T01:00:00Z",
+        "updated_at": "2026-10-18T01:00:00Z",
+        "author": "bot",
+        "author_association": "OWNER",
+    }
+    rep = report(body, [witness_comment("P1", identity=ident), comment])
+    assert rep["recommendation"] == "PROVISIONAL"
+    assert any(item["reason"] == "CONFIRMATION_MALFORMED" for item in rep["ignored_confirmations"])
+
+
+@pytest.mark.parametrize("result", [[], {}, ["PASS"]])
+def test_witness_result_list_or_dict_is_malformed_not_type_error(result):
+    body, ident = setup()
+    rep = report(body, [witness_comment("P1", identity=ident, result=result)])
+    assert rep["malformed_witnesses"] == 1
+    assert row(rep, "P1")["status"] == "UNCOVERED"
+    assert row(rep, "P1")["witnesses"] == []
+
+
+def test_confirmation_without_duplicates_unchanged():
+    body, ident = setup(pids=("P1", "P2"))
+    comments = [witness_comment(p, identity=ident) for p in ("P1", "P2")]
+    comments.append(confirmation_comment(ident, {"P1": "ACCEPT", "P2": "ACCEPT"}))
+    rep = report(body, comments)
+    assert rep["recommendation"] == "VERIFIED"
