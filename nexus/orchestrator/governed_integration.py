@@ -124,22 +124,33 @@ class ControlledIntegrationManager:
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         listed = subprocess.run(
-            ["git", "config", "--list", "--name-only", "-z"],
+            ["git", "config", "--list", "--show-origin", "-z"],
             cwd=cwd,
             capture_output=True,
             text=True,
             env=git_env,
         )
-        hook_names = set()
-        if listed.returncode == 0:
-            for key in listed.stdout.split("\0"):
-                lowered = key.lower()
-                last_dot = key.rfind(".")
-                if lowered.startswith("hook.") and last_dot > len("hook."):
-                    hook_names.add(key[len("hook."):last_dot].lower())
+        if listed.returncode != 0:
+            raise RuntimeError(
+                "CUSTOM_MERGE_DRIVER_REFUSED: git config could not be read; integration refused"
+            )
+        records = listed.stdout.split("\0")
+        configured_hooks = []
+        # --show-origin -z emits alternating origin NUL and key/newline/value NUL
+        # records. Split only on the first newline: values may contain either
+        # newlines or equals signs and must never be interpreted as config keys.
+        for index in range(1, len(records), 2):
+            record = records[index]
+            key, _separator, _value = record.partition("\n")
+            if key.lower().startswith("hook."):
+                configured_hooks.append(key)
+        if configured_hooks:
+            shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
+            raise RuntimeError(
+                "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
+                f"hooks; configured: {shown}"
+            )
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}"]
-        for hook_name in sorted(hook_names):
-            git_cmd.extend(["-c", f"hook.{hook_name}.enabled=false"])
         git_cmd.extend(args)
         return subprocess.run(
             git_cmd,
@@ -960,14 +971,14 @@ class ControlledIntegrationManager:
             if self._git(["for-each-ref", "refs/replace/"], controller_root):
                 raise RuntimeError("repository carries replacement refs; integration refused")
             integration_sha = self._git(["rev-parse", "HEAD"], integration_path)
-        except Exception:
+        except Exception as exc:
             self._git_status(["merge", "--abort"], integration_path)
             self._git_status(["reset", "--merge", integration_base_sha], integration_path)
             if not reuse_controller_worktree:
                 try:
                     self._git(["worktree", "remove", str(integration_path)], controller_root)
                 except Exception:
-                    pass
+                    exc.add_note(f"integration worktree left behind: {integration_path}")
             raise
         if not reuse_controller_worktree:
             self._git(["worktree", "remove", str(integration_path)], controller_root)

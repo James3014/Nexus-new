@@ -911,9 +911,9 @@ def test_controlled_integration_merge_never_reads_controller_driver_config(tmp_p
     assert _git(repo, "show", f"{merged}:README") == "a\nCAND\nc\nd\nHEAD"
 
 
-def _plant_config_hook(repo, marker, event="post-merge"):
-    _git(repo, "config", "hook.pm.event", event)
-    _git(repo, "config", "hook.pm.command", f"touch {marker}")
+def _plant_config_hook(repo, marker, event="post-merge", name="pm"):
+    _git(repo, "config", f"hook.{name}.event", event)
+    _git(repo, "config", f"hook.{name}.command", f"touch {marker}")
 
 
 def test_controlled_integration_refuses_config_hook_before_compat_merge(tmp_path, monkeypatch):
@@ -1032,10 +1032,142 @@ def test_sanitised_git_disables_config_hook_without_refuser(tmp_path):
     _plant_config_hook(repo, marker, "post-checkout")
 
     target = tmp_path / "linked"
-    ControlledIntegrationManager._git(["worktree", "add", str(target), "hook-test"], repo)
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        ControlledIntegrationManager._git(["worktree", "add", str(target), "hook-test"], repo)
 
     assert not marker.exists()
-    _git(repo, "worktree", "remove", str(target))
+    assert not target.exists()
+
+
+def test_sanitised_git_allows_repo_without_config_hooks(tmp_path):
+    repo = tmp_path / "plain-repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    result = ControlledIntegrationManager._run_sanitised_git(["status", "--porcelain"], repo)
+    assert result.returncode == 0
+
+
+@pytest.mark.parametrize("hook_name", ["PM", "a=b"])
+@pytest.mark.parametrize("path", ["authorized", "compat"])
+def test_config_hook_subsection_names_refused_before_first_worktree_status(
+    tmp_path, monkeypatch, hook_name, path
+):
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    if path == "authorized":
+        repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+        _git(repo, "checkout", branch)
+        def call():
+            ControlledIntegrationManager(
+                integration_root=tmp_path / "integrations"
+            ).integrate_authorized_task_state(
+                state, integration_branch=branch, staging_root=tmp_path / "staging", apply=True
+            )
+    else:
+        repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+        branch = "nexus/integration/test"
+        base = _git(repo, "rev-parse", branch)
+        def call():
+            ControlledIntegrationManager(
+                integration_root=tmp_path / "integrations"
+            ).integrate_task_state(state, integration_branch=branch)
+    _plant_config_hook(repo, marker, "post-index-change", hook_name)
+
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        call()
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == base
+
+
+def test_separate_controller_refuses_hook_before_update_ref(tmp_path, monkeypatch):
+    repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+    controller = tmp_path / "separate-controller"
+    _git(repo, "worktree", "add", "--detach", str(controller), "main")
+    state["contract"]["controller_repo_root"] = str(controller)
+    state["integration_authorization"]["canonical_root"] = str(controller)
+    marker = tmp_path / "CONFIG_HOOK_RAN"
+    original_status = ControlledIntegrationManager._git_status.__func__
+
+    def plant_after_ancestry(cls, args, cwd):
+        result = original_status(cls, args, cwd)
+        if args[:2] == ["merge-base", "--is-ancestor"]:
+            _plant_config_hook(repo, marker, "reference-transaction", "PM")
+        return result
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_git_status", classmethod(plant_after_ancestry)
+    )
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state, integration_branch=branch, staging_root=tmp_path / "staging", apply=True
+        )
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == base
+
+
+@pytest.mark.parametrize("path", ["compat", "authorized_staging", "separate_update_ref"])
+def test_explicit_hook_refusal_precedes_protected_git_mutation(tmp_path, monkeypatch, path):
+    events = []
+    original_refuse = ControlledIntegrationManager._refuse_custom_merge_drivers.__func__
+    original_git = ControlledIntegrationManager._git.__func__
+    original_status = ControlledIntegrationManager._git_status.__func__
+
+    def record_refusal(cls, cwd):
+        events.append(("refusal", None))
+        return original_refuse(cls, cwd)
+
+    def record_git(cls, args, cwd):
+        if args[:2] == ["worktree", "add"] or args[:2] == ["update-ref", "--no-deref"]:
+            events.append(("command", tuple(args)))
+        return original_git(cls, args, cwd)
+
+    def record_status(cls, args, cwd):
+        result = original_status(cls, args, cwd)
+        if args[:2] == ["merge-base", "--is-ancestor"]:
+            events.append(("ancestry", None))
+        return result
+
+    monkeypatch.setattr(
+        ControlledIntegrationManager, "_refuse_custom_merge_drivers", classmethod(record_refusal)
+    )
+    monkeypatch.setattr(ControlledIntegrationManager, "_git", classmethod(record_git))
+    monkeypatch.setattr(ControlledIntegrationManager, "_git_status", classmethod(record_status))
+
+    if path == "compat":
+        repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch="nexus/integration/test")
+        command_name = "worktree add"
+    else:
+        repo, _, _, branch, _, state = _authorized_verifier_state(tmp_path)
+        if path == "separate_update_ref":
+            controller = tmp_path / "separate-controller"
+            _git(repo, "worktree", "add", "--detach", str(controller), "main")
+            state["contract"]["controller_repo_root"] = str(controller)
+            state["integration_authorization"]["canonical_root"] = str(controller)
+            command_name = "update-ref --no-deref"
+        else:
+            _git(repo, "checkout", branch)
+            command_name = "worktree add --detach"
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state, integration_branch=branch, staging_root=tmp_path / "staging", apply=True
+        )
+
+    command_event = next(
+        index
+        for index, event in enumerate(events)
+        if event[0] == "command" and " ".join(event[1]).startswith(command_name)
+    )
+    prior_refusals = [index for index, event in enumerate(events[:command_event]) if event[0] == "refusal"]
+    assert prior_refusals
+    if path == "separate_update_ref":
+        ancestry_event = max(index for index, event in enumerate(events) if event[0] == "ancestry")
+        assert prior_refusals[-1] > ancestry_event
 
 
 def test_compat_rechecks_hook_planted_after_merge_commit(tmp_path, monkeypatch):
@@ -1083,3 +1215,21 @@ def test_compat_refusal_survives_dirty_worktree_cleanup_error(tmp_path, monkeypa
         ).integrate_task_state(state, integration_branch="nexus/integration/test")
 
     assert not marker.exists()
+
+
+def test_sanitised_git_fails_closed_when_config_cannot_be_read(tmp_path, monkeypatch):
+    """An unreadable repository config refuses every Controller git call (#3408)."""
+    repo, _state = _legacy_driver_repo(tmp_path, monkeypatch)
+    with (repo / ".git" / "config").open("a") as config:
+        config.write("[broken\n")
+    with pytest.raises(RuntimeError, match="git config could not be read"):
+        ControlledIntegrationManager._git(["status", "--porcelain"], repo)
+
+
+def test_sanitised_git_refuses_a_hook_key_without_a_value(tmp_path, monkeypatch):
+    """A valueless ``hook.<name>.event`` key is listed without a newline and still refused."""
+    repo, _state = _legacy_driver_repo(tmp_path, monkeypatch)
+    with (repo / ".git" / "config").open("a") as config:
+        config.write('[hook "PM"]\n\tevent\n')
+    with pytest.raises(RuntimeError, match="CONFIG_HOOK_REFUSED"):
+        ControlledIntegrationManager._git(["status", "--porcelain"], repo)
