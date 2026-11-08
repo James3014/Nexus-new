@@ -1109,6 +1109,7 @@ def test_sanitised_git_blocks_maintenance_hook_from_include_written_by_fast_forw
         "[gc]\n\tauto = 1\n\tautoDetach = false\n"
         "[maintenance]\n\tstrategy = gc\n"
         '[hook "pre-auto-gc"]\n'
+        "\tevent = pre-auto-gc\n"
         f"\tcommand = {sys.executable} {hook} {marker}\n",
         encoding="utf-8",
     )
@@ -1117,30 +1118,82 @@ def test_sanitised_git_blocks_maintenance_hook_from_include_written_by_fast_forw
     _git(repo, "checkout", "main")
     _git(repo, "config", "include.path", "../.gitconfig")
 
-    try:
-        result = ControlledIntegrationManager._run_sanitised_git(
+    with pytest.raises(RuntimeError, match="CONFIG_INCLUDE_REFUSED"):
+        ControlledIntegrationManager._run_sanitised_git(
             ["merge", "--ff-only", "candidate"], repo
         )
-    except RuntimeError as exc:
-        assert "CONFIG_INCLUDE_REFUSED" in str(exc)
-        assert _git(repo, "rev-parse", "HEAD") == base
-    else:
-        assert result.returncode == 0, result.stderr
-        assert _git(repo, "rev-parse", "HEAD") != base
-        assert _git(repo, "config", "gc.auto") == "1"
-        assert _git(repo, "config", "hook.pre-auto-gc.command")
-        maintenance_env = os.environ.copy()
-        maintenance_env["GIT_CONFIG_NOSYSTEM"] = "1"
-        maintenance_env["GIT_CONFIG_GLOBAL"] = os.devnull
-        maintenance = subprocess.run(
-            ["git", "gc", "--auto"],
-            cwd=repo,
-            env=maintenance_env,
-            capture_output=True,
-            text=True,
-        )
-        assert maintenance.returncode == 0, maintenance.stderr
+    assert _git(repo, "rev-parse", "HEAD") == base
 
+    assert not marker.exists()
+
+
+def test_sanitised_git_maintenance_pins_block_pre_auto_gc_hook(tmp_path, monkeypatch):
+    repo = tmp_path / "maintenance-pin-repo"
+    repo.mkdir()
+    hooks_dir = tmp_path / "canonical-hooks"
+    hooks_dir.mkdir(mode=0o700)
+    hooks_dir.chmod(0o700)
+    marker = tmp_path / "PRE_AUTO_GC_RAN"
+    hook = hooks_dir / "pre-auto-gc"
+    hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n", encoding="utf-8")
+    hook.chmod(0o700)
+    monkeypatch.setenv("NEXUS_CANONICAL_GIT_HOOKS_DIR", str(hooks_dir))
+
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    for key, value in (
+        ("gc.auto", "1"),
+        ("gc.autoDetach", "false"),
+        ("maintenance.autoDetach", "false"),
+        ("maintenance.strategy", "gc"),
+        ("maintenance.gc.enabled", "true"),
+    ):
+        _git(repo, "config", key, value)
+
+    (repo / "README").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "README")
+    _git(repo, "-c", "maintenance.auto=false", "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "candidate")
+    (repo / "README").write_text("candidate\n", encoding="utf-8")
+    _git(repo, "add", "README")
+    _git(repo, "-c", "maintenance.auto=false", "commit", "-m", "candidate")
+    _git(repo, "checkout", "main")
+
+    # Three loose blobs in objects/17 make gc.auto=1 cross its threshold.
+    found = 0
+    nonce = 0
+    while found < 3:
+        payload = f"maintenance-trigger-{nonce}".encode()
+        result = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=repo,
+            input=payload,
+            capture_output=True,
+            check=True,
+        )
+        if result.stdout.decode().startswith("17"):
+            found += 1
+        nonce += 1
+
+    # Positive control: identical fast-forward under plain Git runs the hook.
+    plain_control = subprocess.run(
+        ["git", "-c", f"core.hooksPath={hooks_dir}", "merge", "--ff-only", "candidate"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert plain_control.returncode == 0, plain_control.stderr
+    assert marker.exists()
+
+    _git(repo, "reset", "--hard", base)
+    marker.unlink()
+    result = ControlledIntegrationManager._run_sanitised_git(
+        ["merge", "--ff-only", "candidate"], repo
+    )
+    assert result.returncode == 0, result.stderr
     assert not marker.exists()
 
 
