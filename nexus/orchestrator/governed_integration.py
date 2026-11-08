@@ -124,7 +124,19 @@ class ControlledIntegrationManager:
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         listed = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "config", "--list", "--show-origin", "-z"],
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "config",
+                "--list",
+                "--show-origin",
+                "-z",
+            ],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -137,7 +149,7 @@ class ControlledIntegrationManager:
         records = listed.stdout.split("\0")
         configured_hooks = []
         configured_filters = []
-        configured_conditional_includes = []
+        configured_includes = []
         # --show-origin -z emits alternating origin NUL and key/newline/value NUL
         # records. Split only on the first newline: values may contain either
         # newlines or equals signs and must never be interpreted as config keys.
@@ -148,8 +160,8 @@ class ControlledIntegrationManager:
                 configured_hooks.append(key)
             if key.lower().startswith("filter."):
                 configured_filters.append(key)
-            if key.lower().startswith("includeif."):
-                configured_conditional_includes.append(key)
+            if key.lower().startswith(("include.", "includeif.")):
+                configured_includes.append(key)
         if configured_hooks:
             shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
             raise RuntimeError(
@@ -162,15 +174,23 @@ class ControlledIntegrationManager:
                 "CONFIG_FILTER_REFUSED: governed integration does not run config-based "
                 f"filters; configured: {shown}"
             )
-        if configured_conditional_includes:
-            shown = ", ".join(
-                repr(name[:80]) for name in sorted(configured_conditional_includes)[:5]
-            )
+        if configured_includes:
+            shown = ", ".join(repr(name[:80]) for name in sorted(configured_includes)[:5])
             raise RuntimeError(
-                "CONFIG_INCLUDE_REFUSED: governed integration does not allow conditional "
-                f"config includes; configured: {shown}"
+                "CONFIG_INCLUDE_REFUSED: governed integration does not allow config "
+                f"includes; configured: {shown}"
             )
-        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", "-c", "core.fsmonitor=false"]
+        git_cmd = [
+            "git",
+            "-c",
+            f"core.hooksPath={hooks_dir}",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+        ]
         git_cmd.extend(args)
         return subprocess.run(
             git_cmd,

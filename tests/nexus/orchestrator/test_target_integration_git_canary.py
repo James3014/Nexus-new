@@ -814,6 +814,8 @@ def test_a_custom_merge_driver_from_any_config_source_is_refused_and_never_runs(
     refusal_code = (
         "CONFIG_FILTER_REFUSED"
         if source.startswith("renormalize-filter-")
+        else "CONFIG_INCLUDE_REFUSED"
+        if source == "included-config"
         else "CUSTOM_MERGE_DRIVER_REFUSED"
     )
     with pytest.raises(RuntimeError, match=refusal_code):
