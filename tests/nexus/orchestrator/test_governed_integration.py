@@ -153,6 +153,18 @@ def _marker_program(tmp_path: Path, *, process_filter: bool = False) -> tuple[Pa
     return marker, program
 
 
+def _install_conditional_filter(repo: Path, tmp_path: Path, condition: str, pattern: str):
+    marker, program = _marker_program(tmp_path)
+    included_config = tmp_path / "conditional-filter.config"
+    included_config.write_text(
+        f'[filter "x"]\n\tsmudge = {sys.executable} {program} {marker}\n',
+        encoding="utf-8",
+    )
+    (repo / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    _git(repo, "config", f"includeIf.{condition}:{pattern}.path", str(included_config))
+    return marker
+
+
 def _authorized_verifier_state(tmp_path: Path):
     repo = tmp_path / "authorized-repo"
     repo.mkdir()
@@ -1129,6 +1141,88 @@ def test_controlled_integration_refuses_config_filters_before_any_git_side_effec
     assert _git(repo, "rev-parse", branch) == integration_head
     assert _git(repo, "worktree", "list", "--porcelain") == worktrees_before
     assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+@pytest.mark.parametrize(
+    ("condition", "pattern"),
+    [
+        ("gitdir", "**/.git/worktrees/**"),
+        ("onbranch", "nexus/integration/**"),
+    ],
+    ids=["gitdir-new-worktree", "onbranch-integration-branch"],
+)
+def test_compat_integration_refuses_worktree_only_conditional_filter_before_worktree_add(
+    tmp_path, monkeypatch, condition, pattern
+):
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    branch = "nexus/integration/test"
+    branch_head = _git(repo, "rev-parse", branch)
+    refs_before = _git(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+    worktrees_before = _git(repo, "worktree", "list", "--porcelain")
+    marker = _install_conditional_filter(repo, tmp_path, condition, pattern)
+
+    with pytest.raises(RuntimeError, match="CONFIG_INCLUDE_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch=branch)
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == branch_head
+    assert _git(repo, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    assert _git(repo, "worktree", "list", "--porcelain") == worktrees_before
+    assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def test_authorized_integration_refuses_worktree_only_conditional_filter_before_worktree_add(
+    tmp_path,
+):
+    repo, _base, _candidate, branch, _executable, state = _authorized_verifier_state(tmp_path)
+    branch_head = _git(repo, "rev-parse", branch)
+    refs_before = _git(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+    worktrees_before = _git(repo, "worktree", "list", "--porcelain")
+    marker = _install_conditional_filter(repo, tmp_path, "gitdir", "**/.git/worktrees/**")
+
+    with pytest.raises(RuntimeError, match="CONFIG_INCLUDE_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state,
+            integration_branch=branch,
+            staging_root=tmp_path / "staging",
+            apply=True,
+        )
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == branch_head
+    assert _git(repo, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    assert _git(repo, "worktree", "list", "--porcelain") == worktrees_before
+    assert not (tmp_path / "staging" / state["task_id"]).exists()
+
+
+def test_authorized_integration_refuses_visible_config_filter_before_worktree_add(tmp_path):
+    repo, _base, _candidate, branch, _executable, state = _authorized_verifier_state(tmp_path)
+    branch_head = _git(repo, "rev-parse", branch)
+    refs_before = _git(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+    worktrees_before = _git(repo, "worktree", "list", "--porcelain")
+    marker, program = _marker_program(tmp_path)
+    (repo / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    _git(repo, "config", "filter.x.smudge", f"{sys.executable} {program} {marker}")
+
+    with pytest.raises(RuntimeError, match="CONFIG_FILTER_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state,
+            integration_branch=branch,
+            staging_root=tmp_path / "staging",
+            apply=True,
+        )
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == branch_head
+    assert _git(repo, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    assert _git(repo, "worktree", "list", "--porcelain") == worktrees_before
+    assert not (tmp_path / "staging" / state["task_id"]).exists()
 
 
 @pytest.mark.parametrize("hook_name", ["PM", "a=b"])

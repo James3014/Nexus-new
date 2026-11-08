@@ -137,6 +137,7 @@ class ControlledIntegrationManager:
         records = listed.stdout.split("\0")
         configured_hooks = []
         configured_filters = []
+        configured_conditional_includes = []
         # --show-origin -z emits alternating origin NUL and key/newline/value NUL
         # records. Split only on the first newline: values may contain either
         # newlines or equals signs and must never be interpreted as config keys.
@@ -147,6 +148,8 @@ class ControlledIntegrationManager:
                 configured_hooks.append(key)
             if key.lower().startswith("filter."):
                 configured_filters.append(key)
+            if key.lower().startswith("includeif."):
+                configured_conditional_includes.append(key)
         if configured_hooks:
             shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
             raise RuntimeError(
@@ -158,6 +161,14 @@ class ControlledIntegrationManager:
             raise RuntimeError(
                 "CONFIG_FILTER_REFUSED: governed integration does not run config-based "
                 f"filters; configured: {shown}"
+            )
+        if configured_conditional_includes:
+            shown = ", ".join(
+                repr(name[:80]) for name in sorted(configured_conditional_includes)[:5]
+            )
+            raise RuntimeError(
+                "CONFIG_INCLUDE_REFUSED: governed integration does not allow conditional "
+                f"config includes; configured: {shown}"
             )
         git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", "-c", "core.fsmonitor=false"]
         git_cmd.extend(args)
@@ -197,8 +208,10 @@ class ControlledIntegrationManager:
         because checkout, status and content operations can run its clean, smudge
         or process command. Git's config-based ``hook.<name>.*`` keys
         are refused because commands such as ``hook.<name>.command`` can run during
-        a merge. The check runs under the same sanitised environment and ``cwd`` as
-        the merge; an unreadable config is refused too.
+        a merge. Conditional config includes are refused because they can activate
+        in a newly-created worktree after this check. The check runs under the same
+        sanitised environment and ``cwd`` as the merge; an unreadable config is
+        refused too.
         """
         listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
         if listed.returncode != 0:
