@@ -124,7 +124,19 @@ class ControlledIntegrationManager:
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         listed = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "config", "--list", "--show-origin", "-z"],
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "config",
+                "--list",
+                "--show-origin",
+                "-z",
+            ],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -137,6 +149,7 @@ class ControlledIntegrationManager:
         records = listed.stdout.split("\0")
         configured_hooks = []
         configured_filters = []
+        configured_includes = []
         # --show-origin -z emits alternating origin NUL and key/newline/value NUL
         # records. Split only on the first newline: values may contain either
         # newlines or equals signs and must never be interpreted as config keys.
@@ -147,6 +160,8 @@ class ControlledIntegrationManager:
                 configured_hooks.append(key)
             if key.lower().startswith("filter."):
                 configured_filters.append(key)
+            if key.lower().startswith(("include.", "includeif.")):
+                configured_includes.append(key)
         if configured_hooks:
             shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
             raise RuntimeError(
@@ -159,7 +174,23 @@ class ControlledIntegrationManager:
                 "CONFIG_FILTER_REFUSED: governed integration does not run config-based "
                 f"filters; configured: {shown}"
             )
-        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", "-c", "core.fsmonitor=false"]
+        if configured_includes:
+            shown = ", ".join(repr(name[:80]) for name in sorted(configured_includes)[:5])
+            raise RuntimeError(
+                "CONFIG_INCLUDE_REFUSED: governed integration does not allow config "
+                f"includes; configured: {shown}"
+            )
+        git_cmd = [
+            "git",
+            "-c",
+            f"core.hooksPath={hooks_dir}",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+        ]
         git_cmd.extend(args)
         return subprocess.run(
             git_cmd,
@@ -197,8 +228,10 @@ class ControlledIntegrationManager:
         because checkout, status and content operations can run its clean, smudge
         or process command. Git's config-based ``hook.<name>.*`` keys
         are refused because commands such as ``hook.<name>.command`` can run during
-        a merge. The check runs under the same sanitised environment and ``cwd`` as
-        the merge; an unreadable config is refused too.
+        a merge. Conditional config includes are refused because they can activate
+        in a newly-created worktree after this check. The check runs under the same
+        sanitised environment and ``cwd`` as the merge; an unreadable config is
+        refused too.
         """
         listed = cls._run_sanitised_git(["config", "--list", "--name-only", "-z"], cwd)
         if listed.returncode != 0:
