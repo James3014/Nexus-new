@@ -142,6 +142,17 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _marker_program(tmp_path: Path, *, process_filter: bool = False) -> tuple[Path, Path]:
+    marker = tmp_path / "PROGRAM_RAN"
+    program = tmp_path / "marker_filter.py"
+    script = "import pathlib, sys\npathlib.Path(sys.argv[1]).touch()\n"
+    if process_filter:
+        script += "sys.exit(1)\n"
+    script += "sys.stdout.buffer.write(sys.stdin.buffer.read())\n"
+    program.write_text(script, encoding="utf-8")
+    return marker, program
+
+
 def _authorized_verifier_state(tmp_path: Path):
     repo = tmp_path / "authorized-repo"
     repo.mkdir()
@@ -1045,6 +1056,79 @@ def test_sanitised_git_allows_repo_without_config_hooks(tmp_path):
     _git(repo, "init", "-b", "main")
     result = ControlledIntegrationManager._run_sanitised_git(["status", "--porcelain"], repo)
     assert result.returncode == 0
+
+
+def test_authorized_integration_pins_fsmonitor_off_for_controller_git_calls(tmp_path):
+    repo, base, _candidate, branch, _executable, state = _authorized_verifier_state(tmp_path)
+    _git(repo, "checkout", branch)
+    marker = tmp_path / "FSMONITOR_RAN"
+    program = tmp_path / "marker_fsmonitor.py"
+    program.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).touch()\nsys.stdout.write('token\\n\\0')\n",
+        encoding="utf-8",
+    )
+    _git(repo, "config", "core.fsmonitor", f"{sys.executable} {program} {marker}")
+
+    receipt = ControlledIntegrationManager(
+        integration_root=tmp_path / "integrations"
+    ).integrate_authorized_task_state(
+        state,
+        integration_branch=branch,
+        staging_root=tmp_path / "staging",
+        apply=True,
+    )
+
+    assert not marker.exists()
+    assert receipt.merge_performed
+    assert _git(repo, "rev-parse", branch) == receipt.integration_commit_sha
+    assert _git(repo, "rev-parse", "HEAD") == receipt.integration_commit_sha
+    assert _git(repo, "rev-parse", base) == base
+
+
+@pytest.mark.parametrize(
+    ("filter_key", "attribute_source"),
+    [
+        ("smudge", "info"),
+        ("process", "info"),
+        ("smudge", "committed"),
+    ],
+    ids=["smudge-info-attributes", "process-info-attributes", "smudge-committed-attributes"],
+)
+def test_controlled_integration_refuses_config_filters_before_any_git_side_effect(
+    tmp_path, monkeypatch, filter_key, attribute_source
+):
+    repo, state = _legacy_driver_repo(tmp_path, monkeypatch)
+    branch = "nexus/integration/test"
+    integration_head = _git(repo, "rev-parse", branch)
+    marker, program = _marker_program(tmp_path, process_filter=filter_key == "process")
+    _git(
+        repo,
+        "config",
+        f"filter.x.{filter_key}",
+        f"{sys.executable} {program} {marker}",
+    )
+    if attribute_source == "info":
+        (repo / ".git" / "info" / "attributes").write_text("* filter=x\n")
+    else:
+        target = tmp_path / "target"
+        (target / ".gitattributes").write_text("* filter=x\n")
+        _git(target, "add", ".gitattributes")
+        _git(target, "commit", "-m", "candidate selects configured filter")
+        candidate = _git(target, "rev-parse", "HEAD")
+        tree = _git(target, "rev-parse", "HEAD^{tree}")
+        base = _git(repo, "rev-parse", branch)
+        state = _candidate_state(repo, base, candidate, tree)
+    worktrees_before = _git(repo, "worktree", "list", "--porcelain")
+
+    with pytest.raises(RuntimeError, match="CONFIG_FILTER_REFUSED"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_task_state(state, integration_branch=branch)
+
+    assert not marker.exists()
+    assert _git(repo, "rev-parse", branch) == integration_head
+    assert _git(repo, "worktree", "list", "--porcelain") == worktrees_before
+    assert not (tmp_path / "integrations" / "integration-task").exists()
 
 
 @pytest.mark.parametrize("hook_name", ["PM", "a=b"])

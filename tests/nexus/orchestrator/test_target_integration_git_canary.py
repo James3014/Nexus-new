@@ -811,7 +811,12 @@ def test_a_custom_merge_driver_from_any_config_source_is_refused_and_never_runs(
     assert marker.exists(), "positive control: the planted driver must run without the guard"
     marker.unlink()
 
-    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+    refusal_code = (
+        "CONFIG_FILTER_REFUSED"
+        if source.startswith("renormalize-filter-")
+        else "CUSTOM_MERGE_DRIVER_REFUSED"
+    )
+    with pytest.raises(RuntimeError, match=refusal_code):
         ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
     assert not marker.exists()
 
@@ -897,7 +902,12 @@ def test_a_driver_planted_after_the_check_never_runs_and_yields_no_staging_commi
     monkeypatch.setattr(
         ControlledIntegrationManager, "_run_sanitised_git", staticmethod(racing_run)
     )
-    with pytest.raises(RuntimeError, match="CUSTOM_MERGE_DRIVER_REFUSED"):
+    refusal_code = (
+        "CONFIG_FILTER_REFUSED"
+        if source == "renormalize-filter-clean"
+        else "CUSTOM_MERGE_DRIVER_REFUSED"
+    )
+    with pytest.raises(RuntimeError, match=refusal_code):
         ControlledIntegrationManager._controller_merge_commit(head, candidate, root)
     assert planted and not planted[0].exists()
     assert "commit-tree" not in calls
