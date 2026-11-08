@@ -124,7 +124,7 @@ class ControlledIntegrationManager:
         git_env.pop("GIT_CONFIG", None)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         listed = subprocess.run(
-            ["git", "config", "--list", "--show-origin", "-z"],
+            ["git", "-c", "core.fsmonitor=false", "config", "--list", "--show-origin", "-z"],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -136,6 +136,7 @@ class ControlledIntegrationManager:
             )
         records = listed.stdout.split("\0")
         configured_hooks = []
+        configured_filters = []
         # --show-origin -z emits alternating origin NUL and key/newline/value NUL
         # records. Split only on the first newline: values may contain either
         # newlines or equals signs and must never be interpreted as config keys.
@@ -144,13 +145,21 @@ class ControlledIntegrationManager:
             key, _separator, _value = record.partition("\n")
             if key.lower().startswith("hook."):
                 configured_hooks.append(key)
+            if key.lower().startswith("filter."):
+                configured_filters.append(key)
         if configured_hooks:
             shown = ", ".join(repr(name[:80]) for name in sorted(configured_hooks)[:5])
             raise RuntimeError(
                 "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
                 f"hooks; configured: {shown}"
             )
-        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}"]
+        if configured_filters:
+            shown = ", ".join(repr(name[:80]) for name in sorted(configured_filters)[:5])
+            raise RuntimeError(
+                "CONFIG_FILTER_REFUSED: governed integration does not run config-based "
+                f"filters; configured: {shown}"
+            )
+        git_cmd = ["git", "-c", f"core.hooksPath={hooks_dir}", "-c", "core.fsmonitor=false"]
         git_cmd.extend(args)
         return subprocess.run(
             git_cmd,
@@ -184,8 +193,9 @@ class ControlledIntegrationManager:
         included config, or in inherited ``GIT_CONFIG_COUNT``/``GIT_CONFIG_PARAMETERS``,
         would execute during integration (#3383).  Governed integration admits only
         Git's built-in drivers (text, binary, union): any ``merge.<name>.*`` key is
-        refused.  So is ``merge.renormalize`` with a ``filter.<name>`` command, which
-        the content merge would run too. Git's config-based ``hook.<name>.*`` keys
+        refused. Any ``filter.<name>.*`` key is refused
+        because checkout, status and content operations can run its clean, smudge
+        or process command. Git's config-based ``hook.<name>.*`` keys
         are refused because commands such as ``hook.<name>.command`` can run during
         a merge. The check runs under the same sanitised environment and ``cwd`` as
         the merge; an unreadable config is refused too.
@@ -211,16 +221,6 @@ class ControlledIntegrationManager:
                 "CONFIG_HOOK_REFUSED: governed integration does not run config-based "
                 f"hooks; configured: {shown}"
             )
-        renormalize = cls._run_sanitised_git(
-            ["config", "--type=bool", "--get", "merge.renormalize"], cwd
-        ).stdout.strip()
-        if renormalize == "true":
-            drivers += sorted({
-                name
-                for name in listed.stdout.split("\0")
-                if name.lower().startswith("filter.")
-                and name.lower().rsplit(".", 1)[-1] in {"clean", "smudge", "process"}
-            })
         if drivers:
             shown = ", ".join(repr(name[:80]) for name in drivers[:5])
             raise RuntimeError(
