@@ -4964,9 +4964,14 @@ class _Cycle:
         except Exception as exc:  # noqa: BLE001
             restored = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         receipt["probes"]["rollback"] = restored
-        if restored.get("ok"):
-            self.restart_public_connector(receipt)
-        return {"outcome": "ROLLED_BACK" if restored["ok"] else "ROLLBACK_FAILED"}
+        rollback_succeeded = restored.get("ok") is True
+        if rollback_succeeded:
+            try:
+                self.restart_public_connector(receipt)
+            except Exception as exc:  # noqa: BLE001 - connector restart is informational
+                warning = f"PUBLIC_CONNECTOR_RESTART_FAILED:{type(exc).__name__}:{exc}"[:300]
+                receipt.setdefault("warnings", []).append(warning)
+        return {"outcome": "ROLLED_BACK" if rollback_succeeded else "ROLLBACK_FAILED"}
 
     def reconcile_journal(self) -> Dict[str, Any]:
         """Resolve a switch that a previous cycle did not finish (crash or kill)."""

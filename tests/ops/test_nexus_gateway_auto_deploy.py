@@ -8223,6 +8223,7 @@ class ConnectorHost(FakeHost):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.launchctl: list[list[str]] = []
+        self.events: list[str] = []
         self.loaded = True
         self.kickstart_fails = False
 
@@ -8232,9 +8233,14 @@ class ConnectorHost(FakeHost):
             if argv[1] == "print":
                 return _done(code=0 if self.loaded else 1, stderr="" if self.loaded else "no")
             if argv[1] == "kickstart":
+                self.events.append("connector_kickstart")
                 return _done(code=1, stderr="boom") if self.kickstart_fails else _done()
             return _done(code=1, stderr=f"unexpected {argv}")
         return super().run(argv, cwd=cwd, env=env, timeout=timeout)
+
+    def reload_service(self, plist: Path, label: str) -> None:
+        self.events.append("gateway_reload")
+        super().reload_service(plist, label)
 
 
 class ConnectorProber(FakeProber):
@@ -8359,11 +8365,42 @@ def test_public_connector_is_restarted_when_the_candidate_is_rolled_back(
     receipt = result["receipt"]
     assert receipt["rolled_back"] is True
     assert ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN] in host.launchctl
+    assert host.events.index("gateway_reload", 1) < host.events.index("connector_kickstart")
     assert receipt["public_connector"]["restarted"] is True
     assert receipt["public_connector"]["healthz"] == {
         "ok": True,
         "manifest_status": "verified",
     }
+
+
+def test_public_connector_is_not_restarted_for_non_boolean_rollback_probe(
+    cfg: ad.Config,
+) -> None:
+    host = ConnectorHost()
+    prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False, (ad.LIVE_PORT, OLD): "false"})
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "ROLLBACK_FAILED"
+    receipt = result["receipt"]
+    assert receipt["probes"]["rollback"]["ok"] == "false"
+    assert ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN] not in host.launchctl
+
+
+def test_public_connector_restart_exception_warns_and_stays_rolled_back(
+    cfg: ad.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_restart(self, receipt):
+        raise RuntimeError("clock unavailable")
+
+    monkeypatch.setattr(ad._Cycle, "restart_public_connector", fail_restart)
+    host = ConnectorHost()
+    prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False})
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "ROLLED_BACK"
+    assert result["receipt"]["rolled_back"] is True
+    assert any(
+        w.startswith("PUBLIC_CONNECTOR_RESTART_FAILED:RuntimeError:clock unavailable")
+        for w in result["receipt"]["warnings"]
+    )
 
 
 def test_public_connector_kickstart_failure_on_rollback_warns_and_stays_rolled_back(
