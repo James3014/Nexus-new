@@ -55,7 +55,7 @@ class CollaborationRealmVerifier:
             path = remote.split(":", 1)[1] if ":" in remote else ""
         else:
             path = urlparse(remote).path.lstrip("/")
-        return path.removesuffix(".git").rstrip("/")
+        return path.rstrip("/").removesuffix(".git")
 
     @classmethod
     def verify_submission(cls, contract: SelfHostedTaskContract) -> dict[str, object]:
