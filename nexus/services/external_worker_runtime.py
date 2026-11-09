@@ -955,7 +955,12 @@ class ClaudeExecutionAdapter:
         total_cost = float(cost_raw) if isinstance(cost_raw, (int, float)) else None
         subtype = str(terminal.get("subtype") or "") if terminal else ""
 
-        if terminal is not None and subtype == "success" and terminal.get("is_error") is False:
+        if (
+            exit_code == 0
+            and terminal is not None
+            and subtype == "success"
+            and terminal.get("is_error") is False
+        ):
             return WorkerOutcome(
                 status="COMPLETED",
                 failure_kind=None,
@@ -973,6 +978,20 @@ class ClaudeExecutionAdapter:
                         else "explicit_command_argument"
                     )
                 },
+            )
+
+        if terminal is not None and subtype == "success" and terminal.get("is_error") is False:
+            return WorkerOutcome(
+                status="OUTCOME_UNKNOWN",
+                failure_kind=AccountFailureKind.UNKNOWN.value,
+                observed_provider="claude",
+                observed_model=observed_model,
+                finish_reason=subtype,
+                total_cost=total_cost,
+                provider_session_id=session_id,
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={"exit_code": exit_code, "unknown_outcome": True},
             )
 
         if terminal is None:
