@@ -590,7 +590,7 @@ def test_runtime_revision_binds_explicit_snapshot_git_head(
     assert dispatch._runtime_revision() == head
 
 
-def _fake_claude_cli(path: Path, *, terminal: bool) -> None:
+def _fake_claude_cli(path: Path, *, terminal: bool, tail: str = "") -> None:
     result = (
         """echo '{"type":"result","subtype":"success","is_error":false,"session_id":"cs-1","total_cost_usd":0.01,"result":"ok"}'"""
         if terminal
@@ -604,13 +604,16 @@ case "$1" in
 esac
 echo '{{"type":"system","subtype":"init","model":"claude-sonnet-5-5","session_id":"cs-1"}}'
 {result}
+{tail}
 """,
         encoding="utf-8",
     )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def _run_claude_operation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, terminal: bool):
+def _run_claude_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, terminal: bool, tail: str = ""
+):
     import json
 
     from nexus.services.claude_account_pool import (
@@ -620,7 +623,7 @@ def _run_claude_operation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, te
     )
 
     fake = tmp_path / "claude"
-    _fake_claude_cli(fake, terminal=terminal)
+    _fake_claude_cli(fake, terminal=terminal, tail=tail)
     monkeypatch.setenv("NEXUS_CLAUDE_BIN", str(fake))
     pool_root = tmp_path / "claude-pool"
     monkeypatch.setenv("NEXUS_CLAUDE_ACCOUNT_POOL_DIR", str(pool_root))
@@ -677,6 +680,15 @@ def test_background_claude_no_terminal_result_keeps_lease_unknown(
     assert current["rotations"] == 0
     (lease,) = state["leases"].values()
     assert lease["unknown_outcome"] is True
+
+
+def test_background_claude_success_event_with_nonzero_exit_is_never_completed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #3398: the CLI printed a success result and then exited 3.
+    _, current, _ = _run_claude_operation(tmp_path, monkeypatch, terminal=True, tail="exit 3")
+    assert current["status"] == "OUTCOME_UNKNOWN"
+    assert current["reconciliation"]["retry_permitted"] is False
 
 
 def _claude_inproc_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script_tail: str):

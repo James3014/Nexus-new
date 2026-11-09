@@ -1059,7 +1059,7 @@ def _run_operation_inner(
             return 124
 
         try:
-            exit_code = int(proc.returncode or 0)
+            exit_code = -1 if proc.returncode is None else int(proc.returncode)  # never a made-up 0
             stdout_bytes = stdout_path.read_bytes()
             stderr_bytes = stderr_path.read_bytes()
             stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
