@@ -28,8 +28,8 @@ FILE: dummy.py
 >>>>>>> REPLACE
 """
 
-def test_surgery_system():
-    repo_dir = Path("scratch/dummy_repo").resolve()
+def test_surgery_system(tmp_path: Path):
+    repo_dir = (tmp_path / "dummy_repo").resolve()
     if repo_dir.exists():
         import shutil
         shutil.rmtree(repo_dir)
@@ -66,5 +66,24 @@ def parser(v):
         print(f"Content:\n{new_content}")
         print(f"Error Reason: {final_ctx.failure_reason}")
 
+
+def test_surgery_system_leaves_the_tracked_scratch_dummy_repo_alone(tmp_path: Path, monkeypatch):
+    """#3058: the run builds dummy_repo under the given directory and never touches ./scratch/dummy_repo."""
+    tracked = Path("scratch/dummy_repo")
+    before = {p: p.read_bytes() for p in tracked.rglob("*") if p.is_file()} if tracked.is_dir() else None
+    test_surgery_system(tmp_path)
+    assert (tmp_path / "dummy_repo" / "dummy.py").exists()
+    after = {p: p.read_bytes() for p in tracked.rglob("*") if p.is_file()} if tracked.is_dir() else None
+    assert after == before
+    # also from a working directory that has no scratch/: nothing appears there
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    test_surgery_system(tmp_path / "second")
+    assert not (elsewhere / "scratch").exists()
+
+
 if __name__ == "__main__":
-    test_surgery_system()
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        test_surgery_system(Path(td))
