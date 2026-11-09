@@ -4826,8 +4826,9 @@ class _Cycle:
         Informational only: a connector that is not loaded here is recorded and skipped;
         a failed restart, or a connector that does not report ``ok`` within
         ``PUBLIC_CONNECTOR_HEALTH_SECONDS``, adds one warning and never changes the
-        outcome or rolls back.  Never raises.  Called from ``finish_switch`` only, so a
-        crash-reconciled switch gets it too while the read-only R1 finalize does not.
+        outcome or rolls back.  Never raises.  Called from ``finish_switch`` (so a
+        crash-reconciled switch gets it too while the read-only R1 finalize does not) and
+        from ``guarded_rollback`` after a restored probe that is ``ok is True`` (#3270).
         """
         summary: Dict[str, Any] = {"label": PUBLIC_CONNECTOR_LABEL, "restarted": False}
         warnings = receipt.setdefault("warnings", [])
@@ -4964,7 +4965,14 @@ class _Cycle:
         except Exception as exc:  # noqa: BLE001
             restored = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         receipt["probes"]["rollback"] = restored
-        return {"outcome": "ROLLED_BACK" if restored["ok"] else "ROLLBACK_FAILED"}
+        rollback_succeeded = restored.get("ok") is True
+        if rollback_succeeded:
+            try:
+                self.restart_public_connector(receipt)
+            except Exception as exc:  # noqa: BLE001 - connector restart is informational
+                warning = f"PUBLIC_CONNECTOR_RESTART_FAILED:{type(exc).__name__}:{exc}"[:300]
+                receipt.setdefault("warnings", []).append(warning)
+        return {"outcome": "ROLLED_BACK" if rollback_succeeded else "ROLLBACK_FAILED"}
 
     def reconcile_journal(self) -> Dict[str, Any]:
         """Resolve a switch that a previous cycle did not finish (crash or kill)."""
