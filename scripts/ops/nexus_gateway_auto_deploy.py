@@ -4826,8 +4826,9 @@ class _Cycle:
         Informational only: a connector that is not loaded here is recorded and skipped;
         a failed restart, or a connector that does not report ``ok`` within
         ``PUBLIC_CONNECTOR_HEALTH_SECONDS``, adds one warning and never changes the
-        outcome or rolls back.  Never raises.  Called from ``finish_switch`` only, so a
-        crash-reconciled switch gets it too while the read-only R1 finalize does not.
+        outcome or rolls back.  Never raises.  Called from ``finish_switch`` (so a
+        crash-reconciled switch gets it too while the read-only R1 finalize does not) and
+        from ``guarded_rollback`` after a restored probe that is ``ok is True`` (#3270).
         """
         summary: Dict[str, Any] = {"label": PUBLIC_CONNECTOR_LABEL, "restarted": False}
         warnings = receipt.setdefault("warnings", [])

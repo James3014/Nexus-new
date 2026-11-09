@@ -8373,6 +8373,20 @@ def test_public_connector_is_restarted_when_the_candidate_is_rolled_back(
     }
 
 
+def test_public_connector_is_left_alone_when_the_candidate_is_rolled_back(
+    cfg: ad.Config,
+) -> None:
+    """Id kept for the impact gate (#3420 r2). A rolled-back candidate now restarts the
+    connector (test above); a cycle that never switches (manager lock busy) must not touch it."""
+    host = ConnectorHost()
+    host.lock_fails = True
+    before = cfg.plist.read_bytes()
+    result = cycle(cfg, host, ConnectorProber(results={(ad.LIVE_PORT, NEW): False}))
+    assert result["status"] == "BLOCKED_MANAGER_BUSY"
+    assert host.launchctl == [] and "connector_kickstart" not in host.events
+    assert cfg.plist.read_bytes() == before and host.reloads == []
+
+
 def test_public_connector_is_not_restarted_for_non_boolean_rollback_probe(
     cfg: ad.Config,
 ) -> None:
