@@ -8349,15 +8349,48 @@ def test_public_connector_becomes_ok_during_the_window(cfg: ad.Config) -> None:
     assert prober.connector_reads == 3
 
 
-def test_public_connector_is_left_alone_when_the_candidate_is_rolled_back(
+def test_public_connector_is_restarted_when_the_candidate_is_rolled_back(
     cfg: ad.Config,
 ) -> None:
     host = ConnectorHost()
     prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False})
     result = cycle(cfg, host, prober)
-    assert result["receipt"]["rolled_back"] is True
-    assert host.launchctl == []
-    assert "public_connector" not in result["receipt"]
+    assert result["status"] == "ROLLED_BACK"
+    receipt = result["receipt"]
+    assert receipt["rolled_back"] is True
+    assert ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN] in host.launchctl
+    assert receipt["public_connector"]["restarted"] is True
+    assert receipt["public_connector"]["healthz"] == {
+        "ok": True,
+        "manifest_status": "verified",
+    }
+
+
+def test_public_connector_kickstart_failure_on_rollback_warns_and_stays_rolled_back(
+    cfg: ad.Config,
+) -> None:
+    host = ConnectorHost()
+    host.kickstart_fails = True
+    prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False})
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "ROLLED_BACK"
+    receipt = result["receipt"]
+    assert receipt["rolled_back"] is True
+    assert receipt["public_connector"]["restarted"] is False
+    assert any(w.startswith("PUBLIC_CONNECTOR_RESTART_FAILED:") for w in receipt["warnings"])
+
+
+def test_public_connector_is_not_restarted_when_rollback_itself_fails(
+    cfg: ad.Config,
+) -> None:
+    host = ConnectorHost()
+    prober = ConnectorProber(results={(ad.LIVE_PORT, NEW): False, (ad.LIVE_PORT, OLD): False})
+    result = cycle(cfg, host, prober)
+    assert result["status"] == "ROLLBACK_FAILED"
+    receipt = result["receipt"]
+    assert receipt["rolled_back"] is True
+    assert ["launchctl", "kickstart", "-k", CONNECTOR_DOMAIN] not in host.launchctl
+    assert "public_connector" not in receipt
 
 
 def test_public_connector_health_reads_the_json_body_of_a_503(monkeypatch) -> None:

@@ -4964,6 +4964,8 @@ class _Cycle:
         except Exception as exc:  # noqa: BLE001
             restored = {"ok": False, "error": f"{type(exc).__name__}:{exc}"[:300]}
         receipt["probes"]["rollback"] = restored
+        if restored.get("ok"):
+            self.restart_public_connector(receipt)
         return {"outcome": "ROLLED_BACK" if restored["ok"] else "ROLLBACK_FAILED"}
 
     def reconcile_journal(self) -> Dict[str, Any]:
