@@ -4838,3 +4838,47 @@ def test_conditional_cross_model_reject_and_plain_accept_still_work():
 def test_conditional_claude_reject_at_head_earlier_in_the_same_comment_withdraws():
     assert _conditional_case(f"Claude: REJECT at {MID}\n" + _conditional_body()) == (OLD,)
     assert _conditional_case(f"Claude: REJECT at {HEAD}\n" + _conditional_body()) == ()
+
+
+CLASS_CONTENT = b"class Suite:\n    def test_probe(self):\n        pass\n"
+
+
+def test_conditional_class_method_node_id_verifies():
+    body = _conditional_body(tests="tests/ops/test_review_record_check.py::Suite::test_probe")
+    assert _conditional_case(body, content=CLASS_CONTENT) == (OLD,)
+    # Same file with the names swapped or the method outside the class must not verify.
+    swapped = b"class test_probe:\n    def Suite(self):\n        pass\n"
+    assert _conditional_case(body, content=swapped) == ()
+    assert (
+        _conditional_case(body, content=b"class Suite:\n    pass\ndef test_probe(): pass\n") == ()
+    )
+
+
+def test_conditional_node_id_function_must_be_an_identifier():
+    body = _conditional_body(tests="tests/ops/test_review_record_check.py::Suite::1probe")
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(body)])
+
+
+def test_conditional_scan_starts_at_the_real_verdict_line_not_a_quoted_one():
+    quoted = f"```\nCONDITIONAL ACCEPT\nClaude: REJECT at {MID}\n```\n"
+    assert _conditional_case(quoted + _conditional_body()) == (OLD,)
+    assert _conditional_case(quoted.replace(MID, HEAD) + _conditional_body()) == ()
+
+
+def test_conditional_verification_never_waives_cross_model_for_high_risk_paths():
+    comments = [_c(_conditional_body())]
+    report = rrc.evaluate(HEAD, RISKY, comments, [], conditional_verified=(OLD,))
+    assert report["status"] == "MISSING_CROSS_MODEL"
+    report = rrc.evaluate(
+        HEAD, RISKY, [*comments, _c(CODEX_RECORD)], [], conditional_verified=(OLD,)
+    )
+    assert report["status"] == "OK"
+    assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_RECORD"
+
+
+def test_conditional_withdrawal_scan_fails_closed_past_twenty_named_commits():
+    few = " ".join(f"{i:040x}" for i in range(1, 21))
+    many = " ".join(f"{i:040x}" for i in range(1, 22))
+    assert _conditional_case(later=[_c("notes " + few)]) == (OLD,)
+    assert _conditional_case(later=[_c("notes " + many)]) == ()

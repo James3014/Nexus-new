@@ -1916,13 +1916,15 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
 
 
 _CONDITIONAL_LINE = re.compile(r"\bCONDITIONAL\s+ACCEPT\b")
-_NODE_ID = re.compile(r"([A-Za-z0-9_./-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)(?:::(\w+))?")
+_NODE_ID = re.compile(
+    r"([A-Za-z0-9_./-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)(?:::([A-Za-z_][A-Za-z0-9_]*))?"
+)
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 def _conditional_record(
     comments: list[Any],
-) -> tuple[int, dict[str, Any], str, list[str], list[str]] | None:
+) -> tuple[int, dict[str, Any], str, list[str], list[str], int] | None:
     """Parse the newest visible conditional record; malformed newest records stay terminal."""
     selected = None
     for index, comment in enumerate(comments):
@@ -1987,7 +1989,7 @@ def _conditional_record(
         raise CheckError("incomplete conditional conditions")
     if block < len(lines) and lines[block].strip() and not lines[block].startswith("- "):
         raise CheckError("conditional block must be separated by a blank line")
-    return index, comment, shas[0].lower(), tests, paths
+    return index, comment, shas[0].lower(), tests, paths, n
 
 
 def _valid_conditional_glob(pattern: str) -> bool:
@@ -2352,11 +2354,11 @@ def _conditional_withdrawn(text: str, shas: list[str], anywhere: bool = False) -
     """True when ``text`` holds a Claude-family (or unknown-family) REJECT bound to one of
     ``shas``; a cross-model REJECT never withdraws the independent record. ``anywhere`` also
     tries every commit the text names (a 7-40 character prefix, padded), so a REJECT at an
-    intermediate commit withdraws too; more than 50 named commits fails closed."""
+    intermediate commit withdraws too; more than 20 named commits fails closed."""
     candidates = list(shas)
     if anywhere:
         named = list(dict.fromkeys(_SHORT_HEX.findall(text.lower())))
-        if len(named) > 50:
+        if len(named) > 20:
             return True
         candidates += [token.ljust(40, "0") for token in named]
     for sha in dict.fromkeys(candidates):
@@ -2409,7 +2411,7 @@ def _verify_conditional(
         parsed = _conditional_record(comments)
         if parsed is None:
             return ()
-        index, source, old, tests, patterns = parsed
+        index, source, old, tests, patterns, verdict_line = parsed
         if old == head:
             return ()
         comparison = _compare(fetch, base, token, old, head)
@@ -2434,7 +2436,8 @@ def _verify_conditional(
             match = _NODE_ID.fullmatch(node)
             if match is None:
                 return ()
-            path, function, cls = match.groups()
+            path, first, second = match.groups()
+            cls, function = (first, second) if second else (None, first)
             if path not in pr_paths:
                 return ()
             at_head = _test_function(_contents_text(fetch, base, token, path, head), function, cls)
@@ -2447,11 +2450,6 @@ def _verify_conditional(
                 if at_old is not None and ast.dump(at_old) == ast.dump(at_head):
                     return ()
         # Text after the verdict in its own comment and later comments can withdraw it.
-        verdict_line = next(
-            i
-            for i, line in enumerate(_HTML_COMMENT.sub(" ", source["body"]).splitlines())
-            if _CONDITIONAL_LINE.search(line)
-        )
         source_lines = _HTML_COMMENT.sub(" ", source["body"]).splitlines()
         suffix = "\n".join(source_lines[verdict_line + 1 :])
         prefix = "\n".join(source_lines[:verdict_line])
