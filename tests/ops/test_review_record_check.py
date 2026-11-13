@@ -4813,6 +4813,7 @@ def test_conditional_later_claude_reject_of_any_commit_withdraws(text):
 def test_conditional_claude_reject_at_head_before_the_record_withdraws():
     assert _conditional_case(before=[_c("Claude review: REJECT at " + HEAD)]) == ()
     assert _conditional_case(before=[_c("Claude review: REJECT at " + MID)]) == (OLD,)
+    assert _conditional_case(before=[_c("Claude review: REJECT at " + OLD)]) == (OLD,)
 
 
 @pytest.mark.parametrize(

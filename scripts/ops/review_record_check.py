@@ -2462,7 +2462,9 @@ def _verify_conditional(
         for number, other in enumerate(comments):
             body = other.get("body") if isinstance(other, dict) and number != index else None
             if isinstance(body, str):
-                if _conditional_withdrawn(body, [head, old], anywhere=number > index):
+                if _conditional_withdrawn(
+                    body, [head, old] if number > index else [head], anywhere=number > index
+                ):
                     return ()
         created = source.get("created_at")
         if not isinstance(created, str):
