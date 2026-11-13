@@ -121,6 +121,54 @@ def test_gemini_codex_route_explains_acceptance():
     assert result["reason"] == f"round 2+ route: Gemini and Codex ACCEPT at head {HEAD[:12]}"
 
 
+@pytest.mark.parametrize(
+    "codex_comment",
+    [
+        (
+            "## Codex adversarial review\n"
+            f"Round 3 REJECT at {HEAD}; rebutted, not fixed: cap reached.\n"
+        ),
+        (
+            "## Codex adversarial review\n"
+            f"Head {HEAD}\nRound 3 REJECT; rebutted, not fixed: cap reached.\n"
+        ),
+    ],
+)
+def test_gemini_accept_plus_codex_rebuttal_does_not_satisfy_round_two(codex_comment):
+    result = evaluate(
+        LOW,
+        [comment(f"Claude review: ACCEPT@{OLD}\n"), accept("gemini"), comment(codex_comment)],
+    )
+    assert result["route"] == "r2+"
+    assert result["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "quoted_old_record",
+    [
+        f"> ## Review record -- head {OLD}\n> Claude verdict: ACCEPT\n",
+        f"```\n## Review record -- head {OLD}\nClaude verdict: ACCEPT\n```\n",
+    ],
+)
+def test_quoted_or_fenced_old_claude_record_does_not_start_round_two(quoted_old_record):
+    result = evaluate(LOW, [comment(quoted_old_record), accept("gemini"), accept("codex")])
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
+def test_real_old_claude_record_header_starts_round_two():
+    result = evaluate(
+        LOW,
+        [
+            comment(f"## Review record -- head {OLD}\nClaude verdict: ACCEPT@{OLD}\n"),
+            accept("gemini"),
+            accept("codex"),
+        ],
+    )
+    assert result["route"] == "r2+"
+    assert result["status"] == "OK"
+
+
 def test_high_risk_round_two_prefers_existing_claude_and_cross_model_route():
     result = evaluate(
         HIGH,
