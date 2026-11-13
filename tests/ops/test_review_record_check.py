@@ -80,6 +80,305 @@ def _posts(fail=False):
     return posted, post
 
 
+def _conditional_body(
+    sha=OLD, tests="tests/ops/test_review_record_check.py::test_probe", paths="scripts/ops/**"
+):
+    return (
+        f"**Independent Claude review**: **CONDITIONAL ACCEPT at {sha}**\n"
+        "Conditions:\n"
+        f"- tests: {tests}\n"
+        f"- paths: {paths}\n"
+        "- paths: tests/ops/**\n"
+    )
+
+
+def _conditional_fetch(url, token):
+    assert token == TOKEN
+    if "/compare/" in url:
+        return {
+            "status": "ahead",
+            "behind_by": 0,
+            "files": [
+                {"filename": "scripts/ops/review_record_check.py"},
+                {"filename": "tests/ops/test_review_record_check.py"},
+            ],
+        }
+    if "/contents/" in url:
+        import base64
+
+        return {
+            "type": "file",
+            "content": base64.b64encode(b"def test_probe():\n    pass\n").decode(),
+        }
+    raise AssertionError(url)
+
+
+def test_conditional_verification_accepts_matching_paths_and_test_ast():
+    comments = [_c(_conditional_body())]
+    comments[0]["created_at"] = "2026-01-01T00:00:00Z"
+    result = rrc._verify_conditional(
+        _conditional_fetch,
+        "https://api.github.com/repos/a/b",
+        TOKEN,
+        HEAD,
+        {"base": {"ref": "main"}},
+        [
+            {"filename": "scripts/ops/review_record_check.py"},
+            {"filename": "tests/ops/test_review_record_check.py"},
+        ],
+        comments,
+        [],
+    )
+    assert result == (OLD,)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "CONDITIONAL: ACCEPT",
+        "CONDITIONAL — ACCEPT",
+        "CONDITIONAL ACCEPT@" + OLD,
+        "CONDITIONAL ACCEPT at " + OLD,
+    ],
+)
+def test_conditional_variants_never_count_as_ordinary_accept(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c("Claude " + line)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "CONDITIONAL: ACCEPT",
+        "CONDITIONAL — ACCEPT",
+        "CONDITIONAL ACCEPT@" + OLD,
+        "CONDITIONAL ACCEPT at " + OLD,
+    ],
+)
+def test_conditional_variants_bound_to_head_never_count_as_ordinary_accept(line):
+    line = line.replace(OLD, HEAD)
+    assert rrc.evaluate(HEAD, DOCS, [_c("Claude " + line)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude: CONDITIONAL: ACCEPT@{HEAD}",
+        f"Claude — CONDITIONAL — ACCEPT@{HEAD}",
+        f"Claude: CONDITIONAL ACCEPT at {HEAD}",
+        f"Claude: CONDITIONAL ACCEPT@{HEAD}",
+    ],
+)
+def test_conditional_token_cannot_be_reclassified_as_unconditional(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(f"Claude ACCEPT@{HEAD}")], [])["status"] == "OK"
+    assert rrc.evaluate(HEAD, DOCS, [_c(line)], [])["status"] == "MISSING_RECORD"
+
+
+def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
+    ordinary = f"Claude review: ACCEPT@{HEAD}"
+    conditional = f"Claude review: CONDITIONAL: ACCEPT@{HEAD}"
+    assert rrc.verdict_clauses(ordinary)
+    assert rrc.verdict_clauses(conditional) == []
+
+
+@pytest.mark.parametrize("pattern", ["**/*", "*/*", "*.*", "./**", "**", "../x", "/x", "a\\b"])
+def test_conditional_globs_reject_unsafe_patterns(pattern):
+    assert not rrc._valid_conditional_glob(pattern)
+
+
+@pytest.mark.parametrize("path", ["scripts/ops/a.py", "scripts/ops/deep/a.py"])
+def test_conditional_glob_matches_segment_rules(path):
+    assert rrc._glob_match("scripts/ops/**", path)
+
+
+def test_conditional_text_injection_is_sanitized_before_logging():
+    safe = rrc._log_safe("::set-output\n%0A `evil`")
+    assert "\n" not in safe and safe.startswith("> ")
+
+
+# Round 2 conditional acceptance boundaries.
+def _conditional_case(
+    body=None,
+    *,
+    changed=None,
+    content=b"def test_probe(): pass\n",
+    status="ahead",
+    behind=0,
+    later=(),
+    reviews=(),
+    compare_error=False,
+    content_error=False,
+    content_type="file",
+    pr_files=None,
+):
+    import base64
+
+    body = body or _conditional_body()
+    changed = changed or [
+        "scripts/ops/review_record_check.py",
+        "tests/ops/test_review_record_check.py",
+    ]
+
+    def fetch(url, token):
+        if "/compare/" in url:
+            if compare_error:
+                raise RuntimeError("compare")
+            return {
+                "status": status,
+                "behind_by": behind,
+                "files": [{"filename": x} for x in changed],
+            }
+        if "/contents/" in url:
+            if content_error:
+                raise RuntimeError("contents")
+            return {"type": content_type, "content": base64.b64encode(content).decode()}
+        raise AssertionError(url)
+
+    first = _c(body)
+    first["created_at"] = "2026-01-01T00:00:00Z"
+    return rrc._verify_conditional(
+        fetch,
+        "https://api.github.com/repos/a/b",
+        TOKEN,
+        HEAD,
+        {"base": {"ref": "main"}},
+        pr_files or [{"filename": x} for x in changed],
+        [first, *later],
+        reviews,
+    )
+
+
+def test_conditional_multiple_tests_paths_and_cross_model_reject():
+    body = _conditional_body(
+        tests="tests/ops/test_review_record_check.py::test_probe\n- tests: tests/ops/test_review_record_check.py::test_second",
+        paths="scripts/ops/**\n- paths: tests/ops/**",
+    )
+    assert _conditional_case(
+        body,
+        content=b"def test_probe(): pass\ndef test_second(): pass\n",
+        later=[_c(f"Codex: REJECT at {HEAD}")],
+    ) == (OLD,)
+
+
+@pytest.mark.parametrize("status,behind", [("diverged", 1), ("behind", 2), ("identical", 0)])
+def test_conditional_requires_ancestor(status, behind):
+    assert _conditional_case(status=status, behind=behind) == ()
+
+
+def test_conditional_path_outside_patterns_fails():
+    assert (
+        _conditional_case(changed=["docs/outside.md", "tests/ops/test_review_record_check.py"])
+        == ()
+    )
+
+
+def test_conditional_test_file_must_be_changed():
+    # Control: the same fixture passes when the file is in the compared delta.
+    assert _conditional_case() == (OLD,)
+    assert (
+        _conditional_case(
+            changed=["scripts/ops/review_record_check.py"],
+            pr_files=[
+                {"filename": "scripts/ops/review_record_check.py"},
+                {"filename": "tests/ops/test_review_record_check.py"},
+            ],
+        )
+        == ()
+    )
+
+
+def test_conditional_test_file_must_also_be_in_pr_paths():
+    assert _conditional_case() == (OLD,)
+    pr_files = [{"filename": "scripts/ops/review_record_check.py"}]
+    assert _conditional_case(pr_files=pr_files) == ()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"# def test_probe(): pass\n",
+        b"'''def test_probe(): pass'''\n",
+        b"class X:\n    def test_probe(self): pass\n",
+        b"def test_probe(:\n pass\n",
+    ],
+)
+def test_conditional_requires_ast_function(content):
+    assert _conditional_case(content=content) == ()
+
+
+def test_conditional_test_contents_must_be_a_file():
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case(content_type="symlink") == ()
+
+
+@pytest.mark.parametrize(
+    "content", [b"def test_probe(): pass\n", b"class Other:\n    def test_probe(self): pass\n"]
+)
+def test_conditional_class_must_contain_direct_method(content):
+    body = _conditional_body(tests="tests/ops/test_review_record_check.py::Suite::test_probe")
+    assert _conditional_case(body, content=content) == ()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _conditional_body(paths="scripts/**\n- paths: ../x"),
+        _conditional_body(paths="scripts/**\n- paths: /x"),
+        _conditional_body(paths="scripts/**\n- paths: **/*"),
+        _conditional_body(paths="scripts/**\n- paths: **"),
+        _conditional_body(paths="scripts/**\n- unknown: x"),
+        _conditional_body(paths="scripts/**\n- paths: x\nOther: x"),
+        _conditional_body(tests=""),
+        _conditional_body(paths=""),
+    ],
+)
+def test_conditional_malformed_conditions_fail(body):
+    assert _conditional_case(body) == ()
+
+
+def test_conditional_later_claude_reject_withdraws():
+    assert _conditional_case(later=[_c(f"Claude: REJECT at {HEAD}")]) == ()
+
+
+def test_conditional_cross_model_reject_does_not_withdraw():
+    assert _conditional_case(later=[_c(f"Codex: REJECT at {HEAD}")]) == (OLD,)
+
+
+@pytest.mark.parametrize(
+    "review",
+    [
+        {"state": "CHANGES_REQUESTED", "submitted_at": "2026-01-02T00:00:00Z"},
+        {"state": "CHANGES_REQUESTED"},
+    ],
+)
+def test_conditional_later_or_undated_review_fails(review):
+    control = {"state": "CHANGES_REQUESTED", "submitted_at": "2025-12-31T00:00:00Z"}
+    assert _conditional_case(reviews=[control]) == (OLD,)
+    assert _conditional_case(reviews=[review]) == ()
+
+
+@pytest.mark.parametrize("wrapped", ["```\n{}\n```", "> {}", "| {} |", "<!-- {} -->"])
+def test_conditional_hidden_markup_does_not_count(wrapped):
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case(wrapped.format(_conditional_body().replace("\n", "\n> "))) == ()
+
+
+def test_conditional_inside_fenced_code_is_not_a_record():
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case("```\n" + _conditional_body() + "```\n") == ()
+
+
+def test_conditional_newest_invalid_record_does_not_fall_back():
+    newer = _c(_conditional_body(paths="scripts/**\n- paths: .."))
+    newer["created_at"] = "2026-01-02T00:00:00Z"
+    assert _conditional_case(later=[newer]) == ()
+
+
+def test_conditional_newer_stricter_failure_does_not_fall_back():
+    newer = _c(_conditional_body(paths="scripts/no-match/**"))
+    newer["created_at"] = "2026-01-02T00:00:00Z"
+    assert _conditional_case(later=[newer]) == ()
+
+
 # -- head naming ------------------------------------------------------------------------
 
 
@@ -4235,3 +4534,172 @@ def test_a_withdrawn_accept_does_not_choose_a_delta_head_main_would_not():
     comments = [_c(f"Claude: ACCEPT@{HEAD}"), _c(f"Claude: ACCEPT@{HEAD} withdrawn \u2014 race")]
     report = rrc.evaluate(HEAD, DOCS, comments, reviews, delta_verified=(OLD,))
     assert report["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "content", [b"", b"not base64!", b"def test_probe(): pass\n" + b" " * 1_000_001]
+)
+def test_conditional_invalid_contents_fail(content):
+    assert _conditional_case(content=content) == ()
+
+
+def test_conditional_contents_api_error_fails():
+    assert _conditional_case(content_error=True) == ()
+
+
+def test_conditional_compare_error_fails():
+    assert _conditional_case(compare_error=True) == ()
+
+
+def test_conditional_compare_truncated_at_300_fails():
+    assert _conditional_case(changed=["tests/ops/test_review_record_check.py"] * 300) == ()
+
+
+def test_conditional_reject_after_record_in_same_comment_fails():
+    assert _conditional_case(_conditional_body() + f"\nClaude REJECT at {HEAD}\n") == ()
+
+
+@pytest.mark.parametrize("line", ["x" * 201, "- tests: tests/a.py::test_x\x01"])
+def test_conditional_long_or_control_condition_fails(line):
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case(_conditional_body() + line + "\n") == ()
+
+
+def test_conditional_requires_conditions_immediately_after_verdict():
+    assert _conditional_case() == (OLD,)
+    body = _conditional_body().replace("\nConditions:", "\nInterlude\nConditions:")
+    assert _conditional_case(body) == ()
+
+
+def test_conditional_requires_reviewed_sha_to_be_full_length():
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case(_conditional_body(sha=OLD[:39])) == ()
+
+
+def test_conditional_verdict_sha_must_be_unique():
+    assert _conditional_case() == (OLD,)
+    body = _conditional_body().replace(f"at {OLD}", f"at {OLD} @{OLD}")
+    assert _conditional_case(body) == ()
+
+
+def test_conditional_verdict_must_be_from_claude_family():
+    assert _conditional_case() == (OLD,)
+    body = _conditional_body().replace("Independent Claude review", "Independent Codex review")
+    assert _conditional_case(body) == ()
+
+
+def test_conditional_blank_line_after_block_is_required_before_prose():
+    assert _conditional_case() == (OLD,)
+    body = _conditional_body() + "Additional note\n"
+    assert rrc._conditional_record([_c(_conditional_body())]) is not None
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(body)])
+
+
+def test_conditional_needs_at_least_one_test_and_one_path():
+    assert _conditional_case() == (OLD,)
+    no_tests = _conditional_body().replace(
+        "- tests: tests/ops/test_review_record_check.py::test_probe\n", ""
+    )
+    no_paths = _conditional_body().replace("- paths: scripts/ops/**\n", "")
+    assert _conditional_case(no_tests) == ()
+    assert _conditional_case(no_paths) == ()
+
+
+def test_conditional_conditions_are_limited_to_twenty_each():
+    assert _conditional_case() == (OLD,)
+    tests = "\n".join(
+        ["tests/ops/test_review_record_check.py::test_probe"]
+        + ["- tests: tests/ops/test_review_record_check.py::test_probe"] * 20
+    )
+    paths = "\n".join(["scripts/ops/**"] + ["- paths: scripts/ops/**"] * 20)
+    assert rrc._conditional_record([_c(_conditional_body())]) is not None
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(_conditional_body(tests=tests))])
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(_conditional_body(paths=paths))])
+
+
+def test_conditional_test_and_path_lines_are_at_most_two_hundred_chars():
+    assert _conditional_case() == (OLD,)
+    assert rrc._conditional_record([_c(_conditional_body())]) is not None
+    too_long_path = "scripts/ops/" + "a" * 190
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(_conditional_body(paths=too_long_path))])
+
+
+def test_conditional_condition_lines_reject_control_characters():
+    assert _conditional_case() == (OLD,)
+    body = _conditional_body() + "- paths: scripts/ops/x\x01\n"
+    assert _conditional_case(body) == ()
+
+
+def test_conditional_withdrawal_for_reviewed_sha_is_checked():
+    assert _conditional_case(later=[_c(f"Claude: REJECT at {HEAD}")]) == ()
+    assert _conditional_case(later=[_c(f"Claude: REJECT at {OLD}")]) == ()
+    unrelated = "2" * 40
+    assert _conditional_case(later=[_c(f"Claude: REJECT at {unrelated}")]) == (OLD,)
+
+
+def test_run_reports_the_sha_from_the_verified_conditional_record(tmp_path):
+    import base64
+
+    files = [
+        {"filename": "docs/a.md", "status": "modified"},
+        {"filename": "tests/ops/test_review_record_check.py", "status": "modified"},
+    ]
+    comment = _c(_conditional_body(paths="docs/**\n- paths: tests/ops/**"))
+    comment["created_at"] = "2026-01-01T00:00:00Z"
+
+    def fetch(url, token):
+        assert token == TOKEN
+        if url.endswith("/pulls/7"):
+            return {"head": {"sha": HEAD}, "base": {"ref": "main"}}
+        if "/compare/" in url:
+            return {
+                "status": "ahead",
+                "behind_by": 0,
+                "files": [{"filename": f["filename"]} for f in files],
+            }
+        if "/contents/" in url:
+            return {
+                "type": "file",
+                "content": base64.b64encode(b"def test_probe(): pass\n").decode(),
+            }
+        page = int(url.rsplit("page=", 1)[1])
+        for endpoint, items in (("files", files), ("comments", [comment]), ("reviews", [])):
+            if f"/{endpoint}?" in url:
+                return list(items)[(page - 1) * 100 : page * 100]
+        raise AssertionError(url)
+
+    output = tmp_path / "report.json"
+    result = rrc.run("a/b", 7, TOKEN, fetch=fetch, publish=False, output=str(output))
+    report = json.loads(output.read_text())
+    assert result == 0
+    assert report["status"] == "OK"
+    assert f"conditional accept at {OLD[:9]}" in report["reason"]
+
+
+def test_conditional_injection_never_prints_unsanitized(tmp_path, capsys):
+    body = _conditional_body(paths="scripts/**\n- paths: ::set-output%0A`evil`")
+    fetch = _fake(
+        pull={"head": {"sha": HEAD}, "base": {"ref": "main"}},
+        files=[{"filename": "docs/a.md"}],
+        comments=[_c(body)],
+    )
+    rrc.run("a/b", 7, TOKEN, fetch=fetch, publish=False, output=str(tmp_path / "out"))
+    output = capsys.readouterr().out
+    assert "::set-output" not in output and "%0A`evil`" not in output
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"**Independent Claude review**: ACCEPT@{HEAD}; CONDITIONAL",
+        f"**Independent Claude review**: ACCEPT at {HEAD} (CONDITIONAL on tests)",
+    ],
+)
+def test_uppercase_conditional_after_accept_never_counts_as_ordinary_accept(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(line)], [])["status"] == "MISSING_RECORD"
+    plain = f"**Independent Claude review**: ACCEPT@{HEAD}; no conditional logic issues."
+    assert rrc.evaluate(HEAD, DOCS, [_c(plain)], [])["status"] == "OK"

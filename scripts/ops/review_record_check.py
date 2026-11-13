@@ -65,7 +65,10 @@ required check without a source-bound mechanism; that is an Owner decision.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import bisect
+import datetime
 import itertools
 import json
 import os
@@ -618,6 +621,11 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
 def _verdict_reads(line: str) -> list[tuple[str, bool]]:
     """``verdict_clauses`` as before #3041, each with whether it is withdrawn or struck
     through: a withdrawal never changes how the other clauses on the line are read."""
+    # Conditional records are verified through the API path, never as ordinary ACCEPTs.
+    if re.search(r"\bCONDITIONAL\b.{0,40}\b(?:ACCEPT|APPROVE)", line, re.IGNORECASE) or re.search(
+        r"\bCONDITIONAL\b", line
+    ):
+        return []
     if _SKIP_LINE.match(line):
         return []
     out: list[tuple[str, bool]] = []
@@ -1905,6 +1913,108 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
     return events
 
 
+_CONDITIONAL_LINE = re.compile(r"\bCONDITIONAL\s+ACCEPT\b")
+_NODE_ID = re.compile(r"([A-Za-z0-9_./-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)(?:::(\w+))?")
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _conditional_record(
+    comments: list[Any],
+) -> tuple[int, dict[str, Any], str, list[str], list[str]] | None:
+    """Parse the newest visible conditional record; malformed newest records stay terminal."""
+    selected = None
+    for index, comment in enumerate(comments):
+        if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
+            continue
+        body = _HTML_COMMENT.sub(" ", comment["body"])
+        fenced = False
+        lines = []
+        for line in body.splitlines():
+            if line.strip().startswith(("```", "~~~")):
+                fenced = not fenced
+                lines.append("")
+            elif fenced or line.lstrip().startswith(">") or line.lstrip().startswith("|"):
+                lines.append("")
+            else:
+                lines.append(line)
+        for n, line in enumerate(lines):
+            if _CONDITIONAL_LINE.search(line):
+                selected = (index, comment, lines, n)
+    if selected is None:
+        return None
+    index, comment, lines, n = selected
+    line = lines[n]
+    family = _label_family(line)
+    shas = re.findall(r"(?:\bat\s+|@)([0-9a-fA-F]+)\b", line)
+    if (
+        family != "claude"
+        or len(shas) != 1
+        or len(_ANY_SHA.findall(line.lower())) != 1
+        or not _FULL_SHA.fullmatch(shas[0])
+    ):
+        raise CheckError("invalid conditional verdict")
+    following = n + 1
+    while following < len(lines) and not lines[following].strip():
+        following += 1
+    if following >= len(lines) or lines[following].strip().replace("*", "") != "Conditions:":
+        raise CheckError("missing conditional Conditions block")
+    tests: list[str] = []
+    paths: list[str] = []
+    block = following + 1
+    while block < len(lines) and lines[block].strip():
+        raw = lines[block]
+        match = re.fullmatch(r"- (tests|paths): (.+)", raw)
+        if not match or len(raw) > 200 or any(ord(c) < 32 for c in raw):
+            raise CheckError("invalid conditional condition")
+        value = match.group(2)
+        if match.group(1) == "tests":
+            if (
+                not _NODE_ID.fullmatch(value)
+                or ".." in value
+                or value.startswith("/")
+                or any(c.isspace() for c in value)
+            ):
+                raise CheckError("invalid conditional test id")
+            tests.append(value)
+        else:
+            if not _valid_conditional_glob(value):
+                raise CheckError("invalid conditional path glob")
+            paths.append(value)
+        block += 1
+    if not tests or not paths or len(tests) > 20 or len(paths) > 20:
+        raise CheckError("incomplete conditional conditions")
+    if block < len(lines) and lines[block].strip() and not lines[block].startswith("- "):
+        raise CheckError("conditional block must be separated by a blank line")
+    return index, comment, shas[0].lower(), tests, paths
+
+
+def _valid_conditional_glob(pattern: str) -> bool:
+    if not pattern or pattern.startswith("/") or "\\" in pattern:
+        return False
+    parts = pattern.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if any("**" in part and part != "**" for part in parts):
+        return False
+    if parts[0] == "**" or any(ch in parts[0] for ch in "*?"):
+        return False
+    return True
+
+
+def _glob_match(pattern: str, path: str) -> bool:
+    p, q = pattern.split("/"), path.split("/")
+
+    def match(i: int, j: int) -> bool:
+        if i == len(p):
+            return j == len(q)
+        if p[i] == "**":
+            return match(i + 1, j) or (j < len(q) and match(i, j + 1))
+        regex = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in p[i])
+        return j < len(q) and bool(re.fullmatch(regex, q[j])) and match(i + 1, j + 1)
+
+    return match(0, 0)
+
+
 def evaluate(
     head: str,
     files: list[Any],
@@ -1913,6 +2023,7 @@ def evaluate(
     delta_verified: tuple[str, ...] = (),
     allow_rebuttal: bool = True,
     repo: str = "",
+    conditional_verified: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Pure classification of the PR's review evidence at ``head``.
 
@@ -1929,7 +2040,7 @@ def evaluate(
     # The independent record is the Claude-family review (or a submitted approval); a
     # cross-model record alone satisfies only the cross-model requirement. A family's
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
-    independent_head = approved_reviews > 0 or "claude" in standing
+    independent_head = approved_reviews > 0 or "claude" in standing or bool(conditional_verified)
     cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
     withdrawn = {
         event["family"]
@@ -2007,6 +2118,11 @@ def evaluate(
         reason = (
             f"record at {', '.join(h[:MIN_PREFIX] for h in delta_heads)}, "
             f"merge-only delta verified (head {short})"
+        )
+    elif conditional_verified:
+        status, reason = (
+            "OK",
+            f"conditional accept at {conditional_verified[-1][:9]}, conditions verified (head {short})",
         )
     else:
         status, reason = "OK", f"review record present at head {short}"
@@ -2219,6 +2335,114 @@ def _verify_deltas(
         return ()
 
 
+def _conditional_withdrawn(text: str, head: str, reviewed: str) -> bool:
+    """True when ``text`` holds a Claude-family (or unknown-family) REJECT bound to the
+    head or the reviewed commit; a cross-model REJECT never withdraws the independent record."""
+    for sha in (head, reviewed):
+        for event in _classify(text, sha, rejects_only=True)["events"]:
+            if event.get("kind") == "reject" and event.get("family") != "cross_model":
+                return True
+    return False
+
+
+def _verify_conditional(
+    fetch: Callable[[str, str], Any],
+    base: str,
+    token: str,
+    head: str,
+    pull: Any,
+    files: list[Any],
+    comments: list[Any],
+    reviews: list[Any],
+) -> tuple[str, ...]:
+    """Verify only the newest conditional record against immutable API evidence."""
+    try:
+        parsed = _conditional_record(comments)
+        if parsed is None:
+            return ()
+        index, source, old, tests, patterns = parsed
+        if old == head:
+            return ()
+        comparison = _compare(fetch, base, token, old, head)
+        if comparison.get("status") != "ahead" or comparison.get("behind_by") != 0:
+            return ()
+        changed = _compare_files(fetch, base, token, old, head)
+        pr_paths = _names(files)
+        if any(node.split("::", 1)[0] not in changed for node in tests):
+            return ()
+        if len(changed) >= MAX_DELTA_FILES or any(
+            not any(_glob_match(p, path) for p in patterns) for path in changed
+        ):
+            return ()
+        # For each test file, require presence at both endpoints and parse H without execution.
+        for node in tests:
+            match = _NODE_ID.fullmatch(node)
+            if match is None:
+                return ()
+            path, function, cls = match.groups()
+            if path not in pr_paths:
+                return ()
+            for sha in (head,):
+                response = fetch(f"{base}/contents/{path}?ref={sha}", token)
+                if not isinstance(response, dict) or response.get("type") != "file":
+                    return ()
+                content = base64.b64decode(response.get("content", ""), validate=True)
+                if len(content) > 1_000_000:
+                    return ()
+                text = content.decode("utf-8")
+                if sha == head:
+                    tree = ast.parse(text)
+                    found = any(
+                        isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and item.name == function
+                        for item in tree.body
+                    )
+                    if cls:
+                        found = any(
+                            isinstance(item, ast.ClassDef)
+                            and item.name == cls
+                            and any(
+                                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                and child.name == function
+                                for child in item.body
+                            )
+                            for item in tree.body
+                        )
+                    if not found:
+                        return ()
+        # Text after the verdict in its own comment and later comments can withdraw it.
+        verdict_line = next(
+            i
+            for i, line in enumerate(_HTML_COMMENT.sub(" ", source["body"]).splitlines())
+            if _CONDITIONAL_LINE.search(line)
+        )
+        suffix = "\n".join(_HTML_COMMENT.sub(" ", source["body"]).splitlines()[verdict_line + 1 :])
+        if _conditional_withdrawn(suffix, head, old):
+            return ()
+        for later in comments[index + 1 :]:
+            body = later.get("body") if isinstance(later, dict) else None
+            if isinstance(body, str):
+                if _conditional_withdrawn(body, head, old):
+                    return ()
+        created = source.get("created_at")
+        for review in reviews:
+            if not isinstance(review, dict) or review.get("state") != "CHANGES_REQUESTED":
+                continue
+            submitted = review.get("submitted_at")
+            if not isinstance(created, str) or not isinstance(submitted, str):
+                return ()
+            try:
+                created_at = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+                submitted_at = datetime.datetime.fromisoformat(submitted.replace("Z", "+00:00"))
+            except ValueError:
+                return ()
+            if submitted_at > created_at:
+                return ()
+        return (old,)
+    except Exception:  # noqa: BLE001 - every malformed shape fails closed
+        return ()
+
+
 def _description(report: dict[str, Any]) -> str:
     text = _log_safe(f"{report['status']}: {report['reason']}").strip()
     return text[:MAX_DESCRIPTION]
@@ -2257,6 +2481,20 @@ def run(
                 report = evaluate(
                     head, files, comments, reviews, deltas, allow_rebuttal=allow, repo=repo
                 )
+            if report["status"] != "OK":
+                verified = _verify_conditional(
+                    fetch, base, token, head, pull, files, comments, reviews
+                )
+                if verified:
+                    report = evaluate(
+                        head,
+                        files,
+                        comments,
+                        reviews,
+                        allow_rebuttal=allow,
+                        repo=repo,
+                        conditional_verified=verified,
+                    )
     except Exception as exc:  # noqa: BLE001 - any read failure must fail closed
         report = {
             "schema": "nexus.review_record_check.v1",
