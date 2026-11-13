@@ -44,6 +44,10 @@ quotes the words never counts):
   a finding still open at round three goes back to design, not past a rebuttal).
 - A submitted ``APPROVED`` review whose ``commit_id`` is the head also counts as an
   independent record, unless the same reviewer later requested changes.
+- From round 2 onward, a Claude verdict on an older head enables the Gemini + Codex
+  alternative route; each family's ACCEPT must still stand at the current head.
+- Round 2+ is inferred only from verdict comments and their SHA bindings; no extra API
+  request is made.
 
 Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
@@ -73,6 +77,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any, Callable
 
 API_ROOT = "https://api.github.com"
@@ -90,6 +95,37 @@ MAX_VERDICTS_PER_LINE = 64
 MAX_PR_FILES = 3000
 TRUNCATED_FILES = f"(file list of {MAX_PR_FILES}+ entries may be truncated)"
 
+
+@dataclass(frozen=True)
+class ReviewRoute:
+    risk: str
+    round: str
+    alternatives: tuple[tuple[str, ...], ...]
+
+
+REVIEW_ROUTES = (
+    ReviewRoute("low", "1", (("claude",),)),
+    ReviewRoute("high", "1", (("claude", "cross_model"),)),
+    ReviewRoute("low", "2+", (("claude",), ("gemini", "codex"))),
+    ReviewRoute("high", "2+", (("claude", "cross_model"), ("gemini", "codex"))),
+)
+
+
+def render_routes_markdown() -> str:
+    rows = [
+        "# Review routing",
+        "",
+        "由 `scripts/ops/review_record_check.py` 的 `REVIEW_ROUTES` 產生，勿手改。",
+        "",
+        "| Risk | Round | Required reviewer records |",
+        "| --- | --- | --- |",
+    ]
+    for route in REVIEW_ROUTES:
+        choices = " or ".join(" + ".join(group) for group in route.alternatives)
+        rows.append(f"| {route.risk} | {route.round} | {choices} |")
+    return "\n".join(rows) + "\n"
+
+
 # Paths whose change makes the PR high-risk (nexus-codex-review skill list, 2026-10-15).
 HIGH_RISK_PREFIXES = (
     ".github/workflows/",
@@ -106,15 +142,17 @@ HIGH_RISK_PREFIXES = (
     "nexus/orchestrator/target_integration_lifecycle.py",
     "nexus/governance/",
 )
-HIGH_RISK_FILES = frozenset({
-    "pyproject.toml",
-    "uv.lock",
-    "pytest.ini",
-    "pyrightconfig.json",
-    "ruff.toml",
-    "AGENTS.md",
-    "MUSE_PROTO.md",
-})
+HIGH_RISK_FILES = frozenset(
+    {
+        "pyproject.toml",
+        "uv.lock",
+        "pytest.ini",
+        "pyrightconfig.json",
+        "ruff.toml",
+        "AGENTS.md",
+        "MUSE_PROTO.md",
+    }
+)
 # Repo-specific high-risk paths on top of the lists above, keyed like
 # NO_REBUTTAL_AT_CAP_REPOS (#2994). cairnwork: the HIGH tier of its AGENTS.md "Review
 # speed and risk tiers" that a path can express (experimental/, docs/, tests/ are LOW).
@@ -203,66 +241,70 @@ _ANY_VERDICT_TOKEN = re.compile(rf"\b(?:{_TOKEN}|{_REJECT_TOKEN})\b")
 # What may stand between the previous verdict on the line (or its start) and a REJECT
 # for it to be a reviewer's verdict: reviewer labels, round markers and shas only. A
 # finding that quotes a gate's verdict value ("a tampered receipt: REJECT") is not one.
-_REJECT_LABEL_WORDS = frozenset({
-    "independent",
-    "cross-model",
-    "adversarial",
-    "review",
-    "reviewer",
-    "re-review",
-    "verdict",
-    "final",
-    "latest",
-    "round",
-    "on",
-    "at",
-    "head",
-    "sha",
-    "commit",
-    "delta",
-    "full",
-    "diff",
-    "addendum",
-    "pr",
-    "the",
-    "result",
-    "status",
-    "outcome",
-})
+_REJECT_LABEL_WORDS = frozenset(
+    {
+        "independent",
+        "cross-model",
+        "adversarial",
+        "review",
+        "reviewer",
+        "re-review",
+        "verdict",
+        "final",
+        "latest",
+        "round",
+        "on",
+        "at",
+        "head",
+        "sha",
+        "commit",
+        "delta",
+        "full",
+        "diff",
+        "addendum",
+        "pr",
+        "the",
+        "result",
+        "status",
+        "outcome",
+    }
+)
 # More label words before a REJECT: a status the label carries ("**Codex r2 fix in
 # progress**: REJECT", #3004) and a model's tier ("Codex gpt-5.5 xhigh", "Gemini 3.1 Pro",
 # "Gemini 3.8 Flash High via agy"; versions are in _REJECT_LABEL_WORD, r5 R5).
-_REJECT_LABEL_EXTRA = frozenset({
-    "fix",
-    "fixes",
-    "fixing",
-    "in",
-    "progress",
-    "in-progress",
-    "pending",
-    "queued",
-    "running",
-    "now",
-    "pro",
-    "flash",
-    "high",
-    "xhigh",
-    "low",
-    "medium",
-    "max",
-    "mini",
-    "nano",
-    "ultra",
-    "lite",
-    "fast",
-    "thinking",
-    "preview",
-    "via",
-    "agy",
-    "cli",
-    "exec",
-    "substitute",
-})
+_REJECT_LABEL_EXTRA = frozenset(
+    {
+        "fix",
+        "fixes",
+        "fixing",
+        "in",
+        "progress",
+        "in-progress",
+        "pending",
+        "queued",
+        "running",
+        "now",
+        "pro",
+        "flash",
+        "high",
+        "xhigh",
+        "low",
+        "medium",
+        "max",
+        "mini",
+        "nano",
+        "ultra",
+        "lite",
+        "fast",
+        "thinking",
+        "preview",
+        "via",
+        "agy",
+        "cli",
+        "exec",
+        "substitute",
+    }
+)
 _REJECT_LABEL_WORD = re.compile(
     r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}[a-z]?|[0-9a-f]{7,40}"
     r"|[0-9a-f]{7,40}\.\.\.?[0-9a-f]{7,40}"
@@ -1606,27 +1648,31 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     and not _binding(clause, span, line, head, comment_head)
                     and _binding(clause, span, line, head, reject_head)
                 ):
-                    answers.append((
-                        (index, start + (span[0] if span else 0)),
-                        family,
-                        _reviewer_word(before) or header_reviewer,
-                        main_round,
-                    ))
+                    answers.append(
+                        (
+                            (index, start + (span[0] if span else 0)),
+                            family,
+                            _reviewer_word(before) or header_reviewer,
+                            main_round,
+                        )
+                    )
                 if family and not rejects_only and _binding(clause, span, line, head, comment_head):
-                    line_events.append((
-                        start + (span[0] if span else 0),
-                        {
-                            "family": family,
-                            "reviewer": _reviewer_word(before) or header_reviewer,
-                            # A withdrawn ACCEPT still numbers its round, as before #3041.
-                            "kind": "round" if withdrawn else "accept",
-                            "unattributed": unattributed,
-                            "round": main_round,
-                            "compare": accept_round,
-                            "comment": 0,
-                            "line": clause.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            start + (span[0] if span else 0),
+                            {
+                                "family": family,
+                                "reviewer": _reviewer_word(before) or header_reviewer,
+                                # A withdrawn ACCEPT still numbers its round, as before #3041.
+                                "kind": "round" if withdrawn else "accept",
+                                "unattributed": unattributed,
+                                "round": main_round,
+                                "compare": accept_round,
+                                "comment": 0,
+                                "line": clause.strip(),
+                            },
+                        )
+                    )
                 if (
                     family
                     and withdrawn
@@ -1638,21 +1684,23 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     # A withdrawn or struck ACCEPT at the head also takes back the
                     # reviewer's earlier ACCEPTs, as a REJECT of its round would; it binds
                     # like a REJECT (a 7-character head prefix, fail closed).
-                    line_events.append((
-                        start + (span[0] if span else 0),
-                        {
-                            "family": family,
-                            "reviewer": _reviewer_word(before) or header_reviewer,
-                            "kind": "reject",
-                            "extra": True,
-                            "round": main_round,
-                            "compare": _round_before(clause[: span[0]], lowest=False)
-                            if span
-                            else None,
-                            "comment": 0,
-                            "line": clause.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            start + (span[0] if span else 0),
+                            {
+                                "family": family,
+                                "reviewer": _reviewer_word(before) or header_reviewer,
+                                "kind": "reject",
+                                "extra": True,
+                                "round": main_round,
+                                "compare": _round_before(clause[: span[0]], lowest=False)
+                                if span
+                                else None,
+                                "comment": 0,
+                                "line": clause.strip(),
+                            },
+                        )
+                    )
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
         searched = 0
@@ -1691,19 +1739,21 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             # aside) withdraw too, as an unknown reviewer; they never number rounds and are
             # not read when choosing merge-only delta heads ("extra").
             for family in sorted(_label_families(plain_reject, start + span[0]) - set(families)):
-                line_events.append((
-                    start + span[0],
-                    {
-                        "family": family,
-                        "reviewer": None,
-                        "kind": "reject",
-                        "extra": True,
-                        "round": int(rounds[-1]) if rounds else None,
-                        "compare": _round_before(clause[: span[0]], lowest=False),
-                        "comment": 0,
-                        "line": clause.strip(),
-                    },
-                ))
+                line_events.append(
+                    (
+                        start + span[0],
+                        {
+                            "family": family,
+                            "reviewer": None,
+                            "kind": "reject",
+                            "extra": True,
+                            "round": int(rounds[-1]) if rounds else None,
+                            "compare": _round_before(clause[: span[0]], lowest=False),
+                            "comment": 0,
+                            "line": clause.strip(),
+                        },
+                    )
+                )
             for family in families:
                 event = {
                     "family": family,
@@ -1730,17 +1780,19 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 if reviewer is None:
                     continue
                 for family in families:
-                    line_events.append((
-                        marker.start(),
-                        {
-                            "family": family,
-                            "reviewer": reviewer,
-                            "kind": "round",
-                            "round": 1,
-                            "comment": 0,
-                            "line": line.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            marker.start(),
+                            {
+                                "family": family,
+                                "reviewer": reviewer,
+                                "kind": "round",
+                                "round": 1,
+                                "comment": 0,
+                                "line": line.strip(),
+                            },
+                        )
+                    )
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not reads:
@@ -1888,6 +1940,40 @@ def _contributes(
     )
 
 
+def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
+    """Whether a comment has a Claude ACCEPT/REJECT verdict bound to another SHA."""
+    for comment in comments:
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str):
+            continue
+        for sha in dict.fromkeys(match.group(1) for match in _HEX_TOKEN.finditer(body)):
+            if sha.lower() == head.lower():
+                continue
+            parsed = _classify(body, sha)
+            if any(
+                event["family"] == "claude" and event["kind"] in {"accept", "reject"}
+                for event in parsed["events"]
+            ):
+                return True
+    return False
+
+
+def _standing_model_families(events: list[dict[str, Any]]) -> set[str]:
+    """Standing Gemini/Codex accepts, folded with the existing withdrawal semantics."""
+    specific = []
+    for event in events:
+        reviewer = event.get("reviewer")
+        word = reviewer.lower() if isinstance(reviewer, str) else ""
+        if word.startswith("gemini"):
+            family = "gemini"
+        elif word.startswith(("codex", "gpt")):
+            family = "codex"
+        else:
+            continue
+        specific.append(dict(event, family=family))
+    return standing_families(specific)
+
+
 def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> list[dict[str, Any]]:
     """Events bound to one head in comment order, for carrying a verified delta."""
     events: list[dict[str, Any]] = []
@@ -1920,9 +2006,12 @@ def evaluate(
     verified as merge-only (#2308); a record at one of those counts as a record at the head.
     The caller is the only place that may verify a delta; this function trusts nothing else.
     ``allow_rebuttal`` False (``rebuttal_counts(repo)``) drops rebuttals at the cap.
-    ``repo`` adds that repo's own high-risk paths.
+    ``repo`` adds that repo's own high-risk paths. From round 2 onward, the route
+    permits Gemini and Codex ACCEPTs at the current head in place of Claude.
+    Round 2+ is identified by an earlier Claude verdict bound to a different head.
     """
     risky = high_risk_paths(files, repo)
+    route = "r2+" if _has_older_claude_verdict(head, comments) else "r1"
     records, stale, unbound, approved_reviews, standing = _evidence_at(
         head, comments, reviews, allow_rebuttal
     )
@@ -1931,6 +2020,9 @@ def evaluate(
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
     independent_head = approved_reviews > 0 or "claude" in standing
     cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
+    model_families = _standing_model_families(_fold_events_at(head, comments, allow_rebuttal))
+    gemini_codex = {"gemini", "codex"} <= model_families
+    gemini_route = route == "r2+" and gemini_codex
     withdrawn = {
         event["family"]
         for record in records
@@ -1975,7 +2067,7 @@ def evaluate(
         )
         cross_model = "cross_model" in folded
     short = head[:12]
-    if not independent:
+    if not independent and not gemini_route:
         status = "MISSING_RECORD"
         if "claude" in withdrawn:
             reason = f"a later Claude/Opus REJECT at head {short} withdraws its ACCEPT"
@@ -1989,7 +2081,7 @@ def evaluate(
             reason = (
                 f"no Claude/Opus review record names head {short} with an ACCEPT/APPROVE verdict"
             )
-    elif risky and not cross_model:
+    elif risky and not cross_model and not gemini_route:
         status = "MISSING_CROSS_MODEL"
         if "cross_model" in withdrawn:
             reason = f"a later Codex/Gemini REJECT at head {short} withdraws its ACCEPT"
@@ -2008,8 +2100,18 @@ def evaluate(
             f"record at {', '.join(h[:MIN_PREFIX] for h in delta_heads)}, "
             f"merge-only delta verified (head {short})"
         )
+    elif gemini_route and (not independent or (risky and not cross_model)):
+        status, reason = "OK", f"round 2+ route: Gemini and Codex ACCEPT at head {short}"
     else:
         status, reason = "OK", f"review record present at head {short}"
+    if status == "OK" and gemini_route and (not independent or (risky and not cross_model)):
+        satisfied_by = "gemini+codex"
+    elif independent and risky and cross_model:
+        satisfied_by = "claude+cross_model"
+    elif independent:
+        satisfied_by = "claude"
+    else:
+        satisfied_by = None
     return {
         "schema": "nexus.review_record_check.v1",
         "head": head,
@@ -2020,6 +2122,8 @@ def evaluate(
         "independent": independent,
         "cross_model": cross_model,
         "delta_verified_heads": delta_heads,
+        "route": route,
+        "satisfied_by": satisfied_by,
         "status": status,
         "reason": reason,
     }
