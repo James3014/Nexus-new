@@ -621,11 +621,13 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
 def _verdict_reads(line: str) -> list[tuple[str, bool]]:
     """``verdict_clauses`` as before #3041, each with whether it is withdrawn or struck
     through: a withdrawal never changes how the other clauses on the line are read."""
-    # Conditional records are verified through the API path, never as ordinary ACCEPTs.
-    if re.search(r"\bCONDITIONAL\b.{0,40}\b(?:ACCEPT|APPROVE)", line, re.IGNORECASE) or re.search(
-        r"\bCONDITIONAL\b", line
-    ):
-        return []
+    # Conditional records are verified through the API path, never as ordinary ACCEPTs; the
+    # line is still read as before, but only its withdrawn clauses survive (a withdrawal on a
+    # line that mentions CONDITIONAL must keep withdrawing).
+    conditional = bool(
+        re.search(r"\bCONDITIONAL\b.{0,40}\b(?:ACCEPT|APPROVE)", line, re.IGNORECASE)
+        or re.search(r"\bCONDITIONAL\b", line)
+    )
     if _SKIP_LINE.match(line):
         return []
     out: list[tuple[str, bool]] = []
@@ -700,7 +702,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
             if _hex_tokens(rest_of_line) and _POST_LINE_DENY.search(rest_of_line):
                 continue
         out.append((clause, withdrawn))
-    return out
+    return [read for read in out if read[1]] if conditional else out
 
 
 def is_verdict_line(line: str) -> bool:
@@ -2004,7 +2006,15 @@ def _valid_conditional_glob(pattern: str) -> bool:
 def _glob_match(pattern: str, path: str) -> bool:
     p, q = pattern.split("/"), path.split("/")
 
+    seen: dict[tuple[int, int], bool] = {}
+
     def match(i: int, j: int) -> bool:
+        key = (i, j)
+        if key not in seen:
+            seen[key] = _match(i, j)
+        return seen[key]
+
+    def _match(i: int, j: int) -> bool:
         if i == len(p):
             return j == len(q)
         if p[i] == "**":
@@ -2335,14 +2345,53 @@ def _verify_deltas(
         return ()
 
 
-def _conditional_withdrawn(text: str, head: str, reviewed: str) -> bool:
-    """True when ``text`` holds a Claude-family (or unknown-family) REJECT bound to the
-    head or the reviewed commit; a cross-model REJECT never withdraws the independent record."""
-    for sha in (head, reviewed):
+_SHORT_HEX = re.compile(r"(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])")
+
+
+def _conditional_withdrawn(text: str, shas: list[str], anywhere: bool = False) -> bool:
+    """True when ``text`` holds a Claude-family (or unknown-family) REJECT bound to one of
+    ``shas``; a cross-model REJECT never withdraws the independent record. ``anywhere`` also
+    tries every commit the text names (a 7-40 character prefix, padded), so a REJECT at an
+    intermediate commit withdraws too; more than 50 named commits fails closed."""
+    candidates = list(shas)
+    if anywhere:
+        named = list(dict.fromkeys(_SHORT_HEX.findall(text.lower())))
+        if len(named) > 50:
+            return True
+        candidates += [token.ljust(40, "0") for token in named]
+    for sha in dict.fromkeys(candidates):
         for event in _classify(text, sha, rejects_only=True)["events"]:
             if event.get("kind") == "reject" and event.get("family") != "cross_model":
                 return True
     return False
+
+
+def _contents_text(
+    fetch: Callable[[str, str], Any], base: str, token: str, path: str, ref: str
+) -> str:
+    """One file's text at ``ref`` through the contents API (at most 1 MB); raises on any doubt."""
+    response = fetch(f"{base}/contents/{path}?ref={ref}", token)
+    if not isinstance(response, dict) or response.get("type") != "file":
+        raise CheckError("contents entry is not a file")
+    content = base64.b64decode("".join(str(response.get("content", "")).split()), validate=True)
+    if len(content) > 1_000_000:
+        raise CheckError("contents entry too large")
+    return content.decode("utf-8")
+
+
+def _test_function(text: str, function: str, cls: str | None) -> Any:
+    """The def node of ``function`` at module level (or directly in class ``cls``); parse only."""
+    tree = ast.parse(text)
+    body = tree.body
+    if cls:
+        owners = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls]
+        if not owners:
+            return None
+        body = owners[0].body
+    for item in body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function:
+            return item
+    return None
 
 
 def _verify_conditional(
@@ -2374,7 +2423,13 @@ def _verify_conditional(
             not any(_glob_match(p, path) for p in patterns) for path in changed
         ):
             return ()
-        # For each test file, require presence at both endpoints and parse H without execution.
+        # Each named test must be new or changed by S..H (a pre-existing, untouched function
+        # cannot stand in for a requested test) and be a real function at H (ast, no execution).
+        added = {
+            entry["filename"]
+            for entry in comparison.get("files", [])
+            if isinstance(entry, dict) and entry.get("status") == "added"
+        }
         for node in tests:
             match = _NODE_ID.fullmatch(node)
             if match is None:
@@ -2382,60 +2437,46 @@ def _verify_conditional(
             path, function, cls = match.groups()
             if path not in pr_paths:
                 return ()
-            for sha in (head,):
-                response = fetch(f"{base}/contents/{path}?ref={sha}", token)
-                if not isinstance(response, dict) or response.get("type") != "file":
+            at_head = _test_function(_contents_text(fetch, base, token, path, head), function, cls)
+            if at_head is None:
+                return ()
+            if path not in added:
+                at_old = _test_function(
+                    _contents_text(fetch, base, token, path, old), function, cls
+                )
+                if at_old is not None and ast.dump(at_old) == ast.dump(at_head):
                     return ()
-                content = base64.b64decode(response.get("content", ""), validate=True)
-                if len(content) > 1_000_000:
-                    return ()
-                text = content.decode("utf-8")
-                if sha == head:
-                    tree = ast.parse(text)
-                    found = any(
-                        isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and item.name == function
-                        for item in tree.body
-                    )
-                    if cls:
-                        found = any(
-                            isinstance(item, ast.ClassDef)
-                            and item.name == cls
-                            and any(
-                                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                                and child.name == function
-                                for child in item.body
-                            )
-                            for item in tree.body
-                        )
-                    if not found:
-                        return ()
         # Text after the verdict in its own comment and later comments can withdraw it.
         verdict_line = next(
             i
             for i, line in enumerate(_HTML_COMMENT.sub(" ", source["body"]).splitlines())
             if _CONDITIONAL_LINE.search(line)
         )
-        suffix = "\n".join(_HTML_COMMENT.sub(" ", source["body"]).splitlines()[verdict_line + 1 :])
-        if _conditional_withdrawn(suffix, head, old):
+        source_lines = _HTML_COMMENT.sub(" ", source["body"]).splitlines()
+        suffix = "\n".join(source_lines[verdict_line + 1 :])
+        prefix = "\n".join(source_lines[:verdict_line])
+        # After the record: a Claude REJECT of any commit withdraws it. At any time: a Claude
+        # REJECT at the head does, whatever the posting order (as for ordinary records).
+        if _conditional_withdrawn(suffix, [head, old], anywhere=True):
             return ()
-        for later in comments[index + 1 :]:
-            body = later.get("body") if isinstance(later, dict) else None
+        if _conditional_withdrawn(prefix, [head]):
+            return ()
+        for number, other in enumerate(comments):
+            body = other.get("body") if isinstance(other, dict) and number != index else None
             if isinstance(body, str):
-                if _conditional_withdrawn(body, head, old):
+                if _conditional_withdrawn(body, [head, old], anywhere=number > index):
                     return ()
         created = source.get("created_at")
+        if not isinstance(created, str):
+            return ()
+        created_at = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
         for review in reviews:
             if not isinstance(review, dict) or review.get("state") != "CHANGES_REQUESTED":
                 continue
             submitted = review.get("submitted_at")
-            if not isinstance(created, str) or not isinstance(submitted, str):
+            if not isinstance(submitted, str):
                 return ()
-            try:
-                created_at = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
-                submitted_at = datetime.datetime.fromisoformat(submitted.replace("Z", "+00:00"))
-            except ValueError:
-                return ()
+            submitted_at = datetime.datetime.fromisoformat(submitted.replace("Z", "+00:00"))
             if submitted_at > created_at:
                 return ()
         return (old,)

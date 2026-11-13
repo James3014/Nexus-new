@@ -100,7 +100,7 @@ def _conditional_fetch(url, token):
             "behind_by": 0,
             "files": [
                 {"filename": "scripts/ops/review_record_check.py"},
-                {"filename": "tests/ops/test_review_record_check.py"},
+                {"filename": "tests/ops/test_review_record_check.py", "status": "added"},
             ],
         }
     if "/contents/" in url:
@@ -209,6 +209,8 @@ def _conditional_case(
     content_error=False,
     content_type="file",
     pr_files=None,
+    wrap=False,
+    before=(),
 ):
     import base64
 
@@ -225,12 +227,20 @@ def _conditional_case(
             return {
                 "status": status,
                 "behind_by": behind,
-                "files": [{"filename": x} for x in changed],
+                "files": [
+                    {"filename": x, "status": "added"}
+                    if x.startswith("tests/")
+                    else {"filename": x}
+                    for x in changed
+                ],
             }
         if "/contents/" in url:
             if content_error:
                 raise RuntimeError("contents")
-            return {"type": content_type, "content": base64.b64encode(content).decode()}
+            encoded = base64.b64encode(content).decode()
+            if wrap:  # the GitHub contents API wraps base64 every 60 characters
+                encoded = "\n".join(encoded[i : i + 60] for i in range(0, len(encoded), 60)) + "\n"
+            return {"type": content_type, "content": encoded}
         raise AssertionError(url)
 
     first = _c(body)
@@ -242,7 +252,7 @@ def _conditional_case(
         HEAD,
         {"base": {"ref": "main"}},
         pr_files or [{"filename": x} for x in changed],
-        [first, *later],
+        [*before, first, *later],
         reviews,
     )
 
@@ -4638,7 +4648,8 @@ def test_conditional_withdrawal_for_reviewed_sha_is_checked():
     assert _conditional_case(later=[_c(f"Claude: REJECT at {HEAD}")]) == ()
     assert _conditional_case(later=[_c(f"Claude: REJECT at {OLD}")]) == ()
     unrelated = "2" * 40
-    assert _conditional_case(later=[_c(f"Claude: REJECT at {unrelated}")]) == (OLD,)
+    # R3 (revised): after the record a Claude REJECT of ANY commit withdraws it.
+    assert _conditional_case(later=[_c(f"Claude: REJECT at {unrelated}")]) == ()
 
 
 def test_run_reports_the_sha_from_the_verified_conditional_record(tmp_path):
@@ -4659,7 +4670,13 @@ def test_run_reports_the_sha_from_the_verified_conditional_record(tmp_path):
             return {
                 "status": "ahead",
                 "behind_by": 0,
-                "files": [{"filename": f["filename"]} for f in files],
+                "files": [
+                    {
+                        "filename": f["filename"],
+                        "status": "added" if f["filename"].startswith("tests/") else "modified",
+                    }
+                    for f in files
+                ],
             }
         if "/contents/" in url:
             return {
@@ -4703,3 +4720,121 @@ def test_uppercase_conditional_after_accept_never_counts_as_ordinary_accept(line
     assert rrc.evaluate(HEAD, DOCS, [_c(line)], [])["status"] == "MISSING_RECORD"
     plain = f"**Independent Claude review**: ACCEPT@{HEAD}; no conditional logic issues."
     assert rrc.evaluate(HEAD, DOCS, [_c(plain)], [])["status"] == "OK"
+
+
+def _conditional_case_by_ref(old_content, head_content, *, status="modified", created=True):
+    import base64
+
+    def fetch(url, token):
+        if "/compare/" in url:
+            return {
+                "status": "ahead",
+                "behind_by": 0,
+                "files": [
+                    {"filename": "scripts/ops/review_record_check.py"},
+                    {"filename": "tests/ops/test_review_record_check.py", "status": status},
+                ],
+            }
+        if "/contents/" in url:
+            text = head_content if url.endswith(f"ref={HEAD}") else old_content
+            return {"type": "file", "content": base64.b64encode(text).decode()}
+        raise AssertionError(url)
+
+    comment = _c(_conditional_body())
+    if created:
+        comment["created_at"] = "2026-01-01T00:00:00Z"
+    files = [
+        {"filename": "scripts/ops/review_record_check.py"},
+        {"filename": "tests/ops/test_review_record_check.py"},
+    ]
+    return rrc._verify_conditional(
+        fetch,
+        "https://api.github.com/repos/a/b",
+        TOKEN,
+        HEAD,
+        {"base": {"ref": "main"}},
+        files,
+        [comment],
+        [],
+    )
+
+
+def test_conditional_test_function_must_be_new_or_changed():
+    untouched = b"def test_probe():\n    pass\n"
+    changed_body = b"def test_probe():\n    assert 1 == 1\n"
+    # Positive controls: new in the file (absent at S), changed body, and an added file.
+    assert _conditional_case_by_ref(b"x = 1\n", untouched) == (OLD,)
+    assert _conditional_case_by_ref(untouched, changed_body) == (OLD,)
+    assert _conditional_case_by_ref(untouched, untouched, status="added") == (OLD,)
+    # A pre-existing function whose file changed elsewhere cannot stand in for the test.
+    assert _conditional_case_by_ref(untouched, untouched + b"y = 2\n") == ()
+
+
+def test_conditional_glob_with_many_double_stars_is_not_exponential():
+    import time
+
+    path = "scripts/" + "/".join(["d"] * 40) + "/x.py"
+    pattern = "scripts/" + "/".join(["**"] * 14) + "/NEVER"
+    started = time.monotonic()
+    assert rrc._glob_match(pattern, path) is False
+    assert rrc._glob_match("scripts/**/x.py", path) is True
+    assert time.monotonic() - started < 2
+
+
+def test_conditional_missing_created_at_fails_even_without_reviews():
+    untouched = b"def test_probe():\n    pass\n"
+    assert _conditional_case_by_ref(b"x = 1\n", untouched) == (OLD,)
+    assert _conditional_case_by_ref(b"x = 1\n", untouched, created=False) == ()
+
+
+def test_conditional_accepts_github_wrapped_base64():
+    long_body = b"def test_probe():\n    pass\n" + b"x = 1\n" * 40
+    assert _conditional_case(content=long_body) == (OLD,)
+    assert _conditional_case(content=long_body, wrap=True) == (OLD,)
+
+
+MID = "3" * 40
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"Claude review: REJECT at {MID}",  # (a) intermediate commit, full sha
+        f"Claude review: REJECT at {MID[:7]}",  # (b) 7-character prefix
+        f"Claude review: REJECT at {MID[:9]}",
+        "Claude review: REJECT",  # no sha at all
+    ],
+)
+def test_conditional_later_claude_reject_of_any_commit_withdraws(text):
+    assert _conditional_case() == (OLD,)
+    assert _conditional_case(later=[_c(text)]) == ()
+
+
+def test_conditional_claude_reject_at_head_before_the_record_withdraws():
+    assert _conditional_case(before=[_c("Claude review: REJECT at " + HEAD)]) == ()
+    assert _conditional_case(before=[_c("Claude review: REJECT at " + MID)]) == (OLD,)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"~~ACCEPT at {HEAD}~~ CONDITIONAL items still open",
+        f"ACCEPT at {HEAD} withdrawn, CONDITIONAL follow-up failed",
+        f"Claude: REJECT at {HEAD}: CONDITIONAL logic is wrong",
+    ],
+)
+def test_conditional_word_on_a_withdrawing_line_still_withdraws(line):
+    plain = f"**Independent Claude review**: ACCEPT@{HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(plain)], [])["status"] == "OK"
+    assert rrc.evaluate(HEAD, DOCS, [_c(plain + line + "\n")], [])["status"] == "MISSING_RECORD"
+
+
+def test_conditional_cross_model_reject_and_plain_accept_still_work():
+    assert _conditional_case(later=[_c("Gemini: REJECT at " + MID)]) == (OLD,)  # (g)
+    plain = f"**Independent Claude review**: ACCEPT@{HEAD}\n"  # (i)
+    assert rrc.evaluate(HEAD, DOCS, [_c(plain)], [])["status"] == "OK"
+
+
+def test_conditional_claude_reject_at_head_earlier_in_the_same_comment_withdraws():
+    assert _conditional_case(f"Claude: REJECT at {MID}\n" + _conditional_body()) == (OLD,)
+    assert _conditional_case(f"Claude: REJECT at {HEAD}\n" + _conditional_body()) == ()
