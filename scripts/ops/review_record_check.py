@@ -69,7 +69,10 @@ required check without a source-bound mechanism; that is an Owner decision.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import bisect
+import datetime
 import itertools
 import json
 import os
@@ -654,6 +657,13 @@ def verdict_clauses(line: str, keep_withdrawn: bool = False) -> list[str]:
 def _verdict_reads(line: str) -> list[tuple[str, bool]]:
     """``verdict_clauses`` as before #3041, each with whether it is withdrawn or struck
     through: a withdrawal never changes how the other clauses on the line are read."""
+    # Conditional records are verified through the API path, never as ordinary ACCEPTs; the
+    # line is still read as before, but only its withdrawn clauses survive (a withdrawal on a
+    # line that mentions CONDITIONAL must keep withdrawing).
+    conditional = bool(
+        re.search(r"\bCONDITIONAL\b.{0,40}\b(?:ACCEPT|APPROVE)", line, re.IGNORECASE)
+        or re.search(r"\bCONDITIONAL\b", line)
+    )
     if _SKIP_LINE.match(line):
         return []
     out: list[tuple[str, bool]] = []
@@ -728,7 +738,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
             if _hex_tokens(rest_of_line) and _POST_LINE_DENY.search(rest_of_line):
                 continue
         out.append((clause, withdrawn))
-    return out
+    return [read for read in out if read[1]] if conditional else out
 
 
 def is_verdict_line(line: str) -> bool:
@@ -1980,6 +1990,118 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
     return events
 
 
+_CONDITIONAL_LINE = re.compile(r"\bCONDITIONAL\s+ACCEPT\b")
+_NODE_ID = re.compile(
+    r"([A-Za-z0-9_./-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)(?:::([A-Za-z_][A-Za-z0-9_]*))?"
+)
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _conditional_record(
+    comments: list[Any],
+) -> tuple[int, dict[str, Any], str, list[str], list[str], int] | None:
+    """Parse the newest visible conditional record; malformed newest records stay terminal."""
+    selected = None
+    for index, comment in enumerate(comments):
+        if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
+            continue
+        body = _HTML_COMMENT.sub(" ", comment["body"])
+        fenced = False
+        lines = []
+        for line in body.splitlines():
+            if line.strip().startswith(("```", "~~~")):
+                fenced = not fenced
+                lines.append("")
+            elif fenced or line.lstrip().startswith(">") or line.lstrip().startswith("|"):
+                lines.append("")
+            else:
+                lines.append(line)
+        for n, line in enumerate(lines):
+            if _CONDITIONAL_LINE.search(line):
+                selected = (index, comment, lines, n)
+    if selected is None:
+        return None
+    index, comment, lines, n = selected
+    line = lines[n]
+    family = _label_family(line)
+    shas = re.findall(r"(?:\bat\s+|@)([0-9a-fA-F]+)\b", line)
+    if (
+        family != "claude"
+        or len(shas) != 1
+        or len(_ANY_SHA.findall(line.lower())) != 1
+        or not _FULL_SHA.fullmatch(shas[0])
+    ):
+        raise CheckError("invalid conditional verdict")
+    following = n + 1
+    while following < len(lines) and not lines[following].strip():
+        following += 1
+    if following >= len(lines) or lines[following].strip().replace("*", "") != "Conditions:":
+        raise CheckError("missing conditional Conditions block")
+    tests: list[str] = []
+    paths: list[str] = []
+    block = following + 1
+    while block < len(lines) and lines[block].strip():
+        raw = lines[block]
+        match = re.fullmatch(r"- (tests|paths): (.+)", raw)
+        if not match or len(raw) > 200 or any(ord(c) < 32 for c in raw):
+            raise CheckError("invalid conditional condition")
+        value = match.group(2)
+        if match.group(1) == "tests":
+            if (
+                not _NODE_ID.fullmatch(value)
+                or ".." in value
+                or value.startswith("/")
+                or any(c.isspace() for c in value)
+            ):
+                raise CheckError("invalid conditional test id")
+            tests.append(value)
+        else:
+            if not _valid_conditional_glob(value):
+                raise CheckError("invalid conditional path glob")
+            paths.append(value)
+        block += 1
+    if not tests or not paths or len(tests) > 20 or len(paths) > 20:
+        raise CheckError("incomplete conditional conditions")
+    if block < len(lines) and lines[block].strip() and not lines[block].startswith("- "):
+        raise CheckError("conditional block must be separated by a blank line")
+    return index, comment, shas[0].lower(), tests, paths, n
+
+
+def _valid_conditional_glob(pattern: str) -> bool:
+    if not pattern or pattern.startswith("/") or "\\" in pattern:
+        return False
+    parts = pattern.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if any("**" in part and part != "**" for part in parts):
+        return False
+    if parts[0] == "**" or any(ch in parts[0] for ch in "*?"):
+        return False
+    return True
+
+
+def _glob_match(pattern: str, path: str) -> bool:
+    p, q = pattern.split("/"), path.split("/")
+
+    seen: dict[tuple[int, int], bool] = {}
+
+    def match(i: int, j: int) -> bool:
+        key = (i, j)
+        if key not in seen:
+            seen[key] = _match(i, j)
+        return seen[key]
+
+    def _match(i: int, j: int) -> bool:
+        if i == len(p):
+            return j == len(q)
+        if p[i] == "**":
+            return match(i + 1, j) or (j < len(q) and match(i, j + 1))
+        regex = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in p[i])
+        return j < len(q) and bool(re.fullmatch(regex, q[j])) and match(i + 1, j + 1)
+
+    return match(0, 0)
+
+
 def evaluate(
     head: str,
     files: list[Any],
@@ -1988,6 +2110,7 @@ def evaluate(
     delta_verified: tuple[str, ...] = (),
     allow_rebuttal: bool = True,
     repo: str = "",
+    conditional_verified: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Pure classification of the PR's review evidence at ``head``.
 
@@ -2007,7 +2130,7 @@ def evaluate(
     # The independent record is the Claude-family review (or a submitted approval); a
     # cross-model record alone satisfies only the cross-model requirement. A family's
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
-    independent_head = approved_reviews > 0 or "claude" in standing
+    independent_head = approved_reviews > 0 or "claude" in standing or bool(conditional_verified)
     cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
     model_families = _standing_model_families(_fold_events_at(head, comments, allow_rebuttal))
     gemini_codex = {"gemini", "codex"} <= model_families
@@ -2089,12 +2212,19 @@ def evaluate(
             f"record at {', '.join(h[:MIN_PREFIX] for h in delta_heads)}, "
             f"merge-only delta verified (head {short})"
         )
+    elif conditional_verified:
+        status, reason = (
+            "OK",
+            f"conditional accept at {conditional_verified[-1][:9]}, conditions verified (head {short})",
+        )
     elif gemini_route and (not independent or (risky and not cross_model)):
         status, reason = "OK", f"round 2+ route: Gemini and Codex ACCEPT at head {short}"
     else:
         status, reason = "OK", f"review record present at head {short}"
     if status == "OK" and gemini_route and (not independent or (risky and not cross_model)):
         satisfied_by = "gemini+codex"
+    elif status == "OK" and conditional_verified:
+        satisfied_by = "conditional_accept"
     elif independent and risky and cross_model:
         satisfied_by = "claude+cross_model"
     elif independent:
@@ -2312,6 +2442,143 @@ def _verify_deltas(
         return ()
 
 
+_SHORT_HEX = re.compile(r"(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])")
+
+
+def _conditional_withdrawn(text: str, shas: list[str], anywhere: bool = False) -> bool:
+    """True when ``text`` holds a Claude-family (or unknown-family) REJECT bound to one of
+    ``shas``; a cross-model REJECT never withdraws the independent record. ``anywhere`` also
+    tries every commit the text names (a 7-40 character prefix, padded), so a REJECT at an
+    intermediate commit withdraws too; more than 20 named commits fails closed."""
+    candidates = list(shas)
+    if anywhere:
+        named = list(dict.fromkeys(_SHORT_HEX.findall(text.lower())))
+        if len(named) > 20:
+            return True
+        candidates += [token.ljust(40, "0") for token in named]
+    for sha in dict.fromkeys(candidates):
+        for event in _classify(text, sha, rejects_only=True)["events"]:
+            if event.get("kind") == "reject" and event.get("family") != "cross_model":
+                return True
+    return False
+
+
+def _contents_text(
+    fetch: Callable[[str, str], Any], base: str, token: str, path: str, ref: str
+) -> str:
+    """One file's text at ``ref`` through the contents API (at most 1 MB); raises on any doubt."""
+    response = fetch(f"{base}/contents/{path}?ref={ref}", token)
+    if not isinstance(response, dict) or response.get("type") != "file":
+        raise CheckError("contents entry is not a file")
+    content = base64.b64decode("".join(str(response.get("content", "")).split()), validate=True)
+    if len(content) > 1_000_000:
+        raise CheckError("contents entry too large")
+    return content.decode("utf-8")
+
+
+def _test_function(text: str, function: str, cls: str | None) -> Any:
+    """The def node of ``function`` at module level (or directly in class ``cls``); parse only."""
+    tree = ast.parse(text)
+    body = tree.body
+    if cls:
+        owners = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls]
+        if not owners:
+            return None
+        body = owners[0].body
+    for item in body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function:
+            return item
+    return None
+
+
+def _verify_conditional(
+    fetch: Callable[[str, str], Any],
+    base: str,
+    token: str,
+    head: str,
+    pull: Any,
+    files: list[Any],
+    comments: list[Any],
+    reviews: list[Any],
+) -> tuple[str, ...]:
+    """Verify only the newest conditional record against immutable API evidence."""
+    try:
+        parsed = _conditional_record(comments)
+        if parsed is None:
+            return ()
+        index, source, old, tests, patterns, verdict_line = parsed
+        if old == head:
+            return ()
+        comparison = _compare(fetch, base, token, old, head)
+        if comparison.get("status") != "ahead" or comparison.get("behind_by") != 0:
+            return ()
+        changed = _compare_files(fetch, base, token, old, head)
+        pr_paths = _names(files)
+        if any(node.split("::", 1)[0] not in changed for node in tests):
+            return ()
+        if len(changed) >= MAX_DELTA_FILES or any(
+            not any(_glob_match(p, path) for p in patterns) for path in changed
+        ):
+            return ()
+        # Each named test must be new or changed by S..H (a pre-existing, untouched function
+        # cannot stand in for a requested test) and be a real function at H (ast, no execution).
+        added = {
+            entry["filename"]
+            for entry in comparison.get("files", [])
+            if isinstance(entry, dict) and entry.get("status") == "added"
+        }
+        for node in tests:
+            match = _NODE_ID.fullmatch(node)
+            if match is None:
+                return ()
+            path, first, second = match.groups()
+            cls, function = (first, second) if second else (None, first)
+            if path not in pr_paths:
+                return ()
+            at_head = _test_function(_contents_text(fetch, base, token, path, head), function, cls)
+            if at_head is None:
+                return ()
+            if path not in added:
+                at_old = _test_function(
+                    _contents_text(fetch, base, token, path, old), function, cls
+                )
+                if at_old is not None and ast.dump(at_old) == ast.dump(at_head):
+                    return ()
+        # Text after the verdict in its own comment and later comments can withdraw it.
+        source_lines = _HTML_COMMENT.sub(" ", source["body"]).splitlines()
+        suffix = "\n".join(source_lines[verdict_line + 1 :])
+        prefix = "\n".join(source_lines[:verdict_line])
+        # After the record: a Claude REJECT of any commit withdraws it. At any time: a Claude
+        # REJECT at the head does, whatever the posting order (as for ordinary records).
+        if _conditional_withdrawn(suffix, [head, old], anywhere=True):
+            return ()
+        if _conditional_withdrawn(prefix, [head]):
+            return ()
+        for number, other in enumerate(comments):
+            body = other.get("body") if isinstance(other, dict) and number != index else None
+            if isinstance(body, str):
+                if _conditional_withdrawn(
+                    body, [head, old] if number > index else [head], anywhere=number > index
+                ):
+                    return ()
+        created = source.get("created_at")
+        if not isinstance(created, str):
+            return ()
+        created_at = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+        for review in reviews:
+            if not isinstance(review, dict) or review.get("state") != "CHANGES_REQUESTED":
+                continue
+            submitted = review.get("submitted_at")
+            if not isinstance(submitted, str):
+                return ()
+            submitted_at = datetime.datetime.fromisoformat(submitted.replace("Z", "+00:00"))
+            if submitted_at > created_at:
+                return ()
+        return (old,)
+    except Exception:  # noqa: BLE001 - every malformed shape fails closed
+        return ()
+
+
 def _description(report: dict[str, Any]) -> str:
     text = _log_safe(f"{report['status']}: {report['reason']}").strip()
     return text[:MAX_DESCRIPTION]
@@ -2350,6 +2617,20 @@ def run(
                 report = evaluate(
                     head, files, comments, reviews, deltas, allow_rebuttal=allow, repo=repo
                 )
+            if report["status"] != "OK":
+                verified = _verify_conditional(
+                    fetch, base, token, head, pull, files, comments, reviews
+                )
+                if verified:
+                    report = evaluate(
+                        head,
+                        files,
+                        comments,
+                        reviews,
+                        allow_rebuttal=allow,
+                        repo=repo,
+                        conditional_verified=verified,
+                    )
     except Exception as exc:  # noqa: BLE001 - any read failure must fail closed
         report = {
             "schema": "nexus.review_record_check.v1",
