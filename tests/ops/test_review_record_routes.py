@@ -181,3 +181,18 @@ def test_high_risk_round_two_prefers_existing_claude_and_cross_model_route():
     )
     assert result["status"] == "OK"
     assert result["satisfied_by"] == "claude+cross_model"
+
+
+def test_short_sha_of_current_head_does_not_start_round_two():
+    # A Claude REJECT written with a short prefix of the current head is round 1:
+    # Gemini + Codex ACCEPT must not replace it (Gemini round-2 finding).
+    head = "8d70e3ff83eb16c7b1f4af93ae9d87e01d5fe129"
+    files = [{"filename": "docs/a.md"}]
+    comments = [
+        {"body": f"Claude review: REJECT@{head[:12]}\n", "user": {"login": "reviewer"}},
+        {"body": f"Gemini review: ACCEPT@{head}\n", "user": {"login": "reviewer"}},
+        {"body": f"Codex review: ACCEPT@{head}\n", "user": {"login": "reviewer"}},
+    ]
+    result = rrc.evaluate(head, files, comments, [])
+    assert result["route"] == "r1"
+    assert result["status"] != "OK"

@@ -1944,7 +1944,7 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         # ignores blockquotes, fences, and inline-quoted verdicts while retaining
         # the ordinary reviewer/verdict positions used by the standing logic.
         for sha in dict.fromkeys(match.group(1) for match in _HEX_TOKEN.finditer(body)):
-            if sha.lower() == head.lower():
+            if head.lower().startswith(sha.lower()):
                 continue
             parsed = _classify(body, sha)
             if any(
