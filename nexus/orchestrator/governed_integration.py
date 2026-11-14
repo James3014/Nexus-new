@@ -113,7 +113,7 @@ class ControlledIntegrationManager:
     def _run_sanitised_git(
         args: Sequence[str], cwd: str | Path
     ) -> subprocess.CompletedProcess[str]:
-        git_env = history_pinned_env()
+        git_env = os.environ.copy()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         # Objects are read as recorded: a replacement ref written into the shared ref
@@ -123,6 +123,9 @@ class ControlledIntegrationManager:
         # ``GIT_CONFIG`` redirects only ``git config`` to one file: kept, it would hide
         # repository config from the merge-driver check while the merge still reads it (#3383).
         git_env.pop("GIT_CONFIG", None)
+        # Config scans keep GIT_CONFIG_COUNT visible so env-injected drivers are refused;
+        # every other call also pins grafts and the commit graph (history readers).
+        run_env = git_env if args and args[0] == "config" else history_pinned_env(git_env)
         hooks_dir = get_canonical_git_hooks_dir(Path(cwd))
         listed = subprocess.run(
             [
@@ -198,7 +201,7 @@ class ControlledIntegrationManager:
             cwd=cwd,
             capture_output=True,
             text=True,
-            env=git_env,
+            env=run_env,
         )
 
     @classmethod
