@@ -447,6 +447,31 @@ def test_older_gemini_reject_does_not_start_round_two():
 
 
 @pytest.mark.parametrize(
+    "older_verdict",
+    [
+        f"<details>\nClaude review: REJECT@{OLD}\n</details>",
+        f"- > Claude review: REJECT@{OLD}",
+        f"`\nClaude review: REJECT@{OLD}\n`",
+        f"Claude review: REJECT@{OLD}\n---",
+        f"<div>\nClaude review: REJECT@{OLD}\n</div>",
+        f"| Claude review: REJECT@{OLD} | evidence |",
+        f"1. > Claude review: REJECT@{OLD}",
+        f"```\nClaude review: REJECT@{OLD}",
+        f"<details>\nClaude review: REJECT@{OLD}",
+        f"<div>\nClaude review: REJECT@{OLD}",
+        f"`\nClaude review: REJECT@{OLD}",
+    ],
+)
+def test_non_plain_older_claude_verdict_keeps_round_one(older_verdict):
+    result = evaluate(
+        LOW,
+        [comment(older_verdict), accept("gemini"), accept("codex")],
+    )
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
     "line_factory",
     [
         lambda comment_index, line_index: (

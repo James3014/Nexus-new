@@ -145,15 +145,17 @@ HIGH_RISK_PREFIXES = (
     "nexus/orchestrator/target_integration_lifecycle.py",
     "nexus/governance/",
 )
-HIGH_RISK_FILES = frozenset({
-    "pyproject.toml",
-    "uv.lock",
-    "pytest.ini",
-    "pyrightconfig.json",
-    "ruff.toml",
-    "AGENTS.md",
-    "MUSE_PROTO.md",
-})
+HIGH_RISK_FILES = frozenset(
+    {
+        "pyproject.toml",
+        "uv.lock",
+        "pytest.ini",
+        "pyrightconfig.json",
+        "ruff.toml",
+        "AGENTS.md",
+        "MUSE_PROTO.md",
+    }
+)
 # Repo-specific high-risk paths on top of the lists above, keyed like
 # NO_REBUTTAL_AT_CAP_REPOS (#2994). cairnwork: the HIGH tier of its AGENTS.md "Review
 # speed and risk tiers" that a path can express (experimental/, docs/, tests/ are LOW).
@@ -243,66 +245,70 @@ _ANY_VERDICT_TOKEN = re.compile(rf"\b(?:{_TOKEN}|{_REJECT_TOKEN})\b")
 # What may stand between the previous verdict on the line (or its start) and a REJECT
 # for it to be a reviewer's verdict: reviewer labels, round markers and shas only. A
 # finding that quotes a gate's verdict value ("a tampered receipt: REJECT") is not one.
-_REJECT_LABEL_WORDS = frozenset({
-    "independent",
-    "cross-model",
-    "adversarial",
-    "review",
-    "reviewer",
-    "re-review",
-    "verdict",
-    "final",
-    "latest",
-    "round",
-    "on",
-    "at",
-    "head",
-    "sha",
-    "commit",
-    "delta",
-    "full",
-    "diff",
-    "addendum",
-    "pr",
-    "the",
-    "result",
-    "status",
-    "outcome",
-})
+_REJECT_LABEL_WORDS = frozenset(
+    {
+        "independent",
+        "cross-model",
+        "adversarial",
+        "review",
+        "reviewer",
+        "re-review",
+        "verdict",
+        "final",
+        "latest",
+        "round",
+        "on",
+        "at",
+        "head",
+        "sha",
+        "commit",
+        "delta",
+        "full",
+        "diff",
+        "addendum",
+        "pr",
+        "the",
+        "result",
+        "status",
+        "outcome",
+    }
+)
 # More label words before a REJECT: a status the label carries ("**Codex r2 fix in
 # progress**: REJECT", #3004) and a model's tier ("Codex gpt-5.5 xhigh", "Gemini 3.1 Pro",
 # "Gemini 3.8 Flash High via agy"; versions are in _REJECT_LABEL_WORD, r5 R5).
-_REJECT_LABEL_EXTRA = frozenset({
-    "fix",
-    "fixes",
-    "fixing",
-    "in",
-    "progress",
-    "in-progress",
-    "pending",
-    "queued",
-    "running",
-    "now",
-    "pro",
-    "flash",
-    "high",
-    "xhigh",
-    "low",
-    "medium",
-    "max",
-    "mini",
-    "nano",
-    "ultra",
-    "lite",
-    "fast",
-    "thinking",
-    "preview",
-    "via",
-    "agy",
-    "cli",
-    "exec",
-    "substitute",
-})
+_REJECT_LABEL_EXTRA = frozenset(
+    {
+        "fix",
+        "fixes",
+        "fixing",
+        "in",
+        "progress",
+        "in-progress",
+        "pending",
+        "queued",
+        "running",
+        "now",
+        "pro",
+        "flash",
+        "high",
+        "xhigh",
+        "low",
+        "medium",
+        "max",
+        "mini",
+        "nano",
+        "ultra",
+        "lite",
+        "fast",
+        "thinking",
+        "preview",
+        "via",
+        "agy",
+        "cli",
+        "exec",
+        "substitute",
+    }
+)
 _REJECT_LABEL_WORD = re.compile(
     r"(?:codex|gemini|gpt|claude|opus|sonnet)[a-z0-9.-]*|r?\d{1,3}[a-z]?|[0-9a-f]{7,40}"
     r"|[0-9a-f]{7,40}\.\.\.?[0-9a-f]{7,40}"
@@ -1653,27 +1659,31 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     and not _binding(clause, span, line, head, comment_head)
                     and _binding(clause, span, line, head, reject_head)
                 ):
-                    answers.append((
-                        (index, start + (span[0] if span else 0)),
-                        family,
-                        _reviewer_word(before) or header_reviewer,
-                        main_round,
-                    ))
+                    answers.append(
+                        (
+                            (index, start + (span[0] if span else 0)),
+                            family,
+                            _reviewer_word(before) or header_reviewer,
+                            main_round,
+                        )
+                    )
                 if family and not rejects_only and _binding(clause, span, line, head, comment_head):
-                    line_events.append((
-                        start + (span[0] if span else 0),
-                        {
-                            "family": family,
-                            "reviewer": _reviewer_word(before) or header_reviewer,
-                            # A withdrawn ACCEPT still numbers its round, as before #3041.
-                            "kind": "round" if withdrawn else "accept",
-                            "unattributed": unattributed,
-                            "round": main_round,
-                            "compare": accept_round,
-                            "comment": 0,
-                            "line": clause.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            start + (span[0] if span else 0),
+                            {
+                                "family": family,
+                                "reviewer": _reviewer_word(before) or header_reviewer,
+                                # A withdrawn ACCEPT still numbers its round, as before #3041.
+                                "kind": "round" if withdrawn else "accept",
+                                "unattributed": unattributed,
+                                "round": main_round,
+                                "compare": accept_round,
+                                "comment": 0,
+                                "line": clause.strip(),
+                            },
+                        )
+                    )
                 if (
                     family
                     and withdrawn
@@ -1685,21 +1695,23 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                     # A withdrawn or struck ACCEPT at the head also takes back the
                     # reviewer's earlier ACCEPTs, as a REJECT of its round would; it binds
                     # like a REJECT (a 7-character head prefix, fail closed).
-                    line_events.append((
-                        start + (span[0] if span else 0),
-                        {
-                            "family": family,
-                            "reviewer": _reviewer_word(before) or header_reviewer,
-                            "kind": "reject",
-                            "extra": True,
-                            "round": main_round,
-                            "compare": _round_before(clause[: span[0]], lowest=False)
-                            if span
-                            else None,
-                            "comment": 0,
-                            "line": clause.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            start + (span[0] if span else 0),
+                            {
+                                "family": family,
+                                "reviewer": _reviewer_word(before) or header_reviewer,
+                                "kind": "reject",
+                                "extra": True,
+                                "round": main_round,
+                                "compare": _round_before(clause[: span[0]], lowest=False)
+                                if span
+                                else None,
+                                "comment": 0,
+                                "line": clause.strip(),
+                            },
+                        )
+                    )
         strict_head = _label_binds(reject_labels, index, head)
         plain_reject = _plain(_reject_view(line), keep_parens=True)
         searched = 0
@@ -1738,19 +1750,21 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             # aside) withdraw too, as an unknown reviewer; they never number rounds and are
             # not read when choosing merge-only delta heads ("extra").
             for family in sorted(_label_families(plain_reject, start + span[0]) - set(families)):
-                line_events.append((
-                    start + span[0],
-                    {
-                        "family": family,
-                        "reviewer": None,
-                        "kind": "reject",
-                        "extra": True,
-                        "round": int(rounds[-1]) if rounds else None,
-                        "compare": _round_before(clause[: span[0]], lowest=False),
-                        "comment": 0,
-                        "line": clause.strip(),
-                    },
-                ))
+                line_events.append(
+                    (
+                        start + span[0],
+                        {
+                            "family": family,
+                            "reviewer": None,
+                            "kind": "reject",
+                            "extra": True,
+                            "round": int(rounds[-1]) if rounds else None,
+                            "compare": _round_before(clause[: span[0]], lowest=False),
+                            "comment": 0,
+                            "line": clause.strip(),
+                        },
+                    )
+                )
             for family in families:
                 event = {
                     "family": family,
@@ -1777,17 +1791,19 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
                 if reviewer is None:
                     continue
                 for family in families:
-                    line_events.append((
-                        marker.start(),
-                        {
-                            "family": family,
-                            "reviewer": reviewer,
-                            "kind": "round",
-                            "round": 1,
-                            "comment": 0,
-                            "line": line.strip(),
-                        },
-                    ))
+                    line_events.append(
+                        (
+                            marker.start(),
+                            {
+                                "family": family,
+                                "reviewer": reviewer,
+                                "kind": "round",
+                                "round": 1,
+                                "comment": 0,
+                                "line": line.strip(),
+                            },
+                        )
+                    )
         events.extend(((index, at), event) for at, event in line_events)
         verdicts.extend(e for _, e in line_events if e["kind"] == "accept")
         if not reads:
@@ -1935,6 +1951,126 @@ def _contributes(
     )
 
 
+def _older_verdict_read_lines(body: str) -> list[str] | None:
+    """Return only unambiguous read-text lines, or None for malformed markup."""
+    lines = body.splitlines()
+    visible: list[str] = []
+    fence_char = ""
+    fence_size = 0
+    for line in lines:
+        stripped = line.lstrip()
+        fence = re.match(r"^(`{3,}|~{3,})", stripped)
+        if fence:
+            marker = fence.group(1)
+            if not fence_char:
+                fence_char, fence_size = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_size:
+                fence_char, fence_size = "", 0
+            visible.append("")
+        elif fence_char:
+            visible.append("")
+        else:
+            visible.append(line)
+    if fence_char:
+        return None
+
+    # Inline code can span lines. Remove it from the whole body before looking at lines.
+    text = "\n".join(visible)
+    text = re.sub(r"(`+)(.*?)\1", lambda match: "\n" * match.group(0).count("\n"), text, flags=re.S)
+    if "`" in text:
+        return None
+    lines = text.splitlines()
+
+    # Drop HTML blocks as units. Unclosed comments, tags, and details fail closed.
+    visible = []
+    html_stack: list[str] = []
+    html_comment = False
+    for line in lines:
+        stripped = line.lstrip()
+        if html_comment:
+            if "-->" in line:
+                html_comment = False
+            visible.append("")
+            continue
+        if "<!--" in line and stripped.startswith("<!--"):
+            html_comment = "-->" not in line.split("<!--", 1)[1]
+            visible.append("")
+            continue
+        if html_stack:
+            for tag in re.finditer(r"</?([A-Za-z][\w:-]*)\b[^>]*>", line):
+                token = tag.group(0)
+                name = tag.group(1).lower()
+                if token.startswith("</"):
+                    if html_stack and html_stack[-1] == name:
+                        html_stack.pop()
+                elif not token.rstrip().endswith("/>") and name not in {
+                    "area",
+                    "base",
+                    "br",
+                    "col",
+                    "embed",
+                    "hr",
+                    "img",
+                    "input",
+                    "link",
+                    "meta",
+                    "param",
+                    "source",
+                    "track",
+                    "wbr",
+                }:
+                    html_stack.append(name)
+            visible.append("")
+            continue
+        block = re.match(r"^<(details|[A-Za-z][\w:-]*)\b[^>]*>", stripped, re.I)
+        if block:
+            name = block.group(1).lower()
+            tail = stripped[block.end() :]
+            html_stack = [name]
+            for token in re.finditer(r"</?([A-Za-z][\w:-]*)\b[^>]*>", tail):
+                tag = token.group(0)
+                tag_name = token.group(1).lower()
+                if tag.startswith("</") and html_stack and html_stack[-1] == tag_name:
+                    html_stack.pop()
+                elif not tag.startswith("</") and not tag.rstrip().endswith("/>"):
+                    html_stack.append(tag_name)
+            visible.append("")
+            continue
+        visible.append(line)
+    if html_comment or html_stack:
+        return None
+
+    # A setext title line is not verdict evidence; discard it with its underline.
+    lines = visible
+    candidates = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if index + 1 < len(lines) and re.fullmatch(r"\s*(?:=+|-+)\s*", lines[index + 1]):
+            index += 2
+            continue
+        stripped = line.lstrip()
+        if line.startswith(("    ", "\t")):
+            index += 1
+            continue
+        # Repeated list markers may precede a block quote at any depth.
+        quote_probe = stripped
+        while True:
+            list_item = re.match(r"^(?:[-+*]|\d+[.)])\s+", quote_probe)
+            if not list_item:
+                break
+            quote_probe = quote_probe[list_item.end() :]
+        if re.match(r"^>", quote_probe):
+            index += 1
+            continue
+        if "|" in line and line.count("|") >= 2:
+            index += 1
+            continue
+        candidates.append(line)
+        index += 1
+    return candidates
+
+
 def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
     """Whether a real Claude record header has a verdict bound to another SHA."""
     for comment in comments:
@@ -1942,17 +2078,8 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         if not isinstance(body, str):
             continue
         candidate_lines = []
-        fenced = False
-        for line in body.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith(("```", "~~~")):
-                fenced = not fenced
-                continue
-            if fenced or line.startswith(("    ", "\t")):
-                continue
-            if re.match(r"^\s*[>|]", line):
-                continue
-            candidate = re.sub(r"(`+).*?\1", "", line)
+        for line in _older_verdict_read_lines(body) or []:
+            candidate = line
             lowered = candidate.lower()
             if ("claude" in lowered or "opus" in lowered) and (
                 re.search(r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b", candidate)
