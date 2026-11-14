@@ -63,13 +63,12 @@ _RUNNING_GUARD = threading.Lock()
 def hardened_git_env(
     repo_dir: Path, git_dir: Optional[Path] = None, common_dir: Optional[Path] = None
 ) -> dict[str, str]:
-    """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
-    GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
-    are never fetched, replacement refs, the grafts file and the commit-graph are ignored (#3226, #3437), and discovery stops at
-    ``repo_dir``. With ``git_dir`` (a probed git
-    dir) GIT_DIR and GIT_WORK_TREE are pinned to it and ``repo_dir``, so a rewritten ``.git``
-    pointer cannot redirect the call; ``common_dir`` (a verified linked worktree's) pins
-    GIT_COMMON_DIR too."""
+    """The caller's environment minus every GIT_* variable, then pinned: no system or global
+    config, no lazy fetch, no replacement refs, grafts file or commit-graph (#3226, #3437)
+    (GIT_CONFIG_COUNT carries core.commitGraph=false), discovery stops at ``repo_dir``.
+    With ``git_dir`` (a probed git dir) GIT_DIR and GIT_WORK_TREE are pinned to it and
+    ``repo_dir``, so a rewritten ``.git`` pointer cannot redirect the call; ``common_dir``
+    (a verified linked worktree's) pins GIT_COMMON_DIR too."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
