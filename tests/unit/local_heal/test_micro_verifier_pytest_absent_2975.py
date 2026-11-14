@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from nexus.core.contained_write import root_identity
 
 from nexus.services.local_heal.micro_verifier import MicroVerifier, is_test_file
 from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
@@ -51,6 +52,7 @@ def _verify(repo: Path, patched: list[str], interpreter: str):
     return MicroVerifier.verify(
         patch_content="",
         repo_dir=repo,
+        workspace_identity=root_identity(repo),
         patched_files=patched,
         verifier_env_metadata={"interpreter": interpreter},
     )

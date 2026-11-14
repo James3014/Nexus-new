@@ -205,12 +205,13 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
                 )
                 apply_receipt = run_isolated_workspace_apply(apply_req)
         
-        workspace_path = apply_receipt.workspace_path if apply_receipt.workspace_path else request.source_root
+        workspace_path = apply_receipt.workspace_path
         
         verifier_req = IsolatedVerifierRequest(
             task_id=request.task_id,
             workspace_path=workspace_path,
             verifier_command=request.verifier_command,
+            workspace_identity=apply_receipt.workspace_identity,
             verifier_allowed=request.verifier_allowed,
         )
         pre_verify_source_hash = _verified_source_hash(apply_receipt)

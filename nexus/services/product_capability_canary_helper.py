@@ -83,6 +83,9 @@ def _run_canary_mainchain_cached(
     task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
     canary_root = Path("/tmp/nexus_family_canary") / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
+    from nexus.core.contained_write import root_identity
+
+    canary_root_identity = root_identity(canary_root)
     canary_target = canary_root / "target.py"
     canary_target.write_text(
         (
@@ -287,6 +290,7 @@ def _run_canary_mainchain_cached(
             IsolatedVerifierRequest(
                 task_id=str(c.get("task_id") or task_id),
                 workspace_path=str(canary_root),
+                workspace_identity=canary_root_identity,
                 verifier_command=command,
                 timeout_sec=15.0,
                 verifier_allowed=True,

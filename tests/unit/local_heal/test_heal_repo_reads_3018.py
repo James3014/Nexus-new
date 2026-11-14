@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from nexus.core.contained_write import root_identity
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -492,6 +493,7 @@ def test_micro_verifier_does_not_parse_a_linked_patched_file(repo_and_host, kind
         "",
         repo,
         [relative],
+        workspace_identity=root_identity(repo),
         verifier_env_metadata={"allow_bare_python": True, "interpreter": "python3"},
     )
     assert result.passed is False
@@ -506,6 +508,7 @@ def test_micro_verifier_still_parses_a_plain_patched_file(repo_and_host):
         "",
         repo,
         ["pkg/broken.py"],
+        workspace_identity=root_identity(repo),
         verifier_env_metadata={"allow_bare_python": True, "interpreter": "python3"},
     )
     assert result.syntax_ok is False

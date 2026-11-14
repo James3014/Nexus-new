@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nexus.core.contained_write import PinnedRoot, root_identity
+from nexus.core.contained_write import PinnedRoot
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     argument_file_roots,
@@ -27,6 +27,7 @@ class IsolatedVerifierRequest:
     verifier_allowed: bool = False
     # Extra read-only roots for the sandboxed run (e.g. a sealed oracle outside the workspace).
     readable_paths: tuple[str, ...] = ()
+    workspace_identity: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -78,13 +79,14 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
         )
         
     try:
+        if request.workspace_identity is None:
+            raise SandboxError("verifier_workspace_identity_missing")
         workspace = Path(request.workspace_path)
-        workspace_identity = root_identity(workspace)
         # The workspace holds a model-written patch: run its tests under the OS sandbox (no
         # network, writes only in the workspace, allowlisted env). No barrier, no run (#2936).
         res = run_model_argv(
             request.verifier_command,
-            work_dir=PinnedRoot(workspace, workspace_identity),
+            work_dir=PinnedRoot(workspace, request.workspace_identity),
             timeout=request.timeout_sec,
             readable=(
                 *interpreter_readable_roots(request.verifier_command[0]),

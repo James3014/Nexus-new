@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from nexus.core.contained_write import root_identity
 
 from nexus.engine.model_output_sandbox import denied_subtrees
 from nexus.engine.sandboxed_lane import os_sandbox_available
@@ -77,6 +78,7 @@ def test_micro_verifier_runs_in_a_default_workspace_of_a_gateway_layout(home):
     res = MicroVerifier.verify(
         patch_content="",
         repo_dir=repo,
+        workspace_identity=root_identity(repo),
         patched_files=["good.py"],
         verifier_env_metadata={"interpreter": sys.executable},
     )
