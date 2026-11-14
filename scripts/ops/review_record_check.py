@@ -78,6 +78,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -1951,123 +1952,40 @@ def _contributes(
     )
 
 
-def _older_verdict_read_lines(body: str) -> list[str] | None:
-    """Return only unambiguous read-text lines, or None for malformed markup."""
-    lines = body.splitlines()
-    visible: list[str] = []
-    fence_char = ""
-    fence_size = 0
-    for line in lines:
-        stripped = line.lstrip()
-        fence = re.match(r"^(`{3,}|~{3,})", stripped)
-        if fence:
-            marker = fence.group(1)
-            if not fence_char:
-                fence_char, fence_size = marker[0], len(marker)
-            elif marker[0] == fence_char and len(marker) >= fence_size:
-                fence_char, fence_size = "", 0
-            visible.append("")
-        elif fence_char:
-            visible.append("")
-        else:
-            visible.append(line)
-    if fence_char:
-        return None
+_OLDER_REVIEW_LINE = re.compile(
+    r"Claude review: (?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)@([0-9a-f]{40})",
+    re.ASCII,
+)
+_OLDER_INDEPENDENT_LINE = re.compile(
+    r"\*\*Independent Claude review\*\* \(Claude Opus [A-Za-z0-9. ]+, separate agent\): "
+    r"\*\*(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES) at ([0-9a-f]{40})\*\*\.",
+    re.ASCII,
+)
+_OLDER_RECORD_HEADER = re.compile(r"## Review record (?:--|—|–) head ([0-9a-f]{40})", re.ASCII)
+_OLDER_REFERENCE_DEFINITION = re.compile(r"^\[[^\]\n]+\]:[ \t]*\S", re.ASCII | re.MULTILINE)
 
-    # Inline code can span lines. Remove it from the whole body before looking at lines.
-    text = "\n".join(visible)
-    text = re.sub(r"(`+)(.*?)\1", lambda match: "\n" * match.group(0).count("\n"), text, flags=re.S)
-    if "`" in text:
-        return None
-    lines = text.splitlines()
 
-    # Drop HTML blocks as units. Unclosed comments, tags, and details fail closed.
-    visible = []
-    html_stack: list[str] = []
-    html_comment = False
-    for line in lines:
-        stripped = line.lstrip()
-        if html_comment:
-            if "-->" in line:
-                html_comment = False
-            visible.append("")
-            continue
-        if "<!--" in line and stripped.startswith("<!--"):
-            html_comment = "-->" not in line.split("<!--", 1)[1]
-            visible.append("")
-            continue
-        if html_stack:
-            for tag in re.finditer(r"</?([A-Za-z][\w:-]*)\b[^>]*>", line):
-                token = tag.group(0)
-                name = tag.group(1).lower()
-                if token.startswith("</"):
-                    if html_stack and html_stack[-1] == name:
-                        html_stack.pop()
-                elif not token.rstrip().endswith("/>") and name not in {
-                    "area",
-                    "base",
-                    "br",
-                    "col",
-                    "embed",
-                    "hr",
-                    "img",
-                    "input",
-                    "link",
-                    "meta",
-                    "param",
-                    "source",
-                    "track",
-                    "wbr",
-                }:
-                    html_stack.append(name)
-            visible.append("")
-            continue
-        block = re.match(r"^<(details|[A-Za-z][\w:-]*)\b[^>]*>", stripped, re.I)
-        if block:
-            name = block.group(1).lower()
-            tail = stripped[block.end() :]
-            html_stack = [name]
-            for token in re.finditer(r"</?([A-Za-z][\w:-]*)\b[^>]*>", tail):
-                tag = token.group(0)
-                tag_name = token.group(1).lower()
-                if tag.startswith("</") and html_stack and html_stack[-1] == tag_name:
-                    html_stack.pop()
-                elif not tag.startswith("</") and not tag.rstrip().endswith("/>"):
-                    html_stack.append(tag_name)
-            visible.append("")
-            continue
-        visible.append(line)
-    if html_comment or html_stack:
-        return None
+def _older_verdict_candidate_lines(body: str) -> list[str]:
+    """Collect exact, unquoted older-review record lines from plain-text bodies."""
+    normalized = body.replace("\r\n", "\n")
+    if "~~~" in normalized:
+        return []
+    for character in normalized:
+        category = unicodedata.category(character)
+        if character in "`<\t" or category == "Cf" or (category == "Cc" and character != "\n"):
+            return []
+    if _OLDER_REFERENCE_DEFINITION.search(normalized):
+        return []
 
-    # A setext title line is not verdict evidence; discard it with its underline.
-    lines = visible
+    lines = normalized.split("\n")
     candidates = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if index + 1 < len(lines) and re.fullmatch(r"\s*(?:=+|-+)\s*", lines[index + 1]):
-            index += 2
+    for index, line in enumerate(lines):
+        if index + 1 < len(lines) and re.fullmatch(r"[=-]+", lines[index + 1], re.ASCII):
             continue
-        stripped = line.lstrip()
-        if line.startswith(("    ", "\t")):
-            index += 1
+        if not (_OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)):
             continue
-        # Repeated list markers may precede a block quote at any depth.
-        quote_probe = stripped
-        while True:
-            list_item = re.match(r"^(?:[-+*]|\d+[.)])\s+", quote_probe)
-            if not list_item:
-                break
-            quote_probe = quote_probe[list_item.end() :]
-        if re.match(r"^>", quote_probe):
-            index += 1
-            continue
-        if "|" in line and line.count("|") >= 2:
-            index += 1
-            continue
-        candidates.append(line)
-        index += 1
+        if index == 0 or not lines[index - 1] or _OLDER_RECORD_HEADER.fullmatch(lines[index - 1]):
+            candidates.append(line)
     return candidates
 
 
@@ -2077,36 +1995,16 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         body = comment.get("body") if isinstance(comment, dict) else None
         if not isinstance(body, str):
             continue
-        candidate_lines = []
-        for line in _older_verdict_read_lines(body) or []:
-            candidate = line
-            lowered = candidate.lower()
-            if ("claude" in lowered or "opus" in lowered) and (
-                re.search(r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b", candidate)
-                or ("review record" in lowered and "head" in lowered)
-            ):
-                candidate_lines.append(candidate)
-        candidate_text = "\n".join(candidate_lines)
-        if not re.search(
-            r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b",
-            candidate_text,
-        ):
-            continue
         considered: set[str] = set()
-        for match in _HEX_TOKEN.finditer(candidate_text):
+        for line in _older_verdict_candidate_lines(body):
+            match = _OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)
             sha = match.group(1)
             if sha in considered:
                 continue
             if len(considered) >= MAX_OLDER_SHA_CANDIDATES_PER_COMMENT:
                 break
             considered.add(sha)
-            if head.lower().startswith(sha.lower()):
-                continue
-            parsed = _classify(candidate_text, sha)
-            if any(
-                event["family"] == "claude" and event["kind"] in {"accept", "reject"}
-                for event in parsed["events"]
-            ):
+            if not head.lower().startswith(sha.lower()):
                 return True
     return False
 
