@@ -211,6 +211,20 @@ def test_non_bullet_or_bold_reject_beside_a_bold_accept_still_withdraws(line):
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
 
 
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        f"```\n**ACCEPT at {HEAD}**\n```",
+        f"`**ACCEPT at {HEAD}**`",
+        f"> **ACCEPT at {HEAD}**",
+        f"**Do not treat ACCEPT at {HEAD} as final**",
+    ],
+)
+def test_decoy_bold_accept_does_not_free_the_bullets(decoy):
+    body = f"Claude: ACCEPT at {HEAD}\n{decoy}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
 def test_bold_accept_for_another_head_does_not_free_the_bullets():
     other = "1e9f3d4ec0000000000000000000000000000000"
     body = (

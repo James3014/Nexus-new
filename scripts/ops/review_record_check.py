@@ -457,6 +457,10 @@ def _hex_tokens(text: str) -> list[str]:
 
 
 _BOLD_ACCEPT = re.compile(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*")
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_NEGATED_ACCEPT = re.compile(
+    r"\b(?:not|never|no|cannot|can't|until|pending|awaiting|unless|without)\b|n't\b", re.I
+)
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
@@ -469,10 +473,19 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
     those are read exactly as before. Comments without a bold ACCEPT at the head are
     unchanged too.
     """
-    for line in lines:
+    fenced = False
+    for raw in lines:
+        if raw.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced or raw.lstrip().startswith(">"):
+            continue
+        line = _INLINE_CODE.sub(" ", raw)
         for match in _BOLD_ACCEPT.finditer(line):
             span = match.group(0)
             if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
+                continue
+            if _NEGATED_ACCEPT.search(span):
                 continue
             if not head or names_head(span, head):
                 return True
@@ -1588,7 +1601,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             }
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
-    free_text_ok = _bold_accept_lines(lines, head)
+    free_text_ok = _bold_accept_lines(unfenced, head)
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
         reads: list[tuple[str, bool]] = []
