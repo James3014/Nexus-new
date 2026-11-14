@@ -1997,6 +1997,14 @@ _OLDER_INDEPENDENT_LINE = re.compile(
 _OLDER_RECORD_HEADER = re.compile(rf"## Review record (?:--|—|–) head {_OLDER_SHA}", re.ASCII)
 _OLDER_REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*\S", re.ASCII)
 _OLDER_LIST_ITEM = re.compile(r"^ {0,3}(?:[-+*]|[0-9]+[.)])[ \t]+", re.ASCII)
+_OLDER_HTML_RAW_START = re.compile(
+    r"^ {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)", re.IGNORECASE | re.ASCII
+)
+_OLDER_HTML_RAW_END = re.compile(r"</(?:pre|script|style|textarea)>", re.IGNORECASE | re.ASCII)
+_OLDER_HTML_STANDALONE_TAG = re.compile(
+    r"^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t][^<>]*)?/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$",
+    re.ASCII,
+)
 _OLDER_HTML_START = re.compile(
     r"^ {0,3}(?:<!--|<\?|<![A-Z]|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$))",
     re.IGNORECASE | re.ASCII,
@@ -2009,7 +2017,8 @@ def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
     candidates = []
     fence_char = None
     fence_size = 0
-    html_block = False
+    html_end: re.Pattern[str] | None = None
+    html_until_blank = False
     quote_continuation = False
     for index, line in enumerate(lines):
         fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line, re.ASCII)
@@ -2025,9 +2034,13 @@ def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
         if fence:
             fence_char, fence_size = fence.group(1)[0], len(fence.group(1))
             continue
-        if html_block:
+        if html_end is not None:
+            if html_end.search(line):
+                html_end = None
+            continue
+        if html_until_blank:
             if not line.strip():
-                html_block = False
+                html_until_blank = False
             else:
                 continue
         if not line.strip():
@@ -2048,12 +2061,23 @@ def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
             or _OLDER_REFERENCE_DEFINITION.match(line)
         ):
             continue
-        if _OLDER_HTML_START.match(line):
-            html_block = not (
-                (line.startswith("<!--") and "-->" in line)
-                or (line.startswith("<?") and "?>" in line)
-                or (line.startswith("<!") and ">" in line)
-            )
+        end_marker = None
+        if _OLDER_HTML_RAW_START.match(line):
+            end_marker = _OLDER_HTML_RAW_END
+        elif line.lstrip().startswith("<!--"):
+            end_marker = re.compile("-->")
+        elif line.lstrip().startswith("<?"):
+            end_marker = re.compile(r"\?>")
+        elif line.lstrip().startswith("<![CDATA["):
+            end_marker = re.compile(r"\]\]>")
+        elif re.match(r"^ {0,3}<![A-Z]", line, re.ASCII):
+            end_marker = re.compile(">")
+        if end_marker is not None:
+            if not end_marker.search(line[line.index("<") + 1 :]):
+                html_end = end_marker
+            continue
+        if _OLDER_HTML_START.match(line) or _OLDER_HTML_STANDALONE_TAG.match(line):
+            html_until_blank = True
             continue
         if index + 1 < len(lines) and re.fullmatch(
             r" {0,3}(?:=+|-+) *", lines[index + 1], re.ASCII
