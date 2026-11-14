@@ -2073,7 +2073,14 @@ def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
             for char in nearby
         ):
             continue
-        header = _OLDER_RECORD_HEADER.fullmatch(lines[index - 1]) if index else None
+        header = next(
+            (
+                match
+                for earlier in reversed(lines[:index])
+                if (match := _OLDER_RECORD_HEADER.fullmatch(earlier))
+            ),
+            None,
+        )
         candidates.append((line, header.group(1).lower() if header else None))
     return candidates
 
