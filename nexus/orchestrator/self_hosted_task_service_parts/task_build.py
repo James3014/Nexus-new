@@ -179,7 +179,7 @@ class _TaskBuildMixin:
 
         controller_revision = request.get("controller_revision")
         if not controller_revision:
-            res = _service_module().subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_repo_root, capture_output=True, text=True)
+            res = _service_module().subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_repo_root, capture_output=True, text=True, env=_service_module().history_pinned_env())
             controller_revision = res.stdout.strip() if res.returncode == 0 else "HEAD"
         else:
             controller_revision = str(controller_revision)
@@ -286,8 +286,7 @@ class _TaskBuildMixin:
                 ["git", "merge-base", "--is-ancestor", old, new],
                 cwd=controller_root,
                 capture_output=True,
-                text=True,
-            ).returncode == 0
+                text=True, env=_service_module().history_pinned_env()).returncode == 0
             for old, new in revisions
         )
 
