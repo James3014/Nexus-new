@@ -231,3 +231,37 @@ def test_rdc_repo_root_uses_physical_identity_not_textual_path(
     )
 
     assert result == repo.resolve()
+
+
+def test_bound_controller_rejects_replacement_refs_for_verified_commits(tmp_path: Path):
+    from nexus.orchestrator.canonical_source_root import bound_controller_problem
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "card.md").write_text("card\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tasks/card.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "task card"], cwd=repo, check=True)
+    loaded_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    controller = tmp_path / "controller"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(controller), "HEAD"], cwd=repo, check=True
+    )
+    (repo / "base.txt").write_text("replacement\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "replacement target"], cwd=repo, check=True)
+    replacement_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
+    subprocess.run(
+        ["git", "update-ref", f"refs/replace/{loaded_sha}", replacement_sha], cwd=repo, check=True
+    )
+    subprocess.run(["git", "checkout", "--detach", loaded_sha], cwd=repo, check=True)
+
+    assert bound_controller_problem(controller, repo) == "REPLACEMENT_REFS_PRESENT"

@@ -1016,13 +1016,28 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         )
         if base_sha is None:
             raise RuntimeError("CANONICAL_CORE_SOURCE_REVISION_MISSING")
+        repo_root = (
+            request.get("controller_repo_root")
+            or getattr(contract_arg, "controller_repo_root", None)
+            or kwargs.get("repo_root")
+        )
+        if repo_root:
+            repo_path = Path(repo_root)
+            try:
+                replacement_refs = subprocess.check_output(
+                    ["git", "for-each-ref", "--format=%(refname)", "refs/replace/"],
+                    cwd=str(repo_path),
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    env=hardened_git.hardened_git_env(repo_path),
+                ).strip()
+            except (OSError, subprocess.SubprocessError):
+                raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_UNREADABLE") from None
+            if replacement_refs:
+                raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_PRESENT")
         base_tree = _exact_sha(kwargs.get("base_tree"))
         if base_tree is None:
-            repo_root = (
-                request.get("controller_repo_root")
-                or getattr(contract_arg, "controller_repo_root", None)
-                or kwargs.get("repo_root")
-            )
             try:
                 base_tree = (
                     _exact_sha(
@@ -1032,6 +1047,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                             text=True,
                             stderr=subprocess.DEVNULL,
                             timeout=10,
+                            env=hardened_git.hardened_git_env(Path(repo_root)),
                         ).strip()
                     )
                     if repo_root
@@ -1065,6 +1081,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 ["git", "rev-parse", "HEAD"],
                 cwd=source_repo_root,
                 text=True,
+                env=hardened_git.hardened_git_env(source_repo_root),
             ).strip()
         except (OSError, subprocess.CalledProcessError) as exc:
             raise RuntimeError(

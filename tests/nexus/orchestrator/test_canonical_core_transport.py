@@ -982,3 +982,32 @@ def test_manifest_of_a_target_whose_git_dir_links_into_another_repository_is_ref
 
     with pytest.raises(RuntimeError, match="CANONICAL_CORE_TARGET_GITDIR_UNTRUSTED"):
         extract_git_manifest(test_repo, base_commit.strip(), "HEAD")
+
+
+def test_mutation_binding_ignores_replacement_ref_for_source_commit(
+    test_repo: Path, tmp_path: Path
+):
+    from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
+
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    (test_repo / "tracked_a.txt").write_text("replacement content\n", encoding="utf-8")
+    subprocess.check_call(["git", "add", "tracked_a.txt"], cwd=test_repo)
+    subprocess.check_call(["git", "commit", "-m", "replacement target"], cwd=test_repo)
+    replacement_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    subprocess.check_call(
+        ["git", "update-ref", f"refs/replace/{base_sha}", replacement_sha], cwd=test_repo
+    )
+
+    transport = CanonicalNexusCoreTransportPort(tmp_path / "core.sqlite")
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_REPLACEMENT_REFS_PRESENT"):
+        transport.open_or_reuse_mutation_binding(
+            task_id="task-1",
+            attempt_id="attempt-1",
+            base_sha=base_sha,
+            repo_root=test_repo,
+            request={"allowed_files": ["tracked_a.txt"], "verifier_commands": ["pytest"]},
+        )
