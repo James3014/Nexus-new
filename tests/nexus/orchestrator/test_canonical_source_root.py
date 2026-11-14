@@ -265,3 +265,63 @@ def test_bound_controller_rejects_replacement_refs_for_verified_commits(tmp_path
     subprocess.run(["git", "checkout", "--detach", loaded_sha], cwd=repo, check=True)
 
     assert bound_controller_problem(controller, repo) == "REPLACEMENT_REFS_PRESENT"
+
+
+def _grafts_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    """repo checked out at L; controller worktree at C; C does not descend from L."""
+
+    def git(*args: str, cwd: Path) -> str:
+        return subprocess.check_output(["git", *args], cwd=cwd, text=True).strip()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git("init", "-q", "-b", "main", cwd=repo)
+    git("config", "user.name", "Test", cwd=repo)
+    git("config", "user.email", "test@example.com", cwd=repo)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    git("add", "base.txt", cwd=repo)
+    git("commit", "-qm", "base", cwd=repo)
+    base = git("rev-parse", "HEAD", cwd=repo)
+    for name in ("loaded", "controller"):
+        git("checkout", "-q", "--detach", base, cwd=repo)
+        (repo / "tasks").mkdir(exist_ok=True)
+        (repo / "tasks" / f"{name}.md").write_text(name + "\n", encoding="utf-8")
+        git("add", f"tasks/{name}.md", cwd=repo)
+        git("commit", "-qm", name, cwd=repo)
+        if name == "loaded":
+            loaded = git("rev-parse", "HEAD", cwd=repo)
+        else:
+            controller_sha = git("rev-parse", "HEAD", cwd=repo)
+    git("checkout", "-q", "--detach", loaded, cwd=repo)
+    controller = tmp_path / "controller"
+    git("worktree", "add", "--detach", str(controller), controller_sha, cwd=repo)
+    return repo, controller, loaded, controller_sha
+
+
+def test_bound_controller_ignores_grafts_that_forge_ancestry_3437(tmp_path: Path):
+    from nexus.orchestrator.canonical_source_root import bound_controller_problem
+
+    repo, controller, loaded, controller_sha = _grafts_fixture(tmp_path)
+    assert bound_controller_problem(controller, repo) == "LOADED_COMMIT_NOT_ANCESTOR"
+
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{controller_sha} {loaded}\n", encoding="utf-8")
+
+    assert bound_controller_problem(controller, repo) == "LOADED_COMMIT_NOT_ANCESTOR"
+
+
+def test_bound_controller_accepts_real_descendant_without_grafts_3437(tmp_path: Path):
+    from nexus.orchestrator.canonical_source_root import bound_controller_problem
+
+    repo, controller, loaded, _ = _grafts_fixture(tmp_path)
+    subprocess.run(["git", "checkout", "-q", "--detach", loaded], cwd=controller, check=True)
+    (controller / "tasks" / "next.md").write_text("next\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tasks/next.md"], cwd=controller, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-qm", "next"],
+        cwd=controller,
+        check=True,
+    )
+    (repo / ".git" / "refs" / "replace").mkdir(parents=True, exist_ok=True)
+
+    assert bound_controller_problem(controller, repo) is None

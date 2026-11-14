@@ -9,6 +9,7 @@ file under ``tmp_path``.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -865,6 +866,10 @@ def test_the_runner_refuses_caller_options_its_hardening_does_not_cover(env, mon
 
 def test_hardened_git_env_ignores_replacement_refs(tmp_path):
     assert hardened_git.hardened_git_env(tmp_path)["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_hardened_git_env_ignores_the_grafts_file(tmp_path):
+    assert hardened_git.hardened_git_env(tmp_path)["GIT_GRAFT_FILE"] == os.devnull
 
 
 def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp_path):
