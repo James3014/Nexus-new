@@ -458,62 +458,30 @@ def _hex_tokens(text: str) -> list[str]:
 
 _BOLD_ACCEPT = re.compile(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*")
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
-_LABEL_WORD = re.compile(
-    r"r\d+|review(?:er)?|round|verdict|status|outcome|claude|opus|sonnet|codex|gemini|gpt|"
-    r"cross-model|independent",
-    re.IGNORECASE,
-)
-
-
-def _accept_span(line: str, head: str) -> "re.Match[str] | None":
-    """The bold plain ACCEPT verdict on the line that names the head (#3429)."""
-    for match in _BOLD_ACCEPT.finditer(line):
-        span = match.group(0)
-        if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
-            continue
-        if not head or names_head(span, head):
-            return match
-    return None
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
-    """True when a line holds a bold plain ACCEPT verdict that names the head.
+    """True when a line holds a bold plain ACCEPT verdict that names the head (#3429).
 
-    In a comment with such a line, prose that merely mentions REJECT or CONDITIONAL does
-    not take the ACCEPT back (#3429); see _is_free_text.
+    Rule: in a comment with such a line, an unbolded list bullet is findings text. It may
+    quote REJECT or CONDITIONAL words without taking the ACCEPT back. A verdict that
+    changes a bold ACCEPT is written as a bold verdict line or a plain (non-bullet) line;
+    those are read exactly as before. Comments without a bold ACCEPT at the head are
+    unchanged too.
     """
-    return any(_accept_span(line, head) for line in lines)
+    for line in lines:
+        for match in _BOLD_ACCEPT.finditer(line):
+            span = match.group(0)
+            if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
+                continue
+            if not head or names_head(span, head):
+                return True
+    return False
 
 
-def _is_free_text(line: str, token: "re.Pattern[str]", head: str) -> bool:
-    """True when every ``token`` on the line is prose after a plain word, not a verdict.
-
-    A word after a colon, dash, ``@``, the line start or a reviewer/round label may be a
-    verdict ("Claude r2: REJECT"), so it stays one. "a later Claude REJECT at head" and
-    "ACCEPT at <sha> (no CONDITIONAL items)" are prose. On a line without a bold ACCEPT
-    verdict only an unbolded bullet qualifies.
-    """
-    accept = _accept_span(line, head)
-    start = 0
-    if accept is not None:
-        start = accept.end()
-        if token.search(line[: accept.start()]):
-            return False
-    elif "**" in line or not _FREE_TEXT_BULLET.match(line):
-        return False
-    found = False
-    for match in token.finditer(line, start):
-        found = True
-        before = line[: match.start()]
-        while True:  # step back over the label words: "a later Claude r2 REJECT"
-            word = re.search(r"(\w+(?:-\w+)*)\s+$", before)
-            if word and _LABEL_WORD.fullmatch(word.group(1)):
-                before = before[: word.start()]
-            else:
-                break
-        if not re.search(r"\w\s+$", before):
-            return False
-    return found
+def _is_free_text(line: str) -> bool:
+    """An unbolded list bullet (see _bold_accept_lines)."""
+    return "**" not in line and _FREE_TEXT_BULLET.match(line) is not None
 
 
 def names_head(text: str, head: str) -> bool:
@@ -1733,7 +1701,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         # A REJECT read only by its model-naming label (#3069) is "extra" too.
         base_starts = {at for _clause, at in _reject_clause_starts(line, labels=False)}
         for clause, start, span in _reject_reads(line):
-            if free_text_ok and _is_free_text(line, _REJECT, head):
+            if free_text_ok and _is_free_text(line):
                 continue  # findings text beside a bold ACCEPT verdict (#3429)
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
@@ -1987,6 +1955,7 @@ _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 def _conditional_record(
     comments: list[Any],
+    head: str = "",
 ) -> tuple[int, dict[str, Any], str, list[str], list[str], int] | None:
     """Parse the newest visible conditional record; malformed newest records stay terminal."""
     selected = None
@@ -2004,9 +1973,9 @@ def _conditional_record(
                 lines.append("")
             else:
                 lines.append(line)
-        free_text_ok = _bold_accept_lines(lines, "")
+        free_text_ok = bool(head) and _bold_accept_lines(lines, head)
         for n, line in enumerate(lines):
-            if free_text_ok and _is_free_text(line, re.compile(r"\bCONDITIONAL\b"), ""):
+            if free_text_ok and _is_free_text(line):
                 continue
             if _CONDITIONAL_LINE.search(line):
                 selected = (index, comment, lines, n)
@@ -2474,7 +2443,7 @@ def _verify_conditional(
 ) -> tuple[str, ...]:
     """Verify only the newest conditional record against immutable API evidence."""
     try:
-        parsed = _conditional_record(comments)
+        parsed = _conditional_record(comments, head)
         if parsed is None:
             return ()
         index, source, old, tests, patterns, verdict_line = parsed
