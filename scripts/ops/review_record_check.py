@@ -494,6 +494,47 @@ def _hex_tokens(text: str) -> list[str]:
     return _HEX_TOKEN.findall(text.lower())
 
 
+_BOLD_ACCEPT = re.compile(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*")
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_NEGATED_ACCEPT = re.compile(
+    r"\b(?:not|never|no|cannot|can't|until|pending|awaiting|unless|without)\b|n't\b", re.I
+)
+_FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+
+
+def _bold_accept_lines(lines: list[str], head: str) -> bool:
+    """True when a line holds a bold plain ACCEPT verdict that names the head (#3429).
+
+    Rule: in a comment with such a line, an unbolded list bullet is findings text. It may
+    quote REJECT or CONDITIONAL words without taking the ACCEPT back. A verdict that
+    changes a bold ACCEPT is written as a bold verdict line or a plain (non-bullet) line;
+    those are read exactly as before. Comments without a bold ACCEPT at the head are
+    unchanged too.
+    """
+    fenced = False
+    for raw in lines:
+        if raw.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced or raw.lstrip().startswith(">"):
+            continue
+        line = _INLINE_CODE.sub(" ", raw)
+        for match in _BOLD_ACCEPT.finditer(line):
+            span = match.group(0)
+            if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
+                continue
+            if _NEGATED_ACCEPT.search(span):
+                continue
+            if not head or names_head(span, head):
+                return True
+    return False
+
+
+def _is_free_text(line: str) -> bool:
+    """An unbolded list bullet (see _bold_accept_lines)."""
+    return "**" not in line and _FREE_TEXT_BULLET.match(line) is not None
+
+
 def names_head(text: str, head: str) -> bool:
     """True when the text contains the head sha or a hex prefix of it (>= MIN_PREFIX)."""
     head = head.lower()
@@ -1598,6 +1639,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             }
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
+    free_text_ok = _bold_accept_lines(unfenced, head)
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
         reads: list[tuple[str, bool]] = []
@@ -1710,6 +1752,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         # A REJECT read only by its model-naming label (#3069) is "extra" too.
         base_starts = {at for _clause, at in _reject_clause_starts(line, labels=False)}
         for clause, start, span in _reject_reads(line):
+            if free_text_ok and _is_free_text(line):
+                continue  # findings text beside a bold ACCEPT verdict (#3429)
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
             found = plain_reject.find(clause, searched)
@@ -2090,6 +2134,7 @@ _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 def _conditional_record(
     comments: list[Any],
+    head: str = "",
 ) -> tuple[int, dict[str, Any], str, list[str], list[str], int] | None:
     """Parse the newest visible conditional record; malformed newest records stay terminal."""
     selected = None
@@ -2107,7 +2152,10 @@ def _conditional_record(
                 lines.append("")
             else:
                 lines.append(line)
+        free_text_ok = bool(head) and _bold_accept_lines(lines, head)
         for n, line in enumerate(lines):
+            if free_text_ok and _is_free_text(line):
+                continue
             if _CONDITIONAL_LINE.search(line):
                 selected = (index, comment, lines, n)
     if selected is None:
@@ -2607,7 +2655,7 @@ def _verify_conditional(
 ) -> tuple[str, ...]:
     """Verify only the newest conditional record against immutable API evidence."""
     try:
-        parsed = _conditional_record(comments)
+        parsed = _conditional_record(comments, head)
         if parsed is None:
             return ()
         index, source, old, tests, patterns, verdict_line = parsed

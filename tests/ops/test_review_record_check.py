@@ -180,6 +180,82 @@ def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
     assert rrc.verdict_clauses(conditional) == []
 
 
+_BOLD_ACCEPT_LINE = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"- a later Claude REJECT at {HEAD[:9]} was fixed in the next commit",
+        f"- Probe 2: the earlier Claude REJECT at {HEAD} no longer reproduces",
+        "- the old CONDITIONAL checks are discussed below",
+        f"- Final verdict REJECT at {HEAD}",  # a bullet under a bold ACCEPT is findings text
+    ],
+)
+def test_bullet_beside_a_bold_accept_is_free_text(line):
+    assert rrc.evaluate(HEAD, DOCS, [_c(_BOLD_ACCEPT_LINE + line + "\n")], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude: REJECT at {HEAD}",
+        f"Final verdict REJECT at {HEAD}",
+        f"Claude r2 REJECT at {HEAD}",
+        f"**Independent Claude review**: **REJECT at {HEAD}**",
+        f"- **Claude r2**: REJECT at {HEAD}",
+    ],
+)
+def test_non_bullet_or_bold_reject_beside_a_bold_accept_still_withdraws(line):
+    body = _BOLD_ACCEPT_LINE + line + "\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        f"```\n**ACCEPT at {HEAD}**\n```",
+        f"`**ACCEPT at {HEAD}**`",
+        f"> **ACCEPT at {HEAD}**",
+        f"**Do not treat ACCEPT at {HEAD} as final**",
+    ],
+)
+def test_decoy_bold_accept_does_not_free_the_bullets(decoy):
+    body = f"Claude: ACCEPT at {HEAD}\n{decoy}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_bold_accept_for_another_head_does_not_free_the_bullets():
+    other = "1e9f3d4ec0000000000000000000000000000000"
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {other}**\n"
+        f"Claude: ACCEPT at {HEAD}\n"
+        f"- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_bullet_without_a_bold_accept_is_still_read():
+    body = f"Claude: ACCEPT at {HEAD}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_conditional_selection_ignores_a_bullet_beside_a_bold_accept_for_the_head():
+    body = _BOLD_ACCEPT_LINE + "- the old CONDITIONAL ACCEPT form is gone\n"
+    assert rrc._conditional_record([_c(body)], HEAD) is None
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_conditional_selection_still_reads_the_bullet_when_the_accept_names_another_head():
+    other = "1e9f3d4ec0000000000000000000000000000000"
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {other}**\n"
+        "- this round moved to CONDITIONAL ACCEPT but no block yet\n"
+    )
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(body)], HEAD)
+
+
 @pytest.mark.parametrize("pattern", ["**/*", "*/*", "*.*", "./**", "**", "../x", "/x", "a\\b"])
 def test_conditional_globs_reject_unsafe_patterns(pattern):
     assert not rrc._valid_conditional_glob(pattern)

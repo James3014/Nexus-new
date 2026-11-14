@@ -64,6 +64,7 @@ def test_default_profile_uses_resolved_workspace_path(tmp_path, monkeypatch):
         return "(version 1)"
 
     monkeypatch.setattr(runner, "has_sandbox_exec", True)
+    monkeypatch.setattr(runner, "sandbox_exec_path", sandbox_runner.SANDBOX_EXEC)
     monkeypatch.setattr(runner, "build_elastic_profile", fake_build)
 
     class _Proc:

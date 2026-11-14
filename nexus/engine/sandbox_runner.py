@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.contained_write import PathContainmentError, read_bytes_in_root
 from nexus.core.state_root import persistent_state_root
+from nexus.engine.sandboxed_lane import SANDBOX_EXEC
 from nexus.engine.untrusted_tree_cleanup import remove_untrusted_tree_quietly
 
 logger = logging.getLogger(__name__)
@@ -208,10 +209,20 @@ class SandboxRunner:
 
         # 偵測 macOS 特有的 sandbox-exec 是否可用
         self.has_sandbox_exec = False
-        if sys.platform == "darwin":
+        self.sandbox_exec_path: str | None = None
+        self.sandbox_exec_sha256: str | None = None
+        try:
+            sandbox_exec = Path(SANDBOX_EXEC).resolve(strict=True)
+            if sandbox_exec.is_file() and os.access(sandbox_exec, os.X_OK):
+                sandbox_exec_sha256 = hashlib.sha256(sandbox_exec.read_bytes()).hexdigest()
+                self.sandbox_exec_path = str(sandbox_exec)
+                self.sandbox_exec_sha256 = sandbox_exec_sha256
+        except OSError:
+            pass
+        if sys.platform == "darwin" and self.sandbox_exec_path:
             try:
                 res = subprocess.run(
-                    ["sandbox-exec", "-p", "(version 1) (allow default)", "true"],
+                    [self.sandbox_exec_path, "-p", "(version 1) (allow default)", "/usr/bin/true"],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -301,6 +312,8 @@ class SandboxRunner:
             "output_artifact_path": None,
             "cleanup": cleanup,
             "error": error,
+            "sandbox_exec_path": self.sandbox_exec_path,
+            "sandbox_exec_sha256": self.sandbox_exec_sha256,
             "network_allowed": False,
             "hook_policy": {
                 "source_git_metadata_copied": False,
@@ -566,7 +579,7 @@ socket.socket.connect = _guarded_socket_connect
             barrier_mode = "python_sitecustomize"
             loopback_allowed = True
 
-            if self.has_sandbox_exec:
+            if self.has_sandbox_exec and self.sandbox_exec_path:
                 if elastic_profile:
                     applied_profile = elastic_profile
                 else:
@@ -635,7 +648,7 @@ socket.socket.connect = _guarded_socket_connect
                     f"\n{_run_dir_write_deny_rule(run_dir)}"
                 )
                 active_command = [
-                    "sandbox-exec",
+                    self.sandbox_exec_path,
                     "-p",
                     applied_profile,
                 ] + command_list
@@ -743,6 +756,8 @@ socket.socket.connect = _guarded_socket_connect
                 "output_artifact": output_artifact,
                 "cleanup": cleanup,
                 "error": "output_file_missing" if output_missing else None,
+                "sandbox_exec_path": self.sandbox_exec_path,
+                "sandbox_exec_sha256": self.sandbox_exec_sha256,
                 **({"output_file_refused": output_refused} if output_refused else {}),
                 "network_allowed": False,
                 "hook_policy": {
