@@ -1011,3 +1011,77 @@ def test_mutation_binding_ignores_replacement_ref_for_source_commit(
             repo_root=test_repo,
             request={"allowed_files": ["tracked_a.txt"], "verifier_commands": ["pytest"]},
         )
+
+
+def test_mutation_binding_rejects_replacement_ref_without_repo_root(
+    test_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from nexus.orchestrator import canonical_core_transport
+    from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
+
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
+    (test_repo / "tracked_a.txt").write_text("replacement content\n", encoding="utf-8")
+    subprocess.check_call(["git", "add", "tracked_a.txt"], cwd=test_repo)
+    subprocess.check_call(["git", "commit", "-m", "replacement target"], cwd=test_repo)
+    replacement_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    subprocess.check_call(
+        ["git", "update-ref", f"refs/replace/{base_sha}", replacement_sha], cwd=test_repo
+    )
+
+    source_path = test_repo / "nexus/orchestrator/canonical_core_transport.py"
+    source_path.parent.mkdir(parents=True)
+    (test_repo / "docs/agents").mkdir(parents=True)
+    (test_repo / "docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json").write_text("{}\n")
+    (test_repo / "docs/governance").mkdir(parents=True)
+    (test_repo / "docs/governance/current_operating_mode.yaml").write_text("mode: BOOTSTRAP\n")
+    monkeypatch.setattr(canonical_core_transport, "__file__", str(source_path))
+
+    transport = CanonicalNexusCoreTransportPort(tmp_path / "core.sqlite")
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_REPLACEMENT_REFS_PRESENT"):
+        transport.open_or_reuse_mutation_binding(
+            task_id="task-1",
+            attempt_id="attempt-1",
+            base_sha=base_sha,
+            base_tree=base_tree,
+            request={"allowed_files": ["tracked_a.txt"], "verifier_commands": ["pytest"]},
+        )
+
+
+def test_mutation_binding_accepts_base_tree_without_repo_root(
+    test_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from nexus.orchestrator import canonical_core_transport
+    from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
+
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
+    source_path = test_repo / "nexus/orchestrator/canonical_core_transport.py"
+    source_path.parent.mkdir(parents=True)
+    (test_repo / "docs/agents").mkdir(parents=True)
+    (test_repo / "docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json").write_text("{}\n")
+    (test_repo / "docs/governance").mkdir(parents=True)
+    (test_repo / "docs/governance/current_operating_mode.yaml").write_text("mode: BOOTSTRAP\n")
+    monkeypatch.setattr(canonical_core_transport, "__file__", str(source_path))
+
+    transport = CanonicalNexusCoreTransportPort(tmp_path / "core.sqlite")
+    preparation = transport.open_or_reuse_mutation_binding(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        base_sha=base_sha,
+        base_tree=base_tree,
+        request={"allowed_files": ["tracked_a.txt"], "verifier_commands": ["pytest"]},
+    )
+
+    assert preparation["source_revision"] == f"git-commit:{base_sha}"
+    assert preparation["source_tree"] == f"git-tree:{base_tree}"

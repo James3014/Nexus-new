@@ -1021,21 +1021,21 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             or getattr(contract_arg, "controller_repo_root", None)
             or kwargs.get("repo_root")
         )
-        if repo_root:
-            repo_path = Path(repo_root)
-            try:
-                replacement_refs = subprocess.check_output(
-                    ["git", "for-each-ref", "--format=%(refname)", "refs/replace/"],
-                    cwd=str(repo_path),
-                    text=True,
-                    stderr=subprocess.DEVNULL,
-                    timeout=10,
-                    env=hardened_git.hardened_git_env(repo_path),
-                ).strip()
-            except (OSError, subprocess.SubprocessError):
-                raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_UNREADABLE") from None
-            if replacement_refs:
-                raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_PRESENT")
+        source_repo_root = Path(__file__).resolve().parents[2]
+        repo_path = Path(repo_root) if repo_root else source_repo_root
+        try:
+            replacement_refs = subprocess.check_output(
+                ["git", "for-each-ref", "--format=%(refname)", "refs/replace/"],
+                cwd=str(repo_path),
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                env=hardened_git.hardened_git_env(repo_path),
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_UNREADABLE") from None
+        if replacement_refs:
+            raise RuntimeError("CANONICAL_CORE_REPLACEMENT_REFS_PRESENT")
         base_tree = _exact_sha(kwargs.get("base_tree"))
         if base_tree is None:
             try:
@@ -1073,7 +1073,6 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         # Bind provenance to the exact Nexus-new checkout executing this adapter.
         # A historical hard-coded revision would make an otherwise current G7
         # receipt stale as soon as canonical main advances.
-        source_repo_root = Path(__file__).resolve().parents[2]
         index_path = source_repo_root / "docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json"
         mode_path = source_repo_root / "docs/governance/current_operating_mode.yaml"
         try:
