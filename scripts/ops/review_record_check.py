@@ -456,6 +456,20 @@ def _hex_tokens(text: str) -> list[str]:
     return _HEX_TOKEN.findall(text.lower())
 
 
+def _bold_accept_lines(lines: list[str], head: str) -> bool:
+    """True when a line is a bold plain ACCEPT verdict that names the head (#3429).
+
+    In a comment with such a verdict line, a line without bold is findings text: it may
+    quote REJECT or CONDITIONAL words without taking the ACCEPT back.
+    """
+    return any(
+        re.search(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*", line)
+        and not re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, line)
+        and (not head or names_head(line, head))
+        for line in lines
+    )
+
+
 def names_head(text: str, head: str) -> bool:
     """True when the text contains the head sha or a hex prefix of it (>= MIN_PREFIX)."""
     head = head.lower()
@@ -1560,6 +1574,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             }
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
+    free_text_ok = _bold_accept_lines(lines, head)
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
         reads: list[tuple[str, bool]] = []
@@ -1672,6 +1687,8 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
         # A REJECT read only by its model-naming label (#3069) is "extra" too.
         base_starts = {at for _clause, at in _reject_clause_starts(line, labels=False)}
         for clause, start, span in _reject_reads(line):
+            if free_text_ok and "**" not in line:
+                continue  # findings text beside a bold ACCEPT verdict (#3429)
             # Where the clause text is first found: before #3039 the REJECT was placed
             # there, and its family read from there still counts (fail closed).
             found = plain_reject.find(clause, searched)
@@ -1941,7 +1958,10 @@ def _conditional_record(
                 lines.append("")
             else:
                 lines.append(line)
+        free_text_ok = _bold_accept_lines(lines, "")
         for n, line in enumerate(lines):
+            if free_text_ok and "**" not in line:
+                continue
             if _CONDITIONAL_LINE.search(line):
                 selected = (index, comment, lines, n)
     if selected is None:

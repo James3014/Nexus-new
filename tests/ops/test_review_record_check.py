@@ -180,6 +180,32 @@ def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
     assert rrc.verdict_clauses(conditional) == []
 
 
+def test_free_text_reject_and_conditional_do_not_withdraw_accept():
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+        "- REJECT: possible issue was already fixed\n"
+        "- CONDITIONAL checks are discussed below\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_head_bound_verdict_line_rejects_withdraws_and_conditional_is_selected():
+    accepted = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+    reject = f"**Independent Claude review**: **REJECT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(accepted + reject)], [])["status"] == "MISSING_RECORD"
+    conditional = _conditional_body(sha=HEAD)
+    assert rrc._conditional_record([_c(conditional)]) is not None
+
+
+def test_conditional_accept_words_in_a_bullet_beside_a_bold_accept_are_free_text():
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+        "- the old CONDITIONAL ACCEPT form is gone\n"
+    )
+    assert rrc._conditional_record([_c(body)]) is None
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
 @pytest.mark.parametrize("pattern", ["**/*", "*/*", "*.*", "./**", "**", "../x", "/x", "a\\b"])
 def test_conditional_globs_reject_unsafe_patterns(pattern):
     assert not rrc._valid_conditional_glob(pattern)
