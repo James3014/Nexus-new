@@ -1022,7 +1022,11 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             or kwargs.get("repo_root")
         )
         source_repo_root = Path(__file__).resolve().parents[2]
-        repo_path = Path(repo_root) if repo_root else source_repo_root
+        if not repo_root:
+            # Without the controller root there is no repository in which the
+            # supplied base sha/tree can be proven free of replacement refs.
+            raise RuntimeError("CANONICAL_CORE_CONTROLLER_REPO_ROOT_MISSING")
+        repo_path = Path(repo_root)
         try:
             replacement_refs = subprocess.check_output(
                 ["git", "for-each-ref", "--format=%(refname)", "refs/replace/"],

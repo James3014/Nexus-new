@@ -1013,7 +1013,7 @@ def test_mutation_binding_ignores_replacement_ref_for_source_commit(
         )
 
 
-def test_mutation_binding_rejects_replacement_ref_without_repo_root(
+def test_mutation_binding_refuses_base_tree_without_controller_root_even_with_replace_ref(
     test_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from nexus.orchestrator import canonical_core_transport
@@ -1044,7 +1044,7 @@ def test_mutation_binding_rejects_replacement_ref_without_repo_root(
     monkeypatch.setattr(canonical_core_transport, "__file__", str(source_path))
 
     transport = CanonicalNexusCoreTransportPort(tmp_path / "core.sqlite")
-    with pytest.raises(RuntimeError, match="CANONICAL_CORE_REPLACEMENT_REFS_PRESENT"):
+    with pytest.raises(RuntimeError, match="CANONICAL_CORE_CONTROLLER_REPO_ROOT_MISSING"):
         transport.open_or_reuse_mutation_binding(
             task_id="task-1",
             attempt_id="attempt-1",
@@ -1054,7 +1054,7 @@ def test_mutation_binding_rejects_replacement_ref_without_repo_root(
         )
 
 
-def test_mutation_binding_accepts_base_tree_without_repo_root(
+def test_mutation_binding_accepts_base_tree_with_clean_controller_root(
     test_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from nexus.orchestrator import canonical_core_transport
@@ -1080,7 +1080,11 @@ def test_mutation_binding_accepts_base_tree_without_repo_root(
         attempt_id="attempt-1",
         base_sha=base_sha,
         base_tree=base_tree,
-        request={"allowed_files": ["tracked_a.txt"], "verifier_commands": ["pytest"]},
+        request={
+            "allowed_files": ["tracked_a.txt"],
+            "verifier_commands": ["pytest"],
+            "controller_repo_root": str(test_repo),
+        },
     )
 
     assert preparation["source_revision"] == f"git-commit:{base_sha}"
