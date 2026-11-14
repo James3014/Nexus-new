@@ -57,6 +57,7 @@ def run_sandbox_task(
     output_file: str | Path | None = None,
     cleanup: bool = True,
     runner_factory: SandboxRunnerFactory | None = None,
+    require_os_sandbox: bool = True,
 ) -> SandboxRunResult:
     root = Path(repo_root)
     parsed_command = parse_sandbox_command(command)
@@ -76,7 +77,7 @@ def run_sandbox_task(
             timeout_sec=timeout_sec,
             output_file=output_file,
             cleanup=cleanup,
-            require_os_sandbox=True,
+            require_os_sandbox=require_os_sandbox,
         )
     )
     return SandboxRunResult(
