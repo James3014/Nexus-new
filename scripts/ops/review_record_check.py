@@ -2003,7 +2003,7 @@ _OLDER_HTML_START = re.compile(
 )
 
 
-def _older_verdict_candidate_lines(body: str) -> list[str]:
+def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
     """Collect whitelisted older-review lines only from top-level Markdown paragraphs."""
     lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     candidates = []
@@ -2073,7 +2073,8 @@ def _older_verdict_candidate_lines(body: str) -> list[str]:
             for char in nearby
         ):
             continue
-        candidates.append(line)
+        header = _OLDER_RECORD_HEADER.fullmatch(lines[index - 1]) if index else None
+        candidates.append((line, header.group(1).lower() if header else None))
     return candidates
 
 
@@ -2084,7 +2085,7 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         if not isinstance(body, str):
             continue
         considered: set[str] = set()
-        for line in _older_verdict_candidate_lines(body):
+        for line, header_sha in _older_verdict_candidate_lines(body):
             match = _OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)
             if match is None:
                 continue
@@ -2093,12 +2094,17 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
                 if match.re is _OLDER_REVIEW_LINE
                 else match.group(1)
             )
+            sha = sha.strip("`").lower()
+            if header_sha is not None and not (
+                header_sha.startswith(sha) or sha.startswith(header_sha)
+            ):
+                continue
             if sha in considered:
                 continue
             if len(considered) >= MAX_OLDER_SHA_CANDIDATES_PER_COMMENT:
                 break
             considered.add(sha)
-            if not head.lower().startswith(sha.lower()):
+            if not head.lower().startswith(sha):
                 return True
     return False
 
