@@ -222,7 +222,7 @@ class SandboxRunner:
         if sys.platform == "darwin" and self.sandbox_exec_path:
             try:
                 res = subprocess.run(
-                    [self.sandbox_exec_path, "-p", "(version 1) (allow default)", "true"],
+                    [self.sandbox_exec_path, "-p", "(version 1) (allow default)", "/usr/bin/true"],
                     capture_output=True,
                     text=True,
                     timeout=2,
