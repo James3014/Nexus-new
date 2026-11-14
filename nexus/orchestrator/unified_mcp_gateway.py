@@ -632,6 +632,7 @@ def _loaded_git(*args: str, timeout: float = 3.0) -> str:
         text=True,
         timeout=timeout,
         check=False,
+        env=history_pinned_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
@@ -2920,7 +2921,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         live_head = base
         if isinstance(state.get("integration_approval_grant"), Mapping):
             controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
-            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False, env=history_pinned_env())
             live_head = live_head_result.stdout.strip()
             if live_head_result.returncode != 0 or live_head != expected_integration_head:
                 raise GatewayInputError("CANDIDATE_INTEGRATE_HEAD_DRIFT")

@@ -4861,6 +4861,7 @@ class SelfHostedTaskService(
                             cwd=controller_root,
                             capture_output=True,
                             timeout=10.0,
+                            env=history_pinned_env(),
                         )
                         if anc_result.returncode != 0:
                             failures.append("integration_ancestry_failed")
