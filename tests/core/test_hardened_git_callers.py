@@ -21,6 +21,16 @@ FILES = (
     "nexus/services/external_intelligence_closure.py",
     "nexus/services/external_intelligence_automation.py",
     "scripts/ops/verify_report_claims.py",
+    "scripts/ops/trusted_deletion_anchor.py",
+    "scripts/ops/trusted_dependency_contract.py",
+    "scripts/ops/mcp_gateway_durable.py",
+    "scripts/ops/pr_preflight.py",
+    "scripts/ops/sibling_bindings_check.py",
+    "scripts/ops/check_gateway_source_drift.py",
+    "scripts/ops/task_authority_freshness_check.py",
+    "scripts/ops/closeout_guard.py",
+    "scripts/ops/break_glass_recovery.py",
+    "scripts/governance/livefail_rollback.py",
     "nexus/delivery/evidence_verifier.py",
     "nexus/engine/phases/audit.py",
     "nexus/engine/pipeline_repair.py",
@@ -50,7 +60,13 @@ def _git_subcommand(args):
     return "?"
 
 
-PINNING_HELPERS = {"history_pinned_env", "hardened_git_env", "_git_no_replace_env"}
+PINNING_HELPERS = {
+    "history_pinned_env",
+    "hardened_git_env",
+    "_git_no_replace_env",
+    "_history_pinned_env",
+    "_anchor_git_env",
+}
 
 
 def _is_subprocess_call(node):
@@ -189,6 +205,123 @@ def test_history_reading_subprocess_git_calls_pass_env():
     assert offenders == [], "history-reading git subprocesses without a pinned env: " + ", ".join(
         offenders
     )
+
+
+def test_trusted_anchor_merge_base_ignores_grafts(tmp_path, monkeypatch):
+    import subprocess
+
+    from scripts.ops import trusted_deletion_anchor as anchor
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **__import__("os").environ,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True, env=env
+        ).stdout.strip()
+
+    git("init", "-q")
+    (repo / "a").write_text("a")
+    git("add", "a")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "--orphan", "orphan")
+    git("rm", "-q", "-rf", ".")
+    (repo / "b").write_text("b")
+    git("add", "b")
+    git("commit", "-qm", "orphan")
+    orphan = git("rev-parse", "HEAD")
+    (repo / ".git/info/grafts").write_text(f"{orphan} {base}\n")
+    assert (
+        subprocess.run(
+            ["git", "-C", str(repo), "merge-base", base, orphan], capture_output=True, env=env
+        ).returncode
+        == 0
+    )
+    with pytest.raises(ValueError, match="MERGE_BASE_NOT_UNIQUE"):
+        anchor._unique_merge_base(repo, base, orphan)
+
+
+def test_mcp_gateway_is_ancestor_ignores_grafts(tmp_path):
+    import os
+    import subprocess
+
+    from scripts.ops import mcp_gateway_durable as gateway
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **os.environ,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True, env=env
+        ).stdout.strip()
+
+    git("init", "-q")
+    (repo / "a").write_text("a")
+    git("add", "a")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "--orphan", "orphan")
+    git("rm", "-q", "-rf", ".")
+    (repo / "b").write_text("b")
+    git("add", "b")
+    git("commit", "-qm", "orphan")
+    orphan = git("rev-parse", "HEAD")
+    (repo / ".git/info/grafts").write_text(f"{orphan} {base}\n")
+    assert not gateway._is_ancestor(repo, base, orphan)
+
+
+def test_pr_preflight_git_wrapper_ignores_replace_ref(tmp_path):
+    import os
+    import subprocess
+
+    from scripts.ops import pr_preflight as preflight
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **os.environ,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True, env=env
+        ).stdout.strip()
+
+    git("init", "-q")
+    (repo / "a").write_text("a")
+    git("add", "a")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "--orphan", "orphan")
+    git("rm", "-q", "-rf", ".")
+    (repo / "b").write_text("b")
+    git("add", "b")
+    git("commit", "-qm", "orphan")
+    orphan = git("rev-parse", "HEAD")
+    git("replace", "--graft", orphan, base)
+    assert preflight._git(repo, "merge-base", base, orphan, check=False).returncode != 0
 
 
 @pytest.mark.parametrize(

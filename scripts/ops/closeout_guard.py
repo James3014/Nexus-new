@@ -1,24 +1,47 @@
 #!/usr/bin/env python3
-import sys
-import json
 import argparse
 import hashlib
+import json
+import os
 import subprocess
+import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 # 🛡️ Nexus Closeout Guard (Hard-Gate Enforcement)
 # [NEXUS CONFIG: FAIL-CLOSED RELEASE CONTRACT]
 
+def _history_pinned_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
 def _git_head_short(cwd: Path) -> str:
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(cwd)).decode().strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(cwd), env=_history_pinned_env()).decode().strip()
     except Exception:
         return ""
 
 
 def _git_out(repo_root: Path, *args: str) -> "subprocess.CompletedProcess[str]":
-    return subprocess.run(["git", *args], cwd=str(repo_root), capture_output=True, text=True, check=False)
+    return subprocess.run(["git", *args], cwd=str(repo_root), capture_output=True, text=True, check=False, env=_history_pinned_env())
 
 
 def compute_changed_files(repo_root: Path, base_ref: str = "origin/main"):
