@@ -183,8 +183,8 @@ def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
 def test_free_text_reject_and_conditional_do_not_withdraw_accept():
     body = (
         f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
-        "- REJECT: possible issue was already fixed\n"
-        "- CONDITIONAL checks are discussed below\n"
+        f"- a later REJECT at {HEAD[:9]} was fixed in the next commit\n"
+        "- the old CONDITIONAL checks are discussed below\n"
     )
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
 
@@ -195,6 +195,32 @@ def test_head_bound_verdict_line_rejects_withdraws_and_conditional_is_selected()
     assert rrc.evaluate(HEAD, DOCS, [_c(accepted + reject)], [])["status"] == "MISSING_RECORD"
     conditional = _conditional_body(sha=HEAD)
     assert rrc._conditional_record([_c(conditional)]) is not None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude: REJECT at {HEAD}",
+        f"- Claude r2: REJECT at {HEAD}",
+        f"- REJECT@{HEAD}: data loss",
+        f"Claude r2 REJECT at {HEAD}",
+    ],
+)
+def test_unbolded_reject_verdict_beside_a_bold_accept_still_withdraws(line):
+    accept = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(accept + line + "\n")], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"- Probe 2: the earlier Claude REJECT at {HEAD} no longer reproduces",
+        f"**Independent Claude review**: **ACCEPT at {HEAD}** (no CONDITIONAL items)",
+    ],
+)
+def test_prose_quoting_a_verdict_word_does_not_withdraw_a_bold_accept(line):
+    accept = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(accept + line + "\n")], [])["status"] == "OK"
 
 
 def test_conditional_accept_words_in_a_bullet_beside_a_bold_accept_are_free_text():
