@@ -69,6 +69,7 @@ from nexus.contracts.lifecycle_action import (
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,  # noqa: F401 - kept on the facade after the G10 move
 )
+from nexus.core.hardened_git import history_pinned_env
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,  # noqa: F401 - kept on the facade after the G7b move
     build_canonical_dispatch_envelope,  # noqa: F401 - kept on the facade after the G7b move
@@ -631,6 +632,7 @@ def _loaded_git(*args: str, timeout: float = 3.0) -> str:
         text=True,
         timeout=timeout,
         check=False,
+        env=history_pinned_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
@@ -641,6 +643,7 @@ def _git(*args: str, timeout: float = 3.0) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=CANONICAL_SOURCE_ROOT,
+        env=history_pinned_env(),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -2918,7 +2921,7 @@ class UnifiedMCPGateway(_OwnerAuthorityMixin, _TaskCardMixin, _CandidateOpsMixin
         live_head = base
         if isinstance(state.get("integration_approval_grant"), Mapping):
             controller_root = Path(str(contract.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
-            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False, env=history_pinned_env())
             live_head = live_head_result.stdout.strip()
             if live_head_result.returncode != 0 or live_head != expected_integration_head:
                 raise GatewayInputError("CANDIDATE_INTEGRATE_HEAD_DRIFT")

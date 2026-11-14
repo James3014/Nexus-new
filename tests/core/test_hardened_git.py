@@ -49,6 +49,27 @@ def _repo_with_local_work(root: Path) -> Path:
     return root
 
 
+def test_history_pinned_env_overrides_history_controls_and_preserves_index():
+    env = hardened_git.history_pinned_env({
+        "GIT_GRAFT_FILE": "/x",
+        "GIT_NO_REPLACE_OBJECTS": "0",
+        "GIT_CONFIG_COUNT": "5",
+        "GIT_CONFIG_KEY_0": "core.commitGraph",
+        "GIT_CONFIG_VALUE_0": "true",
+        "GIT_CONFIG_PARAMETERS": "core.commitGraph=true",
+        "GIT_REPLACE_REF_BASE": "refs/evil/",
+        "GIT_INDEX_FILE": "/tmp/index",
+    })
+    assert env["GIT_GRAFT_FILE"] == os.devnull
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "core.commitGraph"
+    assert env["GIT_CONFIG_VALUE_0"] == "false"
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    assert "GIT_REPLACE_REF_BASE" not in env
+    assert env["GIT_INDEX_FILE"] == "/tmp/index"
+
+
 def _restore_candidate_files(repo: Path) -> Any:
     searcher = CandidatePatchSearcher(parser=MagicMock(), patch_applier=MagicMock())
     return searcher._restore_files(repo, [cast(Any, SimpleNamespace(file_path="notes.py"))])

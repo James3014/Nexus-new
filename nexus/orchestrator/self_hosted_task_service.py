@@ -97,6 +97,7 @@ from nexus.contracts.unified_runtime_receipt import (
     build_runtime_development_mapping,  # noqa: F401 - facade surface, used by parts/checkpoint.py
 )
 from nexus.contracts.workforce_admission import WorkforceDemand
+from nexus.core.hardened_git import history_pinned_env
 from nexus.core.task_continuity import (
     build_rehydration_projection,  # noqa: F401 - facade surface, used by parts/events.py
     events_from_attempt_records,  # noqa: F401 - facade surface, used by parts/events.py
@@ -753,8 +754,7 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
 
     source_root = Path(__file__).resolve().parents[2]
     current_rev = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=source_root, capture_output=True, text=True
-    ).stdout.strip()
+        ["git", "rev-parse", "HEAD"], cwd=source_root, capture_output=True, text=True, env=history_pinned_env()).stdout.strip()
     req_rev = request.get("required_lifecycle_revision")
     if req_rev:
         if current_rev != req_rev and not current_rev.startswith(req_rev):
@@ -975,8 +975,7 @@ def _repository_root_from_git() -> Path | None:
         ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
         cwd=source_root,
         capture_output=True,
-        text=True,
-    )
+        text=True, env=history_pinned_env())
     if result.returncode != 0:
         return None
     return Path(result.stdout.strip()).resolve().parent
@@ -1687,8 +1686,7 @@ class SelfHostedTaskService(
         if commit_sha:
             tree_sha = subprocess.run(
                 ["git", "rev-parse", f"{commit_sha}^{{tree}}"], cwd=controller,
-                capture_output=True, text=True, check=False,
-            ).stdout.strip()
+                capture_output=True, text=True, check=False, env=history_pinned_env()).stdout.strip()
         completed_at = _utc_now()
         action = dict(state.get("canonical_action") or action)
         action.update({
@@ -1770,8 +1768,7 @@ class SelfHostedTaskService(
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical branch drift")
         head = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=controller,
-            capture_output=True, text=True, check=False,
-        ).stdout.strip()
+            capture_output=True, text=True, check=False, env=history_pinned_env()).stdout.strip()
         if expected_commit_sha and head != expected_commit_sha:
             raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: HEAD differs from expected commit")
         worktree_manager = WorktreeManager(
@@ -1795,18 +1792,15 @@ class SelfHostedTaskService(
             raise RuntimeError("DIRECT_CANONICAL_REVISION_REQUIRED: controller_revision must be an exact SHA")
         ancestry = subprocess.run(
             ["git", "merge-base", "--is-ancestor", base, head], cwd=controller,
-            capture_output=True, check=False,
-        )
+            capture_output=True, check=False, env=history_pinned_env())
         if ancestry.returncode != 0:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit is not descended from controller_revision")
         changed = subprocess.run(
             ["git", "diff", "--name-only", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
-        ).stdout.splitlines()
+            capture_output=True, text=True, check=False, env=history_pinned_env()).stdout.splitlines()
         deleted = subprocess.run(
             ["git", "diff", "--diff-filter=D", "--name-only", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
-        ).stdout.splitlines()
+            capture_output=True, text=True, check=False, env=history_pinned_env()).stdout.splitlines()
         allowed = tuple(str(path).rstrip("/") for path in request.get("allowed_files") or ())
         if not changed:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit has no scoped changes")
@@ -1817,14 +1811,12 @@ class SelfHostedTaskService(
             raise RuntimeError("DIRECT_CANONICAL_SCOPE_MISMATCH: commit changed files outside allowed scope")
         diff_check = subprocess.run(
             ["git", "diff", "--check", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
-        )
+            capture_output=True, text=True, check=False, env=history_pinned_env())
         if diff_check.returncode != 0:
             raise RuntimeError("DIRECT_CANONICAL_DIFF_CHECK_FAILED: " + diff_check.stdout.strip())
         commit_shape = subprocess.run(
             ["git", "rev-list", "--parents", "-n", "1", head], cwd=controller,
-            capture_output=True, text=True, check=False,
-        ).stdout.split()
+            capture_output=True, text=True, check=False, env=history_pinned_env()).stdout.split()
         if len(commit_shape) != 2:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: merge commit is not allowed")
         verifier_started = time.perf_counter()
@@ -4752,8 +4744,7 @@ class SelfHostedTaskService(
                             cwd=controller_root,
                             capture_output=True,
                             text=True,
-                            timeout=10.0,
-                        )
+                            timeout=10.0, env=history_pinned_env())
                         if resolved_ref.returncode != 0:
                             failures.append("candidate_ref_unresolved")
                         elif resolved_ref.stdout.strip() != candidate_commit:
@@ -4764,8 +4755,7 @@ class SelfHostedTaskService(
                             cwd=controller_root,
                             capture_output=True,
                             text=True,
-                            timeout=10.0,
-                        )
+                            timeout=10.0, env=history_pinned_env())
                         if resolved_tree.returncode != 0:
                             failures.append("candidate_ref_tree_unresolved")
                         elif resolved_tree.stdout.strip() != candidate_tree:
@@ -4871,6 +4861,7 @@ class SelfHostedTaskService(
                             cwd=controller_root,
                             capture_output=True,
                             timeout=10.0,
+                            env=history_pinned_env(),
                         )
                         if anc_result.returncode != 0:
                             failures.append("integration_ancestry_failed")
@@ -5580,10 +5571,10 @@ class SelfHostedTaskService(
                 raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT") from exc
             if candidate_ref_head != candidate_sha:
                 raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT")
-            ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", candidate_sha, current_head], cwd=controller_root, capture_output=True, text=True)
+            ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", candidate_sha, current_head], cwd=controller_root, capture_output=True, text=True, env=history_pinned_env())
             if ancestry.returncode != 0:
                 raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_ANCESTRY_REQUIRED")
-            old_ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", old_pre_apply_head, current_head], cwd=controller_root, capture_output=True, text=True)
+            old_ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", old_pre_apply_head, current_head], cwd=controller_root, capture_output=True, text=True, env=history_pinned_env())
             if old_ancestry.returncode != 0:
                 raise RuntimeError("CLOSURE_INTEGRATING_PRE_APPLY_HEAD_REQUIRED")
         if failed_pre_apply:
@@ -7040,8 +7031,7 @@ class SelfHostedTaskService(
                 ["git", "merge-base", "--is-ancestor", str(candidate), receipt.integration_commit_sha],
                 cwd=controller_root,
                 capture_output=True,
-                text=True,
-            )
+                text=True, env=history_pinned_env())
             if result.returncode != 0:
                 raise RuntimeError("receipt recovery result does not contain candidate")
         return self._record_integration(receipt, task_id=task_id)
@@ -7435,8 +7425,7 @@ class SelfHostedTaskService(
                     ["git", "merge-base", "--is-ancestor", candidate_sha, receipt.integration_commit_sha],
                     cwd=controller_root,
                     capture_output=True,
-                    text=True,
-                )
+                    text=True, env=history_pinned_env())
                 if res.returncode != 0:
                     raise RuntimeError("integration result commit does not contain candidate commit")
         except Exception as exc:

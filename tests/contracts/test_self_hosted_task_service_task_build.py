@@ -948,7 +948,11 @@ def test_controller_revision_default_is_git_head(service, roots, repo, monkeypat
     assert contract.controller_revision == repo.b
     assert contract.target_base_revision == repo.b
     assert calls == [
-        (["git", "rev-parse", "HEAD"], str(repo.root.resolve()), ["capture_output", "cwd", "text"])
+        (
+            ["git", "rev-parse", "HEAD"],
+            str(repo.root.resolve()),
+            ["capture_output", "cwd", "env", "text"],
+        )
     ]
     # an empty revision also asks git; a given one does not
     assert (
@@ -1122,14 +1126,70 @@ def test_refresh_allowed_for_ancestors(repo, monkeypatch) -> None:
         (
             ["git", "merge-base", "--is-ancestor", repo.a, repo.b],
             root,
-            ["capture_output", "cwd", "text"],
+            ["capture_output", "cwd", "env", "text"],
         ),
         (
             ["git", "merge-base", "--is-ancestor", repo.a, repo.b],
             root,
-            ["capture_output", "cwd", "text"],
+            ["capture_output", "cwd", "env", "text"],
         ),
     ]
+
+
+def test_refresh_ancestry_ignores_replace_ref(repo) -> None:
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+    subprocess.run(
+        ["git", "checkout", "--orphan", "unrelated"],
+        cwd=repo.root,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "unrelated",
+        ],
+        cwd=repo.root,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    unrelated = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo.root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", f"refs/replace/{repo.b}", unrelated],
+        cwd=repo.root,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    unpinned = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", repo.a, repo.b],
+        cwd=repo.root,
+        env=env,
+        check=False,
+        capture_output=True,
+    )
+    assert unpinned.returncode != 0
+    existing = _existing(controller=repo.a, target=repo.a)
+    assert (
+        refresh(existing, {"task_id": "t1", "what": "W"}, _contract(repo.root, repo.b, repo.b))
+        is True
+    )
 
 
 def test_refresh_controller_only_or_target_only(repo) -> None:

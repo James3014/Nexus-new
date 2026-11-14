@@ -139,19 +139,16 @@ class _ReconcileRecoveryMixin:
         }
         try:
             observed["current_head"] = _service_module().subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.strip()
+                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False, env=_service_module().history_pinned_env()).stdout.strip()
             observed["dirty"] = bool(_service_module().subprocess.run(
                 ["git", "status", "--porcelain=v1"], cwd=controller, capture_output=True, text=True, check=False,
             ).stdout.strip())
             if len(base) == 40:
                 observed["commits_since_base"] = _service_module().subprocess.run(
                     ["git", "diff", "--name-only", f"{base}..HEAD"], cwd=controller,
-                    capture_output=True, text=True, check=False,
-                ).stdout.splitlines()
+                    capture_output=True, text=True, check=False, env=_service_module().history_pinned_env()).stdout.splitlines()
             observed["working_tree_changes"] = _service_module().subprocess.run(
-                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.splitlines()
+                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False, env=_service_module().history_pinned_env()).stdout.splitlines()
         except OSError as exc:
             observed["probe_error"] = str(exc)
         return self._record_direct_failure(
@@ -198,6 +195,7 @@ class _ReconcileRecoveryMixin:
             # rooted even under diff.relative.  A failing probe is not evidence.
             result = _service_module().subprocess.run(
                 ["git", *args], cwd=controller, capture_output=True, text=True, check=False,
+                env=_service_module().history_pinned_env(),
             )
             if result.returncode != 0:
                 raise _ListingProbeFailed(f"git {' '.join(args)} exited {result.returncode}")
@@ -206,13 +204,11 @@ class _ReconcileRecoveryMixin:
         probe_error = ""
         try:
             observed["current_head"] = _service_module().subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.strip()
+                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False, env=_service_module().history_pinned_env()).stdout.strip()
             if len(expected_head) == 40 and observed["current_head"]:
                 ancestor = _service_module().subprocess.run(
                     ["git", "merge-base", "--is-ancestor", expected_head, str(observed["current_head"])],
-                    cwd=controller, capture_output=True, text=True, check=False,
-                )
+                    cwd=controller, capture_output=True, text=True, check=False, env=_service_module().history_pinned_env())
                 observed["expected_head_is_ancestor"] = ancestor.returncode == 0
                 if observed["expected_head_is_ancestor"]:
                     observed["commits_since_base"] = listing(

@@ -13,7 +13,7 @@ import stat
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 GIT_TIMEOUT_S = 120.0
 # Command-line config outranks repository config: hooks and fsmonitor are switched off,
@@ -29,6 +29,37 @@ _GIT_OVERRIDES = (
     "-c",
     "commit.gpgSign=false",
 )
+_HISTORY_ENV_PINS = {
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_GRAFT_FILE": os.devnull,
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.commitGraph",
+    "GIT_CONFIG_VALUE_0": "false",
+}
+
+
+def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """Copy an environment while removing overrides to git's history pins."""
+    env = dict(os.environ if base is None else base)
+    for key in tuple(env):
+        upper = key.upper()
+        if (
+            upper
+            in {
+                "GIT_REPLACE_REF_BASE",
+                "GIT_GRAFT_FILE",
+                "GIT_NO_REPLACE_OBJECTS",
+                "GIT_CONFIG_COUNT",
+                "GIT_CONFIG_PARAMETERS",
+            }
+            or upper.startswith("GIT_CONFIG_KEY_")
+            or upper.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(key)
+    env.update(_HISTORY_ENV_PINS)
+    return env
+
+
 # Caller-supplied git settings never take precedence over the runner's hardening: a caller
 # may put ``-c`` pairs ahead of the subcommand only for the commit identity or for a setting
 # pinned above (whose pinned value comes after the caller's and so wins). Any other key, and
@@ -75,14 +106,10 @@ def hardened_git_env(
         GIT_CONFIG_GLOBAL=os.devnull,
         GIT_ATTR_NOSYSTEM="1",
         GIT_NO_LAZY_FETCH="1",
-        GIT_NO_REPLACE_OBJECTS="1",
-        GIT_GRAFT_FILE=os.devnull,
-        GIT_CONFIG_COUNT="1",
-        GIT_CONFIG_KEY_0="core.commitGraph",
-        GIT_CONFIG_VALUE_0="false",
         GIT_TERMINAL_PROMPT="0",
         GIT_CEILING_DIRECTORIES=str(repo_dir.parent),
     )
+    env.update(_HISTORY_ENV_PINS)
     if git_dir is not None:
         env.update(GIT_DIR=str(git_dir), GIT_WORK_TREE=str(repo_dir))
     if common_dir is not None:
