@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 import pytest
 
+from nexus.core.contained_write import root_identity
 from nexus.engine.ultra_review_service import os_sandbox_available
 from nexus.evidence.receipt_base import audit_product_receipt_coverage
 from nexus.services.capability_registry import (
@@ -420,6 +421,8 @@ def _run_family_canary_impl(
     # callers can isolate parallel runs with NEXUS_CLOSURE_SCRATCH.
     canary_root = CANARY_WORKSPACE_ROOT / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
+    canary_root = canary_root.resolve()
+    canary_root_identity = root_identity(canary_root)
     if positive and name == "meta_opt":
         # The meta_opt mainchain entry persists its canary episode through the
         # canonical outcome memory, which is idempotent per task/attempt/action.
@@ -793,6 +796,7 @@ def _run_family_canary_impl(
             IsolatedVerifierRequest(
                 task_id=str(c.get("task_id") or task_id),
                 workspace_path=str(canary_root),
+                workspace_identity=canary_root_identity,
                 verifier_command=command,
                 timeout_sec=15.0,
                 verifier_allowed=True,

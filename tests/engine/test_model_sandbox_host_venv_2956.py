@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.core.contained_write import root_identity
 from nexus.core.drone_engine import DroneToolBox
 from nexus.engine import model_output_sandbox as mos
 from nexus.engine import sandboxed_lane
@@ -54,6 +55,7 @@ def test_isolated_verifier_runs_its_own_interpreter(tmp_path, host_prefix_in_den
         IsolatedVerifierRequest(
             task_id="t-2956",
             workspace_path=str(tmp_path),
+            workspace_identity=root_identity(tmp_path),
             verifier_command=(sys.executable, "-I", "-c", "open('ok.txt', 'w').write('x')"),
             verifier_allowed=True,
         )

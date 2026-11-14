@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Tuple
 
-from nexus.core.contained_write import write_text_in_root
+from nexus.core.contained_write import PinnedRoot, root_identity, write_text_in_root
 from nexus.core.hardened_git import (
     repository_config_can_start_a_program,
     repository_git_dir,
@@ -393,15 +393,17 @@ class ReproductionRunner:
             # copy of repo_dir and in record_dir; no barrier means nothing runs (#2945). Nothing
             # it writes is left in repo_dir, where verification later runs.
             with disposable_repo_copy(self.repo_dir, prefix="repro-run-") as work:
+                work_identity = root_identity(work)
+                source_root = Path(self.repo_dir).resolve()
                 subprocess_started = True
                 res = run_model_argv(
                     [self.python_executable, "reproduce_bug.py"],
-                    work_dir=work,
+                    work_dir=PinnedRoot(work, work_identity),
                     timeout=repro_run_timeout,
                     extra_env={self._FAILURE_RECORD_ENV: str(record_path)},
                     readable=(
                         *interpreter_readable_roots(self.python_executable),
-                        Path(self.repo_dir).resolve(),
+                        source_root,
                     ),
                     writable=(record_dir,),
                 )
