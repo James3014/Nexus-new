@@ -196,3 +196,244 @@ def test_short_sha_of_current_head_does_not_start_round_two():
     result = rrc.evaluate(head, files, comments, [])
     assert result["route"] == "r1"
     assert result["status"] != "OK"
+
+
+def _review_record(head, verdict):
+    return comment(
+        f"## Review record — head `{head}`\n"
+        f"**Independent Claude review** (Claude Opus 5.5, separate agent): "
+        f"**{verdict} at {head}**.\n"
+    )
+
+
+def _cross_model_record(model, verdict):
+    return comment(f"**Cross-model review ({model})**\n- Verdict: **{verdict}** at {HEAD}\n")
+
+
+@pytest.mark.parametrize(
+    ("files", "bodies", "expected"),
+    [
+        (
+            LOW,
+            [
+                f"Claude review: REJECT@{OLD}",
+                f"Claude review: REJECT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            HIGH,
+            [
+                f"Claude review: REJECT@{OLD}",
+                f"Claude review: REJECT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                f"Claude review: REJECT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Claude review: ACCEPT@{HEAD}",
+                f"Claude review: REJECT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            HIGH,
+            [
+                _review_record(OLD, "REJECT").get("body"),
+                _review_record(HEAD, "REJECT").get("body"),
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Claude review: REJECT@{HEAD[:9]}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Claude review: REJECT@{HEAD[:7]}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                f"Cross-model review: REJECT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                _cross_model_record("Gemini 3.8 Flash via agy", "REJECT")["body"],
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                _cross_model_record("GPT-6 Luna via codex", "REJECT")["body"],
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                _cross_model_record("Gemini cross-model review", "REJECT")["body"],
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                f"OpenAI review: REJECT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+        (
+            HIGH,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Claude review: ACCEPT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+                _cross_model_record("Gemini 3.8 Flash via agy", "REJECT")["body"],
+            ],
+            "MISSING_CROSS_MODEL",
+        ),
+        (
+            LOW,
+            [
+                f"Gemini review: REJECT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "MISSING_RECORD",
+        ),
+    ],
+)
+def test_must_block_review_record_routes(files, bodies, expected):
+    assert evaluate(files, [comment(body) for body in bodies])["status"] == expected
+
+
+@pytest.mark.parametrize(
+    ("files", "bodies", "expected_route", "satisfied_by"),
+    [
+        (
+            LOW,
+            [
+                f"Claude review: REJECT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "r2+",
+            "gemini+codex",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"GPT review: ACCEPT@{HEAD}",
+            ],
+            "r2+",
+            "gemini+codex",
+        ),
+        (
+            LOW,
+            [
+                f"Claude review: REJECT@{OLD}",
+                f"Claude review: REJECT@{HEAD}",
+                f"Claude review: ACCEPT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "r2+",
+            "claude",
+        ),
+        (
+            HIGH,
+            [
+                f"Claude review: ACCEPT@{OLD}",
+                f"Claude review: ACCEPT@{HEAD}",
+                f"Gemini review: ACCEPT@{HEAD}",
+                f"Codex review: ACCEPT@{HEAD}",
+            ],
+            "r2+",
+            "claude+cross_model",
+        ),
+    ],
+)
+def test_must_pass_review_record_routes(files, bodies, expected_route, satisfied_by):
+    result = evaluate(files, [comment(body) for body in bodies])
+    assert result["status"] == "OK"
+    assert result["route"] == expected_route
+    assert result["satisfied_by"] == satisfied_by
+
+
+def test_older_gemini_reject_does_not_start_round_two():
+    result = evaluate(
+        LOW,
+        [comment(f"Gemini review: REJECT@{OLD}"), accept("gemini"), accept("codex")],
+    )
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
+def test_older_sha_scan_is_linear_enough():
+    comments = []
+    for comment_index in range(3):
+        lines = [
+            f"finding {line_index} {comment_index:02x}{line_index:038x}"
+            for line_index in range(400)
+        ]
+        comments.append(comment("\n".join(lines)))
+    import time
+
+    started = time.perf_counter()
+    rrc.evaluate(HEAD, LOW[0:0] + LOW, comments, [])
+    assert time.perf_counter() - started < 1

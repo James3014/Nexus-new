@@ -1940,10 +1940,20 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         body = comment.get("body") if isinstance(comment, dict) else None
         if not isinstance(body, str):
             continue
+        candidate_lines = [
+            line
+            for line in body.splitlines()
+            if ("claude" in line.lower() or "opus" in line.lower())
+            and (
+                re.search(r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b", line)
+                or ("review record" in line.lower() and "head" in line.lower())
+            )
+        ]
         # _classify uses the same read-vs-quoted rules as standing verdicts: it
         # ignores blockquotes, fences, and inline-quoted verdicts while retaining
         # the ordinary reviewer/verdict positions used by the standing logic.
-        for sha in dict.fromkeys(match.group(1) for match in _HEX_TOKEN.finditer(body)):
+        candidate_text = "\n".join(candidate_lines)
+        for sha in dict.fromkeys(match.group(1) for match in _HEX_TOKEN.finditer(candidate_text)):
             if head.lower().startswith(sha.lower()):
                 continue
             parsed = _classify(body, sha)
@@ -1961,14 +1971,26 @@ def _standing_model_families(events: list[dict[str, Any]]) -> set[str]:
     for event in events:
         if event.get("rebuttal"):
             continue
+        if event.get("family") == "claude":
+            specific.append(event)
+            continue
         reviewer = event.get("reviewer")
         word = reviewer.lower() if isinstance(reviewer, str) else ""
         if word.startswith("gemini"):
             family = "gemini"
         elif word.startswith(("codex", "gpt")):
             family = "codex"
-        else:
+        elif event.get("family") == "cross_model" and event["kind"] == "reject":
+            # A generic cross-model REJECT withdraws either route-family ACCEPT.
+            specific.append(dict(event, family="codex", reviewer=None))
             continue
+        elif event.get("family") == "cross_model":
+            specific.append(event)
+            continue
+        else:
+            # All non-Claude verdicts participate in the same route fold. This
+            # includes headers classified as cross-model or without a model name.
+            family = "codex"
         specific.append(dict(event, family=family))
     return standing_families(specific)
 
@@ -1988,6 +2010,25 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
             if allow_rebuttal or not event.get("rebuttal"):
                 events.append(dict(event, comment=number))
     return events
+
+
+def _route_model_events_at(
+    head: str, comments: list[Any], allow_rebuttal: bool
+) -> list[dict[str, Any]]:
+    """Fold route-model events, including generic cross-model/OpenAI REJECT headers."""
+    events = _fold_events_at(head, comments, allow_rebuttal)
+    for number, comment in enumerate(comments):
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str) or not re.search(r"\b(?:cross-model|openai)\b", body, re.I):
+            continue
+        normalized = re.sub(r"\b(?:cross-model|openai)\b", "Gemini", body, flags=re.I)
+        record = classify_record(normalized, head)
+        if record is None:
+            continue
+        for event in record["events"]:
+            if event["kind"] == "reject" and (allow_rebuttal or not event.get("rebuttal")):
+                events.append(dict(event, comment=number, reviewer=None))
+    return sorted(events, key=lambda event: event.get("comment", 0))
 
 
 _CONDITIONAL_LINE = re.compile(r"\bCONDITIONAL\s+ACCEPT\b")
@@ -2132,9 +2173,22 @@ def evaluate(
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
     independent_head = approved_reviews > 0 or "claude" in standing or bool(conditional_verified)
     cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
-    model_families = _standing_model_families(_fold_events_at(head, comments, allow_rebuttal))
+    model_families = _standing_model_families(
+        _route_model_events_at(head, comments, allow_rebuttal)
+    )
     gemini_codex = {"gemini", "codex"} <= model_families
-    gemini_route = route == "r2+" and gemini_codex
+    route_row = next(
+        item
+        for item in REVIEW_ROUTES
+        if item.risk == ("high" if risky else "low") and item.round == route.removeprefix("r")
+    )
+    gemini_alternative = ("gemini", "codex") in route_row.alternatives
+    folded_events = _fold_events_at(head, comments, allow_rebuttal)
+    claude_events = [event for event in folded_events if event["family"] == "claude"]
+    claude_reject_standing = any(
+        event["kind"] == "reject" for event in claude_events
+    ) and "claude" not in standing_families(claude_events)
+    gemini_route = gemini_alternative and gemini_codex and not claude_reject_standing
     withdrawn = {
         event["family"]
         for record in records
