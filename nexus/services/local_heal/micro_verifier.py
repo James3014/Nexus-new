@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
 
+from nexus.core.contained_write import PinnedRoot, root_identity
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
@@ -191,6 +192,8 @@ class MicroVerifier:
         
         # Use metadata interpreter as fallback (not task-scoped)
         cmd_interpreter = task_interpreter or interpreter or "python3"
+        repo_identity = root_identity(repo_dir)
+        pinned_repo = PinnedRoot(repo_dir, repo_identity)
         
         # T2: If bare python3 is the only option, classify as env_blocked
         if cmd_interpreter == "python3" and not allow_bare_python and not task_scoped:
@@ -255,7 +258,7 @@ class MicroVerifier:
                         # only in repo_dir; no barrier means nothing runs (#2945).
                         result = run_model_argv(
                             [cmd_interpreter, "-c", probe_code, str(repo_dir), module_name],
-                            work_dir=repo_dir,
+                            work_dir=pinned_repo,
                             timeout=10,
                             readable=interpreter_readable_roots(cmd_interpreter),
                         )
@@ -324,7 +327,7 @@ class MicroVerifier:
                 try:
                     probe = run_model_argv(
                         [run_cmd[0], "-c", _PYTEST_PROBE, str(repo_dir)],
-                        work_dir=repo_dir,
+                        work_dir=pinned_repo,
                         timeout=10,
                         readable=interpreter_readable_roots(run_cmd[0]),
                     )
@@ -366,7 +369,7 @@ class MicroVerifier:
                         # The patched repo's tests (and any conftest.py in it) are model output.
                         result = run_model_argv(
                             run_cmd + [str(full_path), "-x", "--tb=short", "-q"],
-                            work_dir=repo_dir,
+                            work_dir=pinned_repo,
                             timeout=30,
                             readable=interpreter_readable_roots(run_cmd[0]),
                         )

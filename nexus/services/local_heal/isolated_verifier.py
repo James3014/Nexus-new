@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from nexus.core.contained_write import PinnedRoot, root_identity
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     argument_file_roots,
@@ -76,11 +78,13 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
         )
         
     try:
+        workspace = Path(request.workspace_path)
+        workspace_identity = root_identity(workspace)
         # The workspace holds a model-written patch: run its tests under the OS sandbox (no
         # network, writes only in the workspace, allowlisted env). No barrier, no run (#2936).
         res = run_model_argv(
             request.verifier_command,
-            work_dir=request.workspace_path,
+            work_dir=PinnedRoot(workspace, workspace_identity),
             timeout=request.timeout_sec,
             readable=(
                 *interpreter_readable_roots(request.verifier_command[0]),
