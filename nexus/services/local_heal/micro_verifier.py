@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
 
+from nexus.core.contained_write import PinnedRoot, root_identity
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
@@ -151,6 +152,7 @@ class MicroVerifier:
         patched_files: List[str], 
         verifier_env_metadata: Optional[Dict[str, Any]] = None,
         env_taxonomy: Optional[Dict[str, Any]] = None,
+        workspace_identity: tuple[int, int] | None = None,
     ) -> MicroVerifyResult:
         """Run micro-verification on patched files.
 
@@ -160,6 +162,25 @@ class MicroVerifier:
         """
         meta = verifier_env_metadata or {}
         env_tax = env_taxonomy or {}
+        if workspace_identity is None:
+            return MicroVerifyResult(
+                passed=False,
+                syntax_ok=False,
+                error_message="MICRO_VERIFY_ROOT_IDENTITY_MISSING",
+                details="Captured workspace identity is required before verification.",
+                classifications=["env_blocked", "verifier_unavailable"],
+            )
+        try:
+            if root_identity(repo_dir) != tuple(workspace_identity):
+                raise ValueError("workspace root identity changed")
+        except (OSError, TypeError, ValueError):
+            return MicroVerifyResult(
+                passed=False,
+                syntax_ok=False,
+                error_message="MICRO_VERIFY_ROOT_REPLACED",
+                details="Workspace root no longer matches its captured identity.",
+                classifications=["env_blocked", "verifier_unavailable"],
+            )
         interpreter = meta.get("interpreter") or ""
         allow_bare_python = meta.get("allow_bare_python", False)
         pytest_cmd = meta.get("pytest_command") or ""
@@ -191,6 +212,7 @@ class MicroVerifier:
         
         # Use metadata interpreter as fallback (not task-scoped)
         cmd_interpreter = task_interpreter or interpreter or "python3"
+        pinned_repo = PinnedRoot(repo_dir, workspace_identity)
         
         # T2: If bare python3 is the only option, classify as env_blocked
         if cmd_interpreter == "python3" and not allow_bare_python and not task_scoped:
@@ -255,7 +277,7 @@ class MicroVerifier:
                         # only in repo_dir; no barrier means nothing runs (#2945).
                         result = run_model_argv(
                             [cmd_interpreter, "-c", probe_code, str(repo_dir), module_name],
-                            work_dir=repo_dir,
+                            work_dir=pinned_repo,
                             timeout=10,
                             readable=interpreter_readable_roots(cmd_interpreter),
                         )
@@ -324,7 +346,7 @@ class MicroVerifier:
                 try:
                     probe = run_model_argv(
                         [run_cmd[0], "-c", _PYTEST_PROBE, str(repo_dir)],
-                        work_dir=repo_dir,
+                        work_dir=pinned_repo,
                         timeout=10,
                         readable=interpreter_readable_roots(run_cmd[0]),
                     )
@@ -366,7 +388,7 @@ class MicroVerifier:
                         # The patched repo's tests (and any conftest.py in it) are model output.
                         result = run_model_argv(
                             run_cmd + [str(full_path), "-x", "--tb=short", "-q"],
-                            work_dir=repo_dir,
+                            work_dir=pinned_repo,
                             timeout=30,
                             readable=interpreter_readable_roots(run_cmd[0]),
                         )
@@ -475,6 +497,7 @@ def micro_verify_in_scratch_copy(
     """Run MicroVerifier.verify on a disposable copy of repo_dir."""
     try:
         scratch_dir = make_isolated_workspace(prefix="micro-verify-")
+        scratch_identity = root_identity(scratch_dir)
     except Exception as e:
         return MicroVerifyResult(
             passed=False,
@@ -500,6 +523,7 @@ def micro_verify_in_scratch_copy(
             result = MicroVerifier.verify(
                 patch_content=patch_content,
                 repo_dir=scratch_dir,
+                workspace_identity=scratch_identity,
                 patched_files=patched_files,
                 verifier_env_metadata=verifier_env_metadata,
                 env_taxonomy=env_taxonomy,

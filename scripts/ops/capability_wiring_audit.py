@@ -848,7 +848,10 @@ def worker_binding(route_name: str = "fast_bounded_implementation") -> dict[str,
 
 
 def make_verifier(
-    ws: Path, command: tuple[str, ...], task_id: str
+    ws: Path,
+    command: tuple[str, ...],
+    task_id: str,
+    workspace_identity: tuple[int, int],
 ) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Real isolated verifier over the fixture; its artifact hash is a sha256 of the real run."""
 
@@ -868,6 +871,7 @@ def make_verifier(
             IsolatedVerifierRequest(
                 task_id=str(context.get("task_id") or task_id),
                 workspace_path=str(ws),
+                workspace_identity=workspace_identity,
                 verifier_command=tuple(command),
                 timeout_sec=30.0,
                 verifier_allowed=True,
@@ -996,10 +1000,15 @@ def run_e2e(
     receipt_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """Full chain: run_mainchain -> UnifiedRuntime -> registry invokers -> executors."""
+    from nexus.core.contained_write import root_identity
     from nexus.services.mainchain_entry import build_mainchain_capability_invokers, run_mainchain
 
     request = _build_request(cap, scen, ws, task_id, trigger)
-    verifier = make_verifier(ws, scen.verifier_command, task_id) if scen.verifier_command else None
+    verifier = (
+        make_verifier(ws, scen.verifier_command, task_id, root_identity(ws))
+        if scen.verifier_command
+        else None
+    )
     local_service = None
     if scen.local_enabled:
         from nexus.services.local_assist_service import LocalAssistService
@@ -1034,6 +1043,7 @@ def run_registry_level(
     from nexus_runtime.kernel.capabilities import _capability_stage
     from nexus_runtime.kernel.constants import REQUEST_SCHEMA
 
+    from nexus.core.contained_write import root_identity
     from nexus.services.mainchain_entry import build_mainchain_capability_invokers
     from nexus.services.runtime_compat import (
         build_canonical_runtime_context,
@@ -1056,7 +1066,7 @@ def run_registry_level(
         chdir(ws),
     ):
         if scen.verifier_command:
-            verifier_ctx = make_verifier(ws, scen.verifier_command, task_id)({
+            verifier_ctx = make_verifier(ws, scen.verifier_command, task_id, root_identity(ws))({
                 "task_id": task_id,
                 "capability_evidence_bundle": {
                     "source_hash": sha256_bytes(
