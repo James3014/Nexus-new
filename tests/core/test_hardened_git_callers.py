@@ -20,6 +20,12 @@ FILES = (
     "nexus/services/agy_reviewer_runtime.py",
     "nexus/services/external_intelligence_closure.py",
     "nexus/services/external_intelligence_automation.py",
+    "scripts/ops/verify_report_claims.py",
+    "nexus/delivery/evidence_verifier.py",
+    "nexus/engine/phases/audit.py",
+    "nexus/engine/pipeline_repair.py",
+    "nexus/engine/repair/audit_evaluator.py",
+    "nexus/engine/planner_graph.py",
 )
 HISTORY_COMMANDS = {"merge-base", "rev-list", "diff", "log", "rev-parse", "cat-file", "show"}
 

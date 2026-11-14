@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 import os
 import subprocess
+from nexus.core.hardened_git import history_pinned_env
 from nexus.engine.phases.base import BasePhaseHandler
 from nexus.core.state_contracts import NexusState
 from nexus.core.parity_audit import ParityAuditor, SurfaceViolation
@@ -26,7 +27,7 @@ class AuditPhaseHandler(BasePhaseHandler):
         try:
             diff_files = subprocess.check_output(
                 ["git", "diff", "--name-only", "HEAD"],
-                cwd=self.project_root, text=True
+                cwd=self.project_root, text=True, env=history_pinned_env()
             ).strip().split("\n")
         except Exception:
             diff_files = []
@@ -43,7 +44,7 @@ class AuditPhaseHandler(BasePhaseHandler):
                 after_code = (self.project_root / filepath).read_text(encoding="utf-8")
                 before_code = subprocess.check_output(
                     ["git", "show", f"HEAD:{filepath}"],
-                    cwd=self.project_root, text=True
+                    cwd=self.project_root, text=True, env=history_pinned_env()
                 )
             except Exception:
                 continue

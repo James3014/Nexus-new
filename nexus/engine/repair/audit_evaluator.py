@@ -9,6 +9,7 @@ from typing import Any
 from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.events.transport import NexusEventBus
 from nexus.core.protocols import PipelineContextProtocol
+from nexus.core.hardened_git import history_pinned_env
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,8 @@ def evaluate_audit_result(
             import subprocess as _sp
             _diff_result = _sp.run(
                 ["git", "diff", "--stat", "HEAD"],
-                cwd=owner.engine.project_root, capture_output=True, text=True
+                cwd=owner.engine.project_root, capture_output=True, text=True,
+                env=history_pinned_env(),
             )
             _physical_has_changes = bool(_diff_result.stdout.strip())
             
@@ -82,7 +84,7 @@ def evaluate_audit_result(
             try:
                 plan_targets = ctx.state.metadata.get("plan_target_files", []) or ctx.pack.get("target_files", [])
                 if plan_targets and isinstance(plan_targets, list):
-                    diff_cmd = subprocess.run(["git", "diff", "--name-only"], cwd=owner.engine.project_root, capture_output=True, text=True)
+                    diff_cmd = subprocess.run(["git", "diff", "--name-only"], cwd=owner.engine.project_root, capture_output=True, text=True, env=history_pinned_env())
                     actual_modified = [p for p in diff_cmd.stdout.strip().split("\n") if p]
                     
                     # 提取檔名作比對，增加容錯率
