@@ -1980,8 +1980,9 @@ def _standing_model_families(events: list[dict[str, Any]]) -> set[str]:
             family = "gemini"
         elif word.startswith(("codex", "gpt")):
             family = "codex"
-        elif event.get("family") == "cross_model" and event["kind"] == "reject":
-            # A generic cross-model REJECT withdraws either route-family ACCEPT.
+        elif event["kind"] == "reject":
+            # A REJECT that names neither family withdraws both route families.
+            specific.append(dict(event, family="gemini", reviewer=None))
             specific.append(dict(event, family="codex", reviewer=None))
             continue
         elif event.get("family") == "cross_model":

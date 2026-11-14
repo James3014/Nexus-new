@@ -437,3 +437,19 @@ def test_older_sha_scan_is_linear_enough():
     started = time.perf_counter()
     rrc.evaluate(HEAD, LOW[0:0] + LOW, comments, [])
     assert time.perf_counter() - started < 1
+
+
+@pytest.mark.parametrize("rejecter", ["Cross-model review", "OpenAI review"])
+def test_unnamed_reject_withdraws_both_route_families(rejecter):
+    # Gemini ACCEPT, then a REJECT naming neither family, then a Codex ACCEPT: the Codex
+    # ACCEPT answers only its own family, so the Gemini ACCEPT must not be left standing.
+    head = "8d70e3ff83eb16c7b1f4af93ae9d87e01d5fe129"
+    older = "1234567abcdef1234567abcdef1234567abcdef0"
+    comments = [
+        {"body": f"Claude review: ACCEPT@{older}\n", "user": {"login": "u"}},
+        {"body": f"Gemini review: ACCEPT@{head}\n", "user": {"login": "u"}},
+        {"body": f"{rejecter}: REJECT@{head}\n", "user": {"login": "u"}},
+        {"body": f"Codex review: ACCEPT@{head}\n", "user": {"login": "u"}},
+    ]
+    result = rrc.evaluate(head, [{"filename": "docs/a.md"}], comments, [])
+    assert result["status"] != "OK"
