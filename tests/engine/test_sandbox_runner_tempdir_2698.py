@@ -7,7 +7,9 @@ after ``run_task`` returns and follows ``NEXUS_STATE_ROOT`` (#2688).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -117,6 +119,48 @@ def test_temp_dir_inside_project_fails_closed(tmp_path, monkeypatch):
     assert list(inner_tmp.iterdir()) == []
 
 
+def test_sandbox_exec_uses_trusted_path_and_records_identity(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    trusted = tmp_path / "trusted" / "sandbox-exec"
+    shadow_dir = tmp_path / "shadow"
+    trusted.parent.mkdir()
+    shadow_dir.mkdir()
+    shadow_marker = tmp_path / "shadow-was-used"
+    trusted.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    shadow = shadow_dir / "sandbox-exec"
+    shadow.write_text(f"#!/bin/sh\ntouch '{shadow_marker}'\nexit 0\n", encoding="utf-8")
+    trusted.chmod(0o755)
+    shadow.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shadow_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(sandbox_runner_mod, "SANDBOX_EXEC", str(trusted), raising=False)
+    monkeypatch.setattr(sandbox_runner_mod.sys, "platform", "darwin")
+
+    runner = SandboxRunner(root)
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = "probe-ok"
+        stderr = ""
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        return _Proc()
+
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)
+    result = runner.run_task("probe", command=_cmd(), timeout_sec=5)
+
+    trusted_path = str(trusted.resolve())
+    expected_digest = hashlib.sha256(trusted.read_bytes()).hexdigest()
+    assert not shadow_marker.exists()
+    assert captured["command"][:2] == [trusted_path, "-p"]
+    assert result["sandbox_exec_path"] == trusted_path
+    assert result["sandbox_exec_sha256"] == expected_digest
+    record = json.loads(Path(result["report_path"]).read_text(encoding="utf-8"))
+    assert record["sandbox_exec_path"] == trusted_path
+    assert record["sandbox_exec_sha256"] == expected_digest
+
+
 _WRITE_RULE = re.compile(r'\((allow|deny) file-write\* \(subpath "([^"]+)"\)\)')
 
 
@@ -138,6 +182,7 @@ def test_network_guard_is_not_writable_by_the_sandboxed_process(tmp_path, monkey
         monkeypatch.setattr(tempfile, "tempdir", str(tmp_root))
         runner = SandboxRunner(root)
         monkeypatch.setattr(runner, "has_sandbox_exec", True)
+        monkeypatch.setattr(runner, "sandbox_exec_path", sandbox_runner_mod.SANDBOX_EXEC)
         captured: dict = {}
 
         class _Proc:
@@ -154,7 +199,7 @@ def test_network_guard_is_not_writable_by_the_sandboxed_process(tmp_path, monkey
         monkeypatch.setattr(sandbox_runner_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", fake_run)  # #3052
         result = runner.run_task("guard", command=_cmd(), timeout_sec=5)
-        assert captured["cmd"][:2] == ["sandbox-exec", "-p"]
+        assert captured["cmd"][:2] == [sandbox_runner_mod.SANDBOX_EXEC, "-p"]
         profile = captured["cmd"][2]
         guard_dir = Path(captured["env"]["PYTHONPATH"].split(":")[0])
         # The guard lives with the run record, not in the removable scratch dir.
