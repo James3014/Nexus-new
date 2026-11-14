@@ -33,6 +33,7 @@ def test_each_route_accepts_its_complete_alternative(route):
     files = LOW if route.risk == "low" else HIGH
     comments = [comment(f"Claude review: ACCEPT@{OLD}\n")] if route.round == "2+" else []
     satisfied = None
+    result = None
     for group in route.alternatives:
         for family in group:
             if family == "claude":
@@ -46,6 +47,7 @@ def test_each_route_accepts_its_complete_alternative(route):
         satisfied = result["satisfied_by"]
         comments = [comment(f"Claude review: ACCEPT@{OLD}\n")] if route.round == "2+" else []
     assert satisfied is not None
+    assert result is not None
     assert result["route"] == ("r1" if route.round == "1" else "r2+")
     expected = (
         "claude+cross_model"

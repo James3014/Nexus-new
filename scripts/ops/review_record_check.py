@@ -1998,6 +1998,8 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         considered: set[str] = set()
         for line in _older_verdict_candidate_lines(body):
             match = _OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)
+            if match is None:
+                continue
             sha = match.group(1)
             if sha in considered:
                 continue
