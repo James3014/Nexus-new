@@ -292,7 +292,13 @@ class SandboxRunner:
         stderr: str = "",
         timed_out: bool = False,
         duration_sec: float = 0.0,
+        os_sandbox_enforced: bool = False,
+        workspace_source: str = "local_project_copy",
+        barrier_mode: str | None = None,
     ) -> dict[str, Any]:
+        network_allowed = not os_sandbox_enforced
+        if barrier_mode is None:
+            barrier_mode = "os_level_sandbox_exec" if os_sandbox_enforced else "python_sitecustomize"
         return {
             "schema": "nexus.sandbox_run_task.v1",
             "task": task,
@@ -304,7 +310,7 @@ class SandboxRunner:
             "duration_sec": duration_sec,
             "command": command,
             "cwd": str(cwd),
-            "workspace_source": "local_project_copy",
+            "workspace_source": workspace_source,
             "workspace_path": str(workspace_path),
             "run_id": run_id,
             "report_path": str(run_dir / "sandbox_result.json"),
@@ -314,7 +320,13 @@ class SandboxRunner:
             "error": error,
             "sandbox_exec_path": self.sandbox_exec_path,
             "sandbox_exec_sha256": self.sandbox_exec_sha256,
-            "network_allowed": False,
+            "network_allowed": network_allowed,
+            "network_barrier": {
+                "mode": barrier_mode,
+                "loopback_allowed": not os_sandbox_enforced,
+                "external_allowed": network_allowed,
+                "os_sandbox_enforced": os_sandbox_enforced,
+            },
             "hook_policy": {
                 "source_git_metadata_copied": False,
                 "git_hooks_copied": False,
@@ -488,6 +500,7 @@ socket.socket.connect = _guarded_socket_connect
         output_file: str | Path | None = None,
         cleanup: bool = True,
         elastic_profile: str | None = None,
+        require_os_sandbox: bool = False,
     ) -> dict[str, Any]:
         """Run an explicit local command inside a copied workspace sandbox."""
         if not command:
@@ -514,7 +527,25 @@ socket.socket.connect = _guarded_socket_connect
         workspace_path = scratch_dir / "workspace"
 
         result_payload: dict[str, Any] | None = None
+        os_sandbox_enforced = False
         try:
+            if require_os_sandbox and not (self.has_sandbox_exec and self.sandbox_exec_path):
+                result_payload = self._failure_result(
+                    task=task,
+                    command=command_list,
+                    run_id=run_id,
+                    run_dir=run_dir,
+                    workspace_path=workspace_path,
+                    cwd=cwd,
+                    output_file=output_file,
+                    cleanup=cleanup,
+                    error="os_sandbox_unavailable",
+                    duration_sec=time.time() - start_time,
+                    workspace_source="none_refused",
+                    barrier_mode="not_enforced",
+                )
+                return self._write_result(run_dir, result_payload, run_dir_identity)
+
             self._copy_workspace(workspace_path)
             cwd_path = Path(cwd)
             effective_cwd = cwd_path if cwd_path.is_absolute() else workspace_path / cwd_path
@@ -581,7 +612,9 @@ socket.socket.connect = _guarded_socket_connect
 
             if self.has_sandbox_exec and self.sandbox_exec_path:
                 if elastic_profile:
-                    applied_profile = elastic_profile
+                    # A caller profile may allow the network; the barrier is only claimed
+                    # because this last-match rule denies it (#3438).
+                    applied_profile = f"{elastic_profile}\n(deny network*)"
                 else:
                     # 動態影響路徑 (Blast Radius) 自動推導演算法
                     read_paths = [
@@ -654,6 +687,7 @@ socket.socket.connect = _guarded_socket_connect
                 ] + command_list
                 barrier_mode = "os_level_sandbox_exec"
                 loopback_allowed = False
+                os_sandbox_enforced = True
 
             # The task's command and everything it starts in its process group are killed
             # once it returns or times out (#3052).
@@ -677,6 +711,7 @@ socket.socket.connect = _guarded_socket_connect
                     stdout=proc.stdout,
                     stderr=proc.stderr,
                     duration_sec=duration_sec,
+                    os_sandbox_enforced=os_sandbox_enforced,
                 )
                 result_payload["run_dir_mismatch"] = mismatch
                 # _write_result sees the same mismatch and writes nothing.
@@ -721,6 +756,7 @@ socket.socket.connect = _guarded_socket_connect
                             stdout=proc.stdout,
                             stderr=proc.stderr,
                             duration_sec=duration_sec,
+                            os_sandbox_enforced=os_sandbox_enforced,
                         )
                         result_payload["run_dir_mismatch"] = str(exc)
                         return self._write_result(run_dir, result_payload, run_dir_identity)
@@ -759,7 +795,7 @@ socket.socket.connect = _guarded_socket_connect
                 "sandbox_exec_path": self.sandbox_exec_path,
                 "sandbox_exec_sha256": self.sandbox_exec_sha256,
                 **({"output_file_refused": output_refused} if output_refused else {}),
-                "network_allowed": False,
+                "network_allowed": not os_sandbox_enforced,
                 "hook_policy": {
                     "source_git_metadata_copied": False,
                     "git_hooks_copied": False,
@@ -768,7 +804,8 @@ socket.socket.connect = _guarded_socket_connect
                 "network_barrier": {
                     "mode": barrier_mode,
                     "loopback_allowed": loopback_allowed,
-                    "external_allowed": False,
+                    "external_allowed": not os_sandbox_enforced,
+                    "os_sandbox_enforced": os_sandbox_enforced,
                 },
             }
             return self._write_result(run_dir, result_payload, run_dir_identity)
@@ -785,6 +822,7 @@ socket.socket.connect = _guarded_socket_connect
                 cleanup=cleanup,
                 error=_run_dir_refusal_reason(exc),
                 duration_sec=time.time() - start_time,
+                os_sandbox_enforced=os_sandbox_enforced,
             )
             result_payload["run_dir_mismatch"] = str(exc)
             return self._write_result(run_dir, result_payload, run_dir_identity)
@@ -804,6 +842,7 @@ socket.socket.connect = _guarded_socket_connect
                 stderr=exc.stderr or "",
                 timed_out=True,
                 duration_sec=time.time() - start_time,
+                os_sandbox_enforced=os_sandbox_enforced,
             )
             return self._write_result(run_dir, result_payload, run_dir_identity)
         finally:
