@@ -266,6 +266,7 @@ def _captured_profile(tmp_root: Path, monkeypatch, elastic_profile: str | None =
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_root))
     runner = SandboxRunner(root)
     monkeypatch.setattr(runner, "has_sandbox_exec", True)
+    monkeypatch.setattr(runner, "sandbox_exec_path", sandbox_runner_mod.SANDBOX_EXEC)
     captured: dict = {}
 
     def fake_run(cmd, **kwargs):
@@ -279,7 +280,7 @@ def _captured_profile(tmp_root: Path, monkeypatch, elastic_profile: str | None =
     result = runner.run_task(
         "profile", command=_cmd(), timeout_sec=5, elastic_profile=elastic_profile
     )
-    assert captured["cmd"][:2] == ["sandbox-exec", "-p"]
+    assert captured["cmd"][:2] == [sandbox_runner_mod.SANDBOX_EXEC, "-p"]
     return captured, result
 
 
@@ -351,6 +352,7 @@ def test_symlinked_project_root_uses_the_real_run_dir_everywhere(tmp_path, monke
     attacker = tmp_path / "attacker"
     runner = SandboxRunner(link)
     monkeypatch.setattr(runner, "has_sandbox_exec", True)
+    monkeypatch.setattr(runner, "sandbox_exec_path", sandbox_runner_mod.SANDBOX_EXEC)
     seen: dict = {}
 
     def fake_run(cmd, **kwargs):
