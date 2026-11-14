@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+from nexus.core.hardened_git import history_pinned_env
 
 if TYPE_CHECKING:
     from nexus.orchestrator.task_contract import SelfHostedTaskContract
@@ -17,7 +18,7 @@ class CollaborationRealmVerifier:
 
     @staticmethod
     def _git(root: Path, *args: str) -> str:
-        env = os.environ.copy()
+        env = history_pinned_env()
         env["GIT_CONFIG_NOSYSTEM"] = "1"
         # Private collaboration repositories rely on the Owner's configured
         # credential helper.  Keep that bounded machine credential surface,

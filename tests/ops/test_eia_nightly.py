@@ -37,6 +37,27 @@ def _cp(argv: list[str], rc: int = 0, out: str = "", err: str = "") -> subproces
     return subprocess.CompletedProcess(argv, rc, out, err)
 
 
+def test_nightly_ancestor_check_ignores_repository_grafts(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "Nexus Test")
+    _git(repo, "config", "user.email", "nexus-test@example.invalid")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "--orphan", "unrelated")
+    _git(repo, "commit", "--allow-empty", "-qm", "orphan")
+    orphan = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "main")
+    (repo / ".git" / "info" / "grafts").write_text(f"{base} {orphan}\n")
+
+    nightly = en.Nightly.__new__(en.Nightly)
+    nightly.run = en.default_runner
+    assert not nightly._is_ancestor(repo, orphan, base)
+
+
 class FakeGitHub:
     def __init__(self, remote: dict[str, str]):
         self.remote = remote

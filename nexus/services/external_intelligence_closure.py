@@ -20,6 +20,7 @@ from typing import Any, Callable, Collection, Mapping, Sequence
 
 from nexus.core.argv_command import run_reaping_process_group
 from nexus.core.hardened_git import (
+    history_pinned_env,
     linked_worktree_git_dir,
     repository_config_can_start_a_program,
     repository_git_dir,
@@ -178,6 +179,7 @@ def _run_git(
             text=True,
             timeout=timeout,
             check=False,
+            env=history_pinned_env(),
         )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:1200]
@@ -303,9 +305,8 @@ def _raw_diff_patch(root: Path, base: str, head: str) -> str:
 
 
 def _git_no_replace_env() -> dict[str, str]:
-    """Environment for closure-owned git reads: ``refs/replace`` must not change what
-    closure sees as the base config or the base..candidate diff."""
-    return {**os.environ, "GIT_NO_REPLACE_OBJECTS": "1"}
+    """Pin closure reads against repository-controlled history rewriting."""
+    return history_pinned_env()
 
 
 def _integrity_git(root: Path, args: Sequence[str]) -> tuple[list[str], int | None, str, str]:
@@ -611,6 +612,7 @@ def _verify_task_card_binding(
         cwd=repository_root,
         capture_output=True,
         check=False,
+        env=history_pinned_env(),
     )
     if commit_check.returncode != 0:
         raise ClosureError("MAIN_SHA_NOT_FOUND")
@@ -619,6 +621,7 @@ def _verify_task_card_binding(
         cwd=repository_root,
         capture_output=True,
         check=False,
+        env=history_pinned_env(),
     )
     if blob_res.returncode != 0:
         raise ClosureError("TASK_CARD_NOT_FOUND")

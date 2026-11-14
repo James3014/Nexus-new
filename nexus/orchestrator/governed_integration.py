@@ -21,6 +21,7 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.core.argv_command import run_reaping_process_group
+from nexus.core.hardened_git import history_pinned_env
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerStatus,
@@ -112,7 +113,7 @@ class ControlledIntegrationManager:
     def _run_sanitised_git(
         args: Sequence[str], cwd: str | Path
     ) -> subprocess.CompletedProcess[str]:
-        git_env = os.environ.copy()
+        git_env = history_pinned_env()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         # Objects are read as recorded: a replacement ref written into the shared ref
@@ -277,9 +278,10 @@ class ControlledIntegrationManager:
         objects = cls._git([*git_path, "objects"], controller_root)
         shallow = Path(cls._git([*git_path, "shallow"], controller_root))
         object_format = cls._git(["rev-parse", "--show-object-format"], controller_root)
-        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env = history_pinned_env({
+            key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+        })
         env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-        env["GIT_NO_REPLACE_OBJECTS"] = "1"
         with tempfile.TemporaryDirectory(prefix="nexus-merge-tree-") as scratch:
             git_dir = Path(scratch) / "merge.git"
             subprocess.run(
@@ -289,11 +291,12 @@ class ControlledIntegrationManager:
             if shallow.is_file():
                 shutil.copyfile(shallow, git_dir / "shallow")
             env.update(GIT_DIR=str(git_dir), GIT_OBJECT_DIRECTORY=objects)
+            pinned_env = history_pinned_env(env)
             return subprocess.run(
                 ["git", "-c", f"core.hooksPath={os.devnull}", "-c", f"core.attributesFile={os.devnull}",
                  "-c", "merge.renormalize=false", f"--attr-source={head}",
                  "merge-tree", "--write-tree", "--no-messages", head, candidate],
-                cwd=scratch, env=env, capture_output=True, text=True,
+                cwd=scratch, env=pinned_env, capture_output=True, text=True,
             )  # fmt: skip
 
     @classmethod

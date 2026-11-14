@@ -49,6 +49,23 @@ def make_repo(tmp_path: Path) -> tuple[Path, str]:
     return root, _git(root, "rev-parse", "HEAD")
 
 
+def test_review_subject_rejects_graft_forged_ancestry(tmp_path):
+    root, base = make_repo(tmp_path)
+    original_branch = _git(root, "symbolic-ref", "--short", "HEAD")
+    _git(root, "checkout", "--orphan", "unrelated")
+    _git(root, "commit", "--allow-empty", "-m", "orphan")
+    orphan = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", original_branch)
+    (root / ".git" / "info" / "grafts").write_text(f"{base} {orphan}\n")
+
+    with pytest.raises(AgyReviewError, match="BASE_REVISION_NOT_ANCESTOR"):
+        collect_review_subject(
+            root,
+            expected_repository="James3014/Nexus-new",
+            base_revision=orphan,
+        )
+
+
 def prepare_subject(tmp_path: Path):
     root, base = make_repo(tmp_path)
     (root / "a.py").write_text("VALUE = 2\n", encoding="utf-8")

@@ -15,6 +15,11 @@ FILES = (
     "nexus/orchestrator/unified_mcp_gateway.py",
     "nexus/orchestrator/unified_mcp_gateway_parts/worker_candidate.py",
     "nexus/orchestrator/unified_mcp_gateway_parts/candidate_ops.py",
+    "nexus/orchestrator/collaboration_realm.py",
+    "nexus/orchestrator/governed_integration.py",
+    "nexus/services/agy_reviewer_runtime.py",
+    "nexus/services/external_intelligence_closure.py",
+    "nexus/services/external_intelligence_automation.py",
 )
 HISTORY_COMMANDS = {"merge-base", "rev-list", "diff", "log", "rev-parse", "cat-file", "show"}
 
@@ -39,7 +44,7 @@ def _git_subcommand(args):
     return "?"
 
 
-PINNING_HELPERS = {"history_pinned_env", "hardened_git_env"}
+PINNING_HELPERS = {"history_pinned_env", "hardened_git_env", "_git_no_replace_env"}
 
 
 def _is_subprocess_call(node):
@@ -67,7 +72,7 @@ def _names_in(target):
 
 # Keys worktree_manager sets after pinning; they only disable system/global config, so they
 # cannot weaken the history pins. Any other GIT_* key (or a non-constant key) is tampering.
-HARMLESS_GIT_KEYS = {"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL"}
+HARMLESS_GIT_KEYS = {"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"}
 
 
 def _is_safe_item_key(key):
@@ -155,6 +160,11 @@ def unpinned_history_calls(source, name="<src>"):
             and isinstance(node.args[0], (ast.List, ast.Tuple))
         ):
             command = _git_subcommand(node.args[0].elts)
+            if command == "diff" and any(
+                isinstance(arg, ast.Constant) and arg.value in {"--cached", "--no-index"}
+                for arg in node.args[0].elts
+            ):
+                command = None
             if command is not None and (command == "?" or command in HISTORY_COMMANDS):
                 if not _env_is_pinned(node, scope):
                     offenders.append(f"{name}:{node.lineno}")

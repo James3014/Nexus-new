@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from nexus.core.hardened_git import history_pinned_env
+
 REVIEW_PACKET_SCHEMA = "nexus.agy_review_packet.v1"
 REVIEW_RECEIPT_SCHEMA = "nexus.agy_review_receipt.v1"
 REVIEW_PROFILE_VERSION = "nexus.rdc_agy_packet_review.v1"
@@ -85,6 +87,7 @@ def _git_bytes(root: Path, *args: str) -> bytes:
         ["git", "-C", str(root), *args],
         capture_output=True,
         check=False,
+        env=history_pinned_env(),
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).decode("utf-8", errors="replace").strip()
@@ -211,6 +214,7 @@ def collect_review_subject(
         ["git", "-C", str(root), "merge-base", "--is-ancestor", base, current_head],
         capture_output=True,
         check=False,
+        env=history_pinned_env(),
     )
     if ancestor.returncode != 0:
         raise AgyReviewError("BASE_REVISION_NOT_ANCESTOR")

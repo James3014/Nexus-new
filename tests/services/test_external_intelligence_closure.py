@@ -21,6 +21,7 @@ from nexus.services.external_intelligence_closure import (
     ClosureStore,
     CompositionWorkspaceAllocator,
     ExternalIntelligenceClosureRuntime,
+    _integrity_git,
     _unique_failed_owner,
     build_acceptance_packet,
     build_composition_repair_delta,
@@ -1134,6 +1135,27 @@ INTEGRITY_IDS = [
 
 def _integrity(verification: dict) -> dict:
     return {row["check_id"]: row for row in verification["integrity_checks"]}
+
+
+def test_closure_git_reader_ignores_repository_grafts(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "Nexus Test")
+    _git(repo, "config", "user.email", "nexus-test@example.invalid")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "--orphan", "unrelated")
+    _git(repo, "commit", "--allow-empty", "-qm", "orphan")
+    orphan = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "main")
+    (repo / ".git" / "info" / "grafts").write_text(f"{base} {orphan}\n")
+
+    _, returncode, stdout, stderr = _integrity_git(repo, ["rev-list", "--parents", "-n", "1", base])
+    assert returncode == 0, stderr
+    assert stdout.strip() == base
 
 
 def test_unit_integrity_checks_are_scoped_to_bound_base_and_recorded(tmp_path):
