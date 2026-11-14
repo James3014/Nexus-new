@@ -38,6 +38,7 @@ from nexus.contracts.lifecycle_action import (
     build_action_envelope,
 )
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
+from nexus.core.hardened_git import history_pinned_env
 from nexus.orchestrator.self_hosted_task_service import (
     candidate_dispose_effect,
     candidate_dispose_unknown_arguments,
@@ -455,7 +456,7 @@ class _CandidateOpsMixin(_CandidateOpsBase):
         if separate_head is not None:
             live_head = separate_head
         else:
-            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False)
+            live_head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_root, capture_output=True, text=True, check=False, env=history_pinned_env())
             live_head = live_head_result.stdout.strip()
             if live_head_result.returncode != 0:
                 raise _gateway().GatewayInputError("CANDIDATE_BIND_HEAD_DRIFT")

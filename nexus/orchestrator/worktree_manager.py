@@ -1604,11 +1604,13 @@ class WorktreeManager:
                     check=True,
                     capture_output=True,
                     text=True,
-                    env={
-                        **os.environ,
-                        "GIT_CONFIG_NOSYSTEM": "1",
-                        "GIT_CONFIG_GLOBAL": "/dev/null",
-                    },
+                    env=history_pinned_env(
+                        {
+                            **os.environ,
+                            "GIT_CONFIG_NOSYSTEM": "1",
+                            "GIT_CONFIG_GLOBAL": "/dev/null",
+                        }
+                    ),
                 ).stdout.strip()
             )
         common_dir = (
