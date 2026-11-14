@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Mapping, Optional
 
-from nexus.core.hardened_git import read_git_pointer_file
+from nexus.core.hardened_git import hardened_git_env, read_git_pointer_file
 
 CANONICAL_SOURCE_ROOT_ENV = "NEXUS_CANONICAL_SOURCE_ROOT"
 # Derive the repository root from this module's own location instead of a
@@ -115,6 +115,7 @@ def resolve_canonical_source_root(
             text=True,
             timeout=3,
             check=False,
+            env=hardened_git_env(resolved),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE") from exc
@@ -128,7 +129,13 @@ def resolve_canonical_source_root(
 def _git_text(root: Path, *args: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, timeout=5, check=False
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=hardened_git_env(root),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -142,6 +149,11 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
     descends from the loaded commit and differs from it only under ``tasks/``,
     so the Controller runs the loaded code plus Task Card bind commits only.
     """
+    replacement_refs = _git_text(loaded, "for-each-ref", "--format=%(refname)", "refs/replace/")
+    if replacement_refs is None:
+        return "REPLACEMENT_REFS_UNREADABLE"
+    if replacement_refs:
+        return "REPLACEMENT_REFS_PRESENT"
     controller_common = _git_text(
         controller, "rev-parse", "--path-format=absolute", "--git-common-dir"
     )
@@ -176,6 +188,7 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
             capture_output=True,
             timeout=5,
             check=False,
+            env=hardened_git_env(controller),
         )
     except (OSError, subprocess.SubprocessError):
         return "HEAD_UNREADABLE"
@@ -209,6 +222,7 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
             capture_output=True,
             timeout=5,
             check=False,
+            env=hardened_git_env(controller),
         )
         if ancestor.returncode != 0:
             return "LOADED_COMMIT_NOT_ANCESTOR"
@@ -228,6 +242,7 @@ def bound_controller_problem(controller: Path, loaded: Path) -> Optional[str]:
             capture_output=True,
             timeout=5,
             check=False,
+            env=hardened_git_env(controller),
         )
         if raw.returncode != 0:
             return "DIFF_UNREADABLE"
@@ -287,6 +302,7 @@ def _controller_worktree_problem(controller: Path) -> Optional[str]:
         capture_output=True,
         timeout=5,
         check=False,
+        env=hardened_git_env(controller),
     )
     if status.returncode != 0:
         return "STATUS_UNREADABLE"
@@ -309,6 +325,7 @@ def _controller_worktree_problem(controller: Path) -> Optional[str]:
         capture_output=True,
         timeout=10,
         check=False,
+        env=hardened_git_env(controller),
     )
     if flagged.returncode != 0:
         return "INDEX_UNREADABLE"
@@ -434,6 +451,7 @@ def resolve_rdc_repo_root(
             text=True,
             timeout=5,
             check=False,
+            env=hardened_git_env(resolved),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("RDC_REPO_ROOT_NOT_GIT_REPO") from exc
@@ -452,6 +470,7 @@ def resolve_rdc_repo_root(
             text=True,
             timeout=5,
             check=False,
+            env=hardened_git_env(resolved),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("RDC_REPO_ROOT_REMOTE_UNREADABLE") from exc

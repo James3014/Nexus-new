@@ -335,6 +335,7 @@ def test_canonical_core_transport_binds_executing_checkout_revision(tmp_path: Pa
             "allowed_files": ["fixtures/canary/current.txt"],
             "verifier_commands": ["git diff --check"],
             "deletion_policy": {"allow_deletion": False},
+            "controller_repo_root": str(source_root),
         },
     )
 

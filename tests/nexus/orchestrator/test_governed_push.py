@@ -309,3 +309,34 @@ def test_governed_push_wrong_key_type_is_zero_git_calls(monkeypatch, tmp_path):
             branch="nexus/integration", expected_sha=expected, authority_key="wrong",
         )
     assert calls == []
+
+
+def test_governed_push_rejects_replacement_refs_for_local_commit(monkeypatch, tmp_path):
+    repo, _remote, expected = _repo_with_remote(tmp_path)
+    (repo / "file.txt").write_text("replacement target\n", encoding="utf-8")
+    _git(repo, "add", "file.txt")
+    _git(repo, "commit", "-m", "replacement target")
+    replacement_sha = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", f"refs/replace/{expected}", replacement_sha)
+    monkeypatch.setattr(
+        governed_push_module,
+        "authorize_durable_standing_grant_effect",
+        lambda **kwargs: _authority(
+            competition_id="competition-1",
+            winner_task_id="winner-1",
+            remote="origin",
+            branch="nexus/integration",
+            expected_sha=expected,
+        ),
+    )
+    manager = GovernedPushManager(repo_root=repo, allowed_remotes={"origin"})
+
+    with pytest.raises(RuntimeError, match="REPLACEMENT_REFS_PRESENT"):
+        manager.push(
+            competition_id="competition-1",
+            winner_task_id="winner-1",
+            remote="origin",
+            branch="nexus/integration",
+            expected_sha=expected,
+            authority_key=_key(),
+        )

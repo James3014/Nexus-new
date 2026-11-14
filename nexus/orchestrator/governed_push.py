@@ -13,6 +13,7 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     canonical_autonomy_hash,
 )
+from nexus.core.hardened_git import hardened_git_env
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantKey,
     StandingGrantReceiptError,
@@ -65,6 +66,7 @@ class GovernedPushManager:
             cwd=self.repo_root,
             capture_output=True,
             text=True,
+            env=hardened_git_env(self.repo_root),
         )
         if result.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -166,6 +168,8 @@ class GovernedPushManager:
             effect=effect,
         )
 
+        if self._git(["for-each-ref", "--format=%(refname)", "refs/replace/"]):
+            raise RuntimeError("REPLACEMENT_REFS_PRESENT")
         local_sha = self._git(["rev-parse", f"{branch}^{{commit}}"])
         if local_sha != expected_sha:
             raise RuntimeError("local integration branch changed after receipt")
