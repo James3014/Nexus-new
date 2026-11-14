@@ -144,9 +144,40 @@ def _history_pinned_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def _history_pinned_args(args: tuple[str, ...]) -> list[str]:
+    protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+    kept: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "-c" and i + 1 < len(args):
+            if args[i + 1].split("=", 1)[0].lower() in protected:
+                i += 2
+                continue
+            kept.extend(args[i : i + 2])
+            i += 2
+            continue
+        if arg.startswith("-c") and len(arg) > 2 and arg[2:].split("=", 1)[0].lower() in protected:
+            i += 1
+            continue
+        if arg.startswith("--config-env=") and arg[13:].split("=", 1)[0].lower() in protected:
+            i += 1
+            continue
+        if arg == "--config-env" and i + 1 < len(args):
+            if args[i + 1].split("=", 1)[0].lower() in protected:
+                i += 2
+                continue
+            kept.extend(args[i : i + 2])
+            i += 2
+            continue
+        kept.append(arg)
+        i += 1
+    return ["-c", "core.commitGraph=false", "-c", "core.useReplaceRefs=false", *kept]
+
+
 def _git(root: Path, *args: str) -> str:
     return subprocess.check_output(
-        ["git", "-C", str(root), *args], text=True, env=_history_pinned_env()
+        ["git", *_history_pinned_args(("-C", str(root), *args))], text=True, env=_history_pinned_env()
     ).strip()
 
 def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:

@@ -38,6 +38,50 @@ _HISTORY_ENV_PINS = {
 }
 
 
+def history_pinned_args(args: Any) -> list[str]:
+    """Strip caller overrides of the history pins from a git argv.
+
+    Git command-line config wins over environment config, so a caller's
+    ``-c core.commitGraph=true`` would undo the env pin. Remove every supported
+    spelling of the protected keys; the env pins then apply. Other argv is unchanged.
+    """
+    values = [str(arg) for arg in args]
+    protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+    result: list[str] = []
+    index = 0
+    while index < len(values):
+        arg = values[index]
+        if arg == "-c" and index + 1 < len(values):
+            setting = values[index + 1]
+            if setting.split("=", 1)[0].lower() in protected:
+                index += 2
+                continue
+            result.extend((arg, setting))
+            index += 2
+            continue
+        if arg.startswith("--config-env="):
+            setting = arg[len("--config-env="):].split("=", 1)[0]
+            if setting.lower() in protected:
+                index += 1
+                continue
+        elif arg == "--config-env" and index + 1 < len(values):
+            setting = values[index + 1].split("=", 1)[0]
+            if setting.lower() in protected:
+                index += 2
+                continue
+            result.extend((arg, values[index + 1]))
+            index += 2
+            continue
+        elif arg.startswith("-c") and len(arg) > 2:
+            setting = arg[2:].split("=", 1)[0]
+            if setting.lower() in protected:
+                index += 1
+                continue
+        result.append(arg)
+        index += 1
+    return result
+
+
 def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """Copy an environment while removing overrides to git's history pins."""
     env = dict(os.environ if base is None else base)

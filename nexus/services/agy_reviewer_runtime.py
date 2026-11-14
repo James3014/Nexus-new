@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from nexus.core.hardened_git import history_pinned_env
+from nexus.core.hardened_git import history_pinned_args, history_pinned_env
 
 REVIEW_PACKET_SCHEMA = "nexus.agy_review_packet.v1"
 REVIEW_RECEIPT_SCHEMA = "nexus.agy_review_receipt.v1"
@@ -84,7 +84,7 @@ def compact_tracked_diff(tracked_diff: str) -> tuple[str, dict[str, Any]]:
 
 def _git_bytes(root: Path, *args: str) -> bytes:
     proc = subprocess.run(
-        ["git", "-C", str(root), *args],
+        ["git", *history_pinned_args(("-C", str(root), *args))],
         capture_output=True,
         check=False,
         env=history_pinned_env(),
