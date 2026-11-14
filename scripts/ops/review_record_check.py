@@ -1980,59 +1980,100 @@ def _contributes(
     )
 
 
+_OLDER_SHA = r"`?([0-9a-f]{7,40})`?"
+_OLDER_SHA_HEX = r"`?[0-9a-f]{7,40}`?"
+_OLDER_DISPOSITION = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)"
 _OLDER_REVIEW_LINE = re.compile(
-    r"(?:\*\*)?Claude(?: (?:review|reviewer))?(?:\*\*)?: "
-    r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)@`?([0-9a-f]{40})`?",
+    rf"(?:\*\*Claude(?: (?:review|reviewer))?\*\*|Claude(?: (?:review|reviewer))?)(?: r[0-9]+)?: "
+    rf"(?:{_OLDER_DISPOSITION}@({_OLDER_SHA_HEX})|{_OLDER_DISPOSITION} \(({_OLDER_SHA_HEX})\))",
     re.ASCII,
 )
 _OLDER_INDEPENDENT_LINE = re.compile(
-    r"\*\*Independent Claude review\*\* \(Claude [A-Z][a-z]{1,31} "
-    r"[0-9]+(?:\.[0-9]+)*, separate agent\): "
-    r"\*\*(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES) at `?([0-9a-f]{40})`?\*\*\.",
+    rf"\*\*Independent Claude review\*\* \(Claude (?:(?:Sonnet(?: [0-9]+(?:\.[0-9]+)*)?|[A-Z][a-z]{{1,31}} [0-9]+(?:\.[0-9]+)*)(?: \([^)]+\))?|\([^)]+\)), "
+    rf"(?:separate agent(?:, (?:round [0-9]+|delta from [^)]*))?|review desk(?:, delta from [^)]*)?)\): "
+    rf"\*\*{_OLDER_DISPOSITION} at {_OLDER_SHA}\*\*\.",
     re.ASCII,
 )
-_OLDER_RECORD_HEADER = re.compile(r"## Review record (?:--|—|–) head `?([0-9a-f]{40})`?", re.ASCII)
-_OLDER_REFERENCE_DEFINITION = re.compile(r"^\[[^\]\n]+\]:[ \t]*\S", re.ASCII | re.MULTILINE)
+_OLDER_RECORD_HEADER = re.compile(rf"## Review record (?:--|—|–) head {_OLDER_SHA}", re.ASCII)
+_OLDER_REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*\S", re.ASCII)
+_OLDER_LIST_ITEM = re.compile(r"^ {0,3}(?:[-+*]|[0-9]+[.)])[ \t]+", re.ASCII)
+_OLDER_HTML_START = re.compile(
+    r"^ {0,3}(?:<!--|<\?|<![A-Z]|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$))",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 def _older_verdict_candidate_lines(body: str) -> list[str]:
-    """Collect exact, unquoted older-review record lines from plain-text bodies."""
-    normalized = body.replace("\r\n", "\n")
-    if "~~~" in normalized:
-        return []
-    # Markdown code is permitted only for a balanced pair directly around the SHA
-    # in a whitelisted record header or verdict line. Strip those exact wrappers,
-    # then retain the existing body-wide prohibition on every other backtick.
-    lines = normalized.split("\n")
-    sanitized = []
-    for line in lines:
-        if "`" in line:
-            unwrapped = re.sub(r"`([0-9a-f]{40})`", r"\1", line, flags=re.ASCII)
-            if unwrapped != line and not (
-                _OLDER_RECORD_HEADER.fullmatch(unwrapped)
-                or _OLDER_REVIEW_LINE.fullmatch(unwrapped)
-                or _OLDER_INDEPENDENT_LINE.fullmatch(unwrapped)
-            ):
-                return []
-            line = unwrapped
-        sanitized.append(line)
-    normalized = "\n".join(sanitized)
-    for character in normalized:
-        category = unicodedata.category(character)
-        if character in "`<\t" or category == "Cf" or (category == "Cc" and character != "\n"):
-            return []
-    if _OLDER_REFERENCE_DEFINITION.search(normalized):
-        return []
-
-    lines = normalized.split("\n")
+    """Collect whitelisted older-review lines only from top-level Markdown paragraphs."""
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     candidates = []
+    fence_char = None
+    fence_size = 0
+    html_block = False
+    quote_continuation = False
     for index, line in enumerate(lines):
-        if index + 1 < len(lines) and re.fullmatch(r"[=-]+", lines[index + 1], re.ASCII):
+        fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line, re.ASCII)
+        if fence_char:
+            if (
+                fence
+                and fence.group(1)[0] == fence_char
+                and len(fence.group(1)) >= fence_size
+                and not line[fence.end() :].strip()
+            ):
+                fence_char = None
+            continue
+        if fence:
+            fence_char, fence_size = fence.group(1)[0], len(fence.group(1))
+            continue
+        if html_block:
+            if not line.strip():
+                html_block = False
+            else:
+                continue
+        if not line.strip():
+            quote_continuation = False
+            continue
+        if re.match(r"^ {4}|^\t", line):
+            continue
+        if re.match(r"^ {0,3}>", line):
+            quote_continuation = True
+            continue
+        if quote_continuation:
+            # CommonMark permits lazy paragraph continuation after a quote marker.
+            quote_continuation = False
+            continue
+        if (
+            _OLDER_LIST_ITEM.match(line)
+            or line.startswith("|")
+            or _OLDER_REFERENCE_DEFINITION.match(line)
+        ):
+            continue
+        if _OLDER_HTML_START.match(line):
+            html_block = not (
+                (line.startswith("<!--") and "-->" in line)
+                or (line.startswith("<?") and "?>" in line)
+                or (line.startswith("<!") and ">" in line)
+            )
+            continue
+        if index + 1 < len(lines) and re.fullmatch(
+            r" {0,3}(?:=+|-+) *", lines[index + 1], re.ASCII
+        ):
             continue
         if not (_OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)):
             continue
-        if index == 0 or not lines[index - 1] or _OLDER_RECORD_HEADER.fullmatch(lines[index - 1]):
-            candidates.append(line)
+        if (
+            index
+            and lines[index - 1].strip()
+            and not _OLDER_RECORD_HEADER.fullmatch(lines[index - 1])
+        ):
+            continue
+        if any(
+            unicodedata.category(char) in {"Cf", "Cc"}
+            for nearby in lines[max(0, index - 1) : index + 2]
+            for char in nearby
+        ):
+            continue
+        candidates.append(line)
     return candidates
 
 
@@ -2047,7 +2088,11 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
             match = _OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)
             if match is None:
                 continue
-            sha = match.group(1)
+            sha = (
+                match.group(1) or match.group(2)
+                if match.re is _OLDER_REVIEW_LINE
+                else match.group(1)
+            )
             if sha in considered:
                 continue
             if len(considered) >= MAX_OLDER_SHA_CANDIDATES_PER_COMMENT:

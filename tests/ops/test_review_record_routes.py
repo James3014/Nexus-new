@@ -180,7 +180,6 @@ def test_noncanonical_old_claude_record_header_keeps_round_one():
         f"\tClaude review: REJECT@{OLD}",
         f"> quoted text\nClaude review: REJECT@{OLD}",
         f"Claude\u200b review: REJECT@{OLD}",
-        f"Claude review: REJECT@{OLD}\n[x]: /url",
         f"Claude review: REJECT@{OLD}\ncontrol\x01",
     ],
 )
@@ -195,7 +194,6 @@ def test_unsafe_older_claude_body_keeps_round_one(untrusted_body):
     [
         f"~~~\nClaude review: REJECT@{OLD}\n~~~",
         f"<span>Claude review: REJECT@{OLD}</span>",
-        f"Claude review: REJECT@{OLD}\n[ref]: /url",
     ],
 )
 def test_markup_and_reference_older_claude_body_keeps_round_one(untrusted_body):
@@ -557,11 +555,9 @@ def test_claude_verdict_label_forms_start_round_two(label):
         f"```\nClaude review: REJECT@{OLD}\n```",
         f"`Claude review: REJECT@{OLD}`",
         f"| Claude | REJECT@{OLD} |",
-        f"Claude review: REJECT@{OLD}\n[x]: /url",
         f"Claude review: REJECT@{OLD}\n===",
         f"Claude Review: REJECT@{OLD}",
         f"Claude review: REJECT@{OLD.upper()}",
-        f"Claude review: REJECT@{OLD}\n- Scope: `x.py`",
     ],
 )
 def test_documented_non_record_shapes_stay_round_one(older_verdict):
@@ -577,6 +573,12 @@ def test_documented_non_record_shapes_stay_round_one(older_verdict):
     "older_verdict",
     [
         f"<details>\nClaude review: REJECT@{OLD}\n</details>",
+        f"~~~\n\nClaude review: REJECT@{OLD}\n~~~",
+        f"    Claude review: REJECT@{OLD}",
+        f"- Claude review: REJECT@{OLD}",
+        f"| Claude review: REJECT@{OLD} | evidence |",
+        f"[Claude review: REJECT@{OLD}]: /url",
+        f"Claude review: REJECT@{OLD}\n---\n",
         f"- > Claude review: REJECT@{OLD}",
         f"`\nClaude review: REJECT@{OLD}\n`",
         f"Claude review: REJECT@{OLD}\n---",
@@ -594,6 +596,74 @@ def test_non_plain_older_claude_verdict_keeps_round_one(older_verdict):
         LOW,
         [comment(older_verdict), accept("gemini"), accept("codex")],
     )
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        (
+            f"## Review record — head `{OLD}`\n"
+            f"**Independent Claude review** (Claude Sonnet 5.5, separate agent): "
+            f"**REJECT at `{OLD}`**.\n\n"
+            "- Tests: `pytest tests/ops` → 963 passed\n"
+            "- [introduced] scripts/ops/check.py:123 — `<`, -> and CJK文字; "
+            "separate agent, round 2"
+        ),
+        (
+            f"## Review record -- head `{OLD}`\n"
+            f"**Independent Claude review** (Claude Opus 5.5, separate agent): "
+            f"**REJECT at {OLD[:9]}**."
+        ),
+        (f"**Independent Claude review** (Claude Sonnet, separate agent): **REJECT at {OLD}**."),
+        (
+            f"**Independent Claude review** (Claude (Haiku 4.5), separate agent): "
+            f"**REJECT at {OLD}**."
+        ),
+        (
+            f"**Independent Claude review** (Claude Opus 4.7 (1M), separate agent): "
+            f"**REJECT at {OLD}**."
+        ),
+        (
+            f"**Independent Claude review** (Claude Sonnet 5.5, separate agent, round 2): "
+            f"**REJECT at {OLD}**."
+        ),
+        (
+            f"**Independent Claude review** (Claude Sonnet 5.5, review desk, delta from {OLD[:8]}): "
+            f"**REJECT at {OLD}**."
+        ),
+        f"Claude review: ACCEPT ({OLD[:9]})",
+        f"Claude r1: ACCEPT@{OLD[:9]}",
+    ],
+)
+def test_documented_older_claude_records_start_round_two_with_inline_markdown(body):
+    result = evaluate(LOW, [comment(body), accept("gemini"), accept("codex")])
+    assert result["route"] == "r2+"
+    assert result["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"~~~\nClaude review: REJECT@{OLD}\n~~~",
+        f"```\n\nClaude review: REJECT@{OLD}\n```",
+        f"> Claude review: REJECT@{OLD}",
+        f"intro\n\n    Claude review: REJECT@{OLD}",
+        f"- Claude review: REJECT@{OLD}",
+        f"| Claude review: REJECT@{OLD} | evidence |",
+        f"<div>\nClaude review: REJECT@{OLD}\n</div>",
+        f"[Claude review: REJECT@{OLD}]: /url",
+        f"Claude review: REJECT@{OLD}\n---",
+        f"Claude review: REJECT@{OLD} trailing prose",
+        f"[label]:\nClaude review: REJECT@{OLD}",
+        f"[Claude review: REJECT@{OLD}](https://example.test)",
+        f"**Claude review: ACCEPT@{OLD}",
+        f"\u200b\nClaude review: REJECT@{OLD}",
+    ],
+)
+def test_older_claude_verdict_inside_nonparagraph_markdown_blocks_is_ignored(body):
+    result = evaluate(LOW, [comment(body), accept("gemini"), accept("codex")])
     assert result["route"] == "r1"
     assert result["status"] == "MISSING_RECORD"
 
