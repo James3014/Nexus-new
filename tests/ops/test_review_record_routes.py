@@ -497,7 +497,7 @@ def test_older_gemini_reject_does_not_start_round_two():
 
 @pytest.mark.parametrize(
     "model",
-    ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.5", "Opus 6"],
+    ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.5", "Opus 6", "Mythos 5"],
 )
 def test_documented_claude_model_records_start_round_two(model):
     body = (
@@ -512,6 +512,24 @@ def test_documented_claude_model_records_start_round_two(model):
     assert result["route"] == "r2+"
     assert result["status"] == "OK"
     assert result["satisfied_by"] == "gemini+codex"
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["opus 5.5", "Opus5.5", "Op`us 5.5", "Opus-X 5", "O 5", "Opus"],
+)
+def test_malformed_claude_model_names_stay_in_round_one(model):
+    body = (
+        f"## Review record — head `{OLD}`\n"
+        f"**Independent Claude review** (Claude {model}, separate agent): "
+        f"**ACCEPT at `{OLD}`**."
+    )
+    result = evaluate(
+        LOW,
+        [comment(body), accept("gemini"), accept("codex")],
+    )
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
 
 
 @pytest.mark.parametrize(

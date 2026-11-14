@@ -1986,7 +1986,7 @@ _OLDER_REVIEW_LINE = re.compile(
     re.ASCII,
 )
 _OLDER_INDEPENDENT_LINE = re.compile(
-    r"\*\*Independent Claude review\*\* \(Claude (?:Opus|Sonnet|Haiku|Fable) "
+    r"\*\*Independent Claude review\*\* \(Claude [A-Z][a-z]{1,31} "
     r"[0-9]+(?:\.[0-9]+)*, separate agent\): "
     r"\*\*(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES) at `?([0-9a-f]{40})`?\*\*\.",
     re.ASCII,
