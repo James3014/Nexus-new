@@ -1242,7 +1242,7 @@ class WorktreeManager:
                 if self._ensure_hooks
                 else Path("/dev/null")
             )
-            git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
+            git_args = ["-c", f"core.hooksPath={hooks_dir}", *git_args]
         # Targets are written by untrusted workers; never run a repo-defined
         # fsmonitor program from their config (#1912).
         git_args = ["-c", "core.fsmonitor=false", *git_args]
