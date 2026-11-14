@@ -498,7 +498,9 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                     task_id=request.task_id,
                 )
                 if retry_result is not None:
-                    return retry_result
+                    from dataclasses import replace as _with_identity
+
+                    return _with_identity(retry_result, workspace_identity=tmpdir_identity)
 
             return IsolatedApplyReceipt(
                 task_id=request.task_id,

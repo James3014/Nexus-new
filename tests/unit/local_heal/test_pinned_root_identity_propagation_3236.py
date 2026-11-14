@@ -244,9 +244,7 @@ def test_micro_verifier_without_workspace_identity_blocks_before_reads(tmp_path,
 
 
 @pytest.mark.parametrize("replacement_kind", ["directory", "symlink"])
-def test_pinned_root_rejects_workspace_replaced_at_original_path(
-    tmp_path, replacement_kind
-):
+def test_pinned_root_rejects_workspace_replaced_at_original_path(tmp_path, replacement_kind):
     from nexus.core.contained_write import PinnedRoot
 
     workspace = tmp_path / "workspace"
@@ -283,7 +281,9 @@ def test_resolved_workspace_under_symlink_parent_is_accepted(tmp_path):
     workspace.mkdir()
     resolved_workspace = workspace.resolve()
 
-    bound, _ = _bind_root(PinnedRoot(str(resolved_workspace), root_identity(resolved_workspace)), "work_dir")
+    bound, _ = _bind_root(
+        PinnedRoot(str(resolved_workspace), root_identity(resolved_workspace)), "work_dir"
+    )
 
     assert bound == resolved_workspace
 
@@ -356,7 +356,9 @@ def test_canary_resolves_workspace_under_symlink_parent(tmp_path, monkeypatch):
     monkeypatch.setattr(helper, "run_mainchain", run_mainchain)
     monkeypatch.setattr(isolated_verifier, "run_isolated_verifier", run_verifier)
 
-    helper._run_canary_mainchain_cached("semantic_searcher", positive=False, task_id_override="task")
+    helper._run_canary_mainchain_cached(
+        "semantic_searcher", positive=False, task_id_override="task"
+    )
 
     request = captured["request"]
     assert Path(request.workspace_path) == Path(request.workspace_path).resolve()
@@ -402,3 +404,46 @@ def test_same_oracle_rejects_execution_identity_drift_before_verifier(tmp_path, 
     assert receipt is None
     assert reason == "CANDIDATE_WORKSPACE_IDENTITY_DRIFT"
     assert not called
+
+
+def test_preimage_retry_receipt_carries_workspace_identity(tmp_path, monkeypatch):
+    import subprocess
+
+    from nexus.services.local_heal import isolated_workspace_apply as apply_mod
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    bad_diff = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-nothing like it\n+x = 2\n"
+    seen = {}
+
+    def _retry(**kwargs):
+        seen["tmpdir"] = kwargs["tmpdir"]
+        return apply_mod.IsolatedApplyReceipt(
+            task_id="t",
+            workspace_path=kwargs["tmpdir"],
+            target_file="a.py",
+            patch_apply_status="applied",
+            patch_apply_error="",
+            selected_candidate_hash="h",
+            applied_patch_hash="p",
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            mutation_allowed=True,
+        )
+
+    monkeypatch.setattr("nexus.experimental.c6bd_preimage_retry.run_c6bd_preimage_retry", _retry)
+    receipt = apply_mod.run_isolated_workspace_apply(
+        apply_mod.IsolatedApplyRequest(
+            task_id="t",
+            source_root=str(source),
+            target_file="a.py",
+            unified_diff=bad_diff,
+            selected_candidate_hash="h",
+            mutation_allowed=True,
+            search_text="x = 1",
+        )
+    )
+    assert seen, "preimage retry was not reached"
+    assert receipt.workspace_identity == root_identity(seen["tmpdir"])

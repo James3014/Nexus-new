@@ -1066,9 +1066,7 @@ def run_registry_level(
         chdir(ws),
     ):
         if scen.verifier_command:
-            verifier_ctx = make_verifier(
-                ws, scen.verifier_command, task_id, root_identity(ws)
-            )({
+            verifier_ctx = make_verifier(ws, scen.verifier_command, task_id, root_identity(ws))({
                 "task_id": task_id,
                 "capability_evidence_bundle": {
                     "source_hash": sha256_bytes(
