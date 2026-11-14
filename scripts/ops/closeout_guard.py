@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
+import sys
+import json
 import argparse
 import hashlib
-import json
 import os
 import subprocess
-import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, Any, List
 
 # 🛡️ Nexus Closeout Guard (Hard-Gate Enforcement)
 # [NEXUS CONFIG: FAIL-CLOSED RELEASE CONTRACT]

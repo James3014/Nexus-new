@@ -1,6 +1,10 @@
 """History-reading subprocess git callers must pin repository-controlled history."""
 
 import ast
+import importlib.util
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -43,6 +47,38 @@ HISTORY_COMMANDS = {"merge-base", "rev-list", "diff", "log", "rev-parse", "cat-f
 GUARD_ALLOWLIST = {
     "nexus/orchestrator/governed_integration.py:199": "config subcommand keeps injected config visible; history subcommands use run_env",
 }
+
+
+@pytest.mark.parametrize(
+    "path,helper",
+    [
+        ("scripts/ops/closeout_guard.py", "_history_pinned_env"),
+        ("scripts/ops/task_authority_freshness_check.py", "_history_pinned_env"),
+        ("scripts/ops/break_glass_recovery.py", "_history_pinned_env"),
+        ("scripts/governance/livefail_rollback.py", "_history_pinned_env"),
+        ("scripts/ops/check_gateway_source_drift.py", "_history_pinned_env"),
+        ("scripts/ops/sibling_bindings_check.py", "_history_pinned_env"),
+        ("scripts/ops/pr_preflight.py", "_history_pinned_env"),
+        ("scripts/ops/trusted_deletion_anchor.py", "_anchor_git_env"),
+        ("scripts/ops/mcp_gateway_durable.py", "_history_pinned_env"),
+    ],
+)
+def test_script_local_history_env_helpers_pin_real_git(path, helper, tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("script_helper_under_test", ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    monkeypatch.setenv("GIT_GRAFT_FILE", "/hostile-graft")
+    monkeypatch.setenv("GIT_NO_REPLACE_OBJECTS", "0")
+    env = getattr(module, helper)()
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_GRAFT_FILE"] == os.devnull
+    assert (
+        subprocess.check_output(
+            ["git", "config", "--get", "core.commitGraph"], cwd=tmp_path, env=env, text=True
+        ).strip()
+        == "false"
+    )
 
 
 def _git_subcommand(args):
@@ -281,6 +317,11 @@ def test_history_reading_subprocess_git_calls_pass_env():
 
 def _assert_captured_git_is_pinned(argv, env, *, cli_pins=()):
     protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+    expected_pins = {
+        ("core.commitgraph", "false"),
+        ("core.usereplacerefs", "false"),
+        ("core.graftfile", os.devnull.lower()),
+    }
     for index, arg in enumerate(argv):
         setting = None
         if arg == "-c" and index + 1 < len(argv):
@@ -293,7 +334,7 @@ def _assert_captured_git_is_pinned(argv, env, *, cli_pins=()):
             setting = argv[index + 1]
         if setting and setting.split("=", 1)[0].lower() in protected:
             key, _, value = setting.partition("=")
-            if (key.lower(), value.lower()) not in cli_pins:
+            if (key.lower(), value.lower()) not in expected_pins | set(cli_pins):
                 pytest.fail(f"protected caller history config remained in argv: {argv!r}")
     assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
     assert env["GIT_GRAFT_FILE"]
@@ -427,6 +468,92 @@ def test_mcp_gateway_durable_git_wrappers_remove_caller_history_config(tmp_path,
         captured[1][1],
         cli_pins={("core.commitgraph", "false"), ("core.usereplacerefs", "false")},
     )
+
+
+@pytest.mark.parametrize("wrapper", ["worktree", "unified", "durable"])
+@pytest.mark.parametrize(
+    "form", ["pair", "upper", "joined", "gitdir", "branch", "env_equal", "env_pair"]
+)
+def test_git_wrappers_reject_include_history_config(wrapper, form, tmp_path, monkeypatch):
+    from nexus.orchestrator import unified_mcp_gateway as unified
+    from nexus.orchestrator import worktree_manager as wm
+    from scripts.ops import mcp_gateway_durable as durable
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@x",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "base",
+        ],
+        check=True,
+    )
+    base = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "--orphan", "other"], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@x",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "orphan",
+        ],
+        check=True,
+    )
+    orphan = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(["git", "-C", str(repo), "checkout", "main"], check=True, capture_output=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{base} {orphan}\n", encoding="utf-8")
+    inc = tmp_path / "included.gitconfig"
+    inc.write_text("[core]\n\tcommitGraph = true\n", encoding="utf-8")
+    if form == "pair":
+        opts = ["-c", f"include.path={inc}"]
+    elif form == "upper":
+        opts = ["-c", f"INCLUDE.PATH={inc}"]
+    elif form == "joined":
+        opts = [f"-cinclude.path={inc}"]
+    elif form == "gitdir":
+        opts = ["-c", f"includeIf.gitdir:{repo}/.path={inc}"]
+    elif form == "branch":
+        opts = ["-c", f"includeif.onbranch:main.path={inc}"]
+    elif form == "env_equal":
+        monkeypatch.setenv("NEXUS_TEST_INCLUDE", str(inc))
+        opts = ["--config-env=include.path=NEXUS_TEST_INCLUDE"]
+    else:
+        monkeypatch.setenv("NEXUS_TEST_INCLUDE", str(inc))
+        opts = ["--config-env", "include.path=NEXUS_TEST_INCLUDE"]
+
+    def run(*args):
+        if wrapper == "worktree":
+            return wm.WorktreeManager(
+                root_dir=str(tmp_path / "targets"), create_root=False
+            )._run_git([*opts, *args], cwd=repo)
+        if wrapper == "unified":
+            monkeypatch.setattr(unified, "CANONICAL_SOURCE_ROOT", repo)
+            return unified._git(*opts, *args)
+        return durable._git(repo, *opts, *args)
+
+    assert run("config", "--get", "core.commitGraph").strip() == "false"
+    assert orphan not in run("rev-list", "HEAD").splitlines()
 
 
 def test_trusted_anchor_merge_base_ignores_grafts(tmp_path, monkeypatch):

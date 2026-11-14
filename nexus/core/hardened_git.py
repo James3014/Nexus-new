@@ -47,13 +47,18 @@ def history_pinned_args(args: Any) -> list[str]:
     """
     values = [str(arg) for arg in args]
     protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+
+    def is_protected(setting: str) -> bool:
+        key = setting.split("=", 1)[0].lower()
+        return key in protected or key.startswith(("include.", "includeif."))
+
     result: list[str] = []
     index = 0
     while index < len(values):
         arg = values[index]
         if arg == "-c" and index + 1 < len(values):
             setting = values[index + 1]
-            if setting.split("=", 1)[0].lower() in protected:
+            if is_protected(setting):
                 index += 2
                 continue
             result.extend((arg, setting))
@@ -61,12 +66,12 @@ def history_pinned_args(args: Any) -> list[str]:
             continue
         if arg.startswith("--config-env="):
             setting = arg[len("--config-env=") :].split("=", 1)[0]
-            if setting.lower() in protected:
+            if is_protected(setting):
                 index += 1
                 continue
         elif arg == "--config-env" and index + 1 < len(values):
             setting = values[index + 1].split("=", 1)[0]
-            if setting.lower() in protected:
+            if is_protected(setting):
                 index += 2
                 continue
             result.extend((arg, values[index + 1]))
@@ -74,11 +79,40 @@ def history_pinned_args(args: Any) -> list[str]:
             continue
         elif arg.startswith("-c") and len(arg) > 2:
             setting = arg[2:].split("=", 1)[0]
-            if setting.lower() in protected:
+            if is_protected(setting):
                 index += 1
                 continue
         result.append(arg)
         index += 1
+    # Keep global options ahead of the command and let our pins win last.
+    at = 0
+    takes_value = {
+        "-c",
+        "-C",
+        "--config-env",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--super-prefix",
+    }
+    while at < len(result) and result[at].startswith("-"):
+        if result[at] in takes_value and at + 1 < len(result):
+            at += 2
+            continue
+        option = result[at].split("=", 1)[0]
+        if option in takes_value and "=" not in result[at]:
+            at += 2
+        else:
+            at += 1
+    result[at:at] = [
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+    ]
     return result
 
 
@@ -109,7 +143,15 @@ def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, st
 # pinned above (whose pinned value comes after the caller's and so wins). Any other key, and
 # any other option ahead of the subcommand (``--config-env``, ``-C``, ``--exec-path`` ...),
 # is refused. Keys are matched as git does, ignoring case.
-_PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in _GIT_OVERRIDES[1::2])
+_PINNED_CONFIG_KEYS = frozenset(
+    pair.split("=", 1)[0].lower()
+    for pair in (
+        *_GIT_OVERRIDES[1::2],
+        "core.commitGraph=false",
+        "core.useReplaceRefs=false",
+        f"core.graftFile={os.devnull}",
+    )
+)
 _CALLER_CONFIG_KEYS = frozenset({
     "user.name",
     "user.email",

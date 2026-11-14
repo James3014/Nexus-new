@@ -146,25 +146,30 @@ def _history_pinned_env(base: dict[str, str] | None = None) -> dict[str, str]:
 
 def _history_pinned_args(args: tuple[str, ...]) -> list[str]:
     protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+
+    def is_protected(setting: str) -> bool:
+        key = setting.split("=", 1)[0].lower()
+        return key in protected or key.startswith(("include.", "includeif."))
+
     kept: list[str] = []
     i = 0
     while i < len(args):
         arg = args[i]
         if arg == "-c" and i + 1 < len(args):
-            if args[i + 1].split("=", 1)[0].lower() in protected:
+            if is_protected(args[i + 1]):
                 i += 2
                 continue
             kept.extend(args[i : i + 2])
             i += 2
             continue
-        if arg.startswith("-c") and len(arg) > 2 and arg[2:].split("=", 1)[0].lower() in protected:
+        if arg.startswith("-c") and len(arg) > 2 and is_protected(arg[2:]):
             i += 1
             continue
-        if arg.startswith("--config-env=") and arg[13:].split("=", 1)[0].lower() in protected:
+        if arg.startswith("--config-env=") and is_protected(arg[13:]):
             i += 1
             continue
         if arg == "--config-env" and i + 1 < len(args):
-            if args[i + 1].split("=", 1)[0].lower() in protected:
+            if is_protected(args[i + 1]):
                 i += 2
                 continue
             kept.extend(args[i : i + 2])
@@ -172,7 +177,32 @@ def _history_pinned_args(args: tuple[str, ...]) -> list[str]:
             continue
         kept.append(arg)
         i += 1
-    return ["-c", "core.commitGraph=false", "-c", "core.useReplaceRefs=false", *kept]
+    at = 0
+    takes_value = {
+        "-c",
+        "-C",
+        "--config-env",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--super-prefix",
+    }
+    while at < len(kept) and kept[at].startswith("-"):
+        if kept[at] in takes_value and at + 1 < len(kept):
+            at += 2
+            continue
+        option = kept[at].split("=", 1)[0]
+        at += 2 if option in takes_value and "=" not in kept[at] else 1
+    kept[at:at] = [
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+    ]
+    return kept
 
 
 def _git(root: Path, *args: str) -> str:

@@ -56,6 +56,7 @@ def test_nightly_ancestor_check_ignores_repository_grafts(tmp_path):
     nightly = en.Nightly.__new__(en.Nightly)
     nightly.run = en.default_runner
     assert not nightly._is_ancestor(repo, orphan, base)
+    assert orphan not in nightly._git(repo, "rev-list", "HEAD").splitlines()
 
 
 class FakeGitHub:

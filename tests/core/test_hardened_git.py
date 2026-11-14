@@ -83,7 +83,48 @@ def test_history_pinned_args_strips_every_config_form():
         "log",
         "HEAD",
     ))
-    assert args == ["-c", "user.name=test", "log", "HEAD"]
+    assert args == [
+        "-c",
+        "user.name=test",
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+        "log",
+        "HEAD",
+    ]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        ("-c", "include.path={file}"),
+        ("-c", "INCLUDE.PATH={file}"),
+        ("-cinclude.path={file}",),
+        ("-c", "includeIf.gitdir:{repo}/.path={file}"),
+        ("-c", "includeif.onbranch:main.path={file}"),
+        ("--config-env=include.path=VAR",),
+        ("--config-env", "include.path=VAR"),
+    ],
+)
+def test_history_pinned_args_strips_include_config_reintroduction(override, tmp_path, monkeypatch):
+    config = tmp_path / "included.gitconfig"
+    config.write_text("[core]\n\tcommitGraph = true\n", encoding="utf-8")
+    args = tuple(part.format(file=config, repo=tmp_path) for part in override)
+    if "--config-env" in args[0]:
+        monkeypatch.setenv("VAR", str(config))
+    pinned = hardened_git.history_pinned_args((*args, "config", "--get", "core.commitGraph"))
+    result = subprocess.run(
+        ["git", *pinned],
+        cwd=tmp_path,
+        env=hardened_git.history_pinned_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "false"
 
 
 def _restore_candidate_files(repo: Path) -> Any:
