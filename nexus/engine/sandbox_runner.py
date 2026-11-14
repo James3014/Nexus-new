@@ -606,7 +606,9 @@ socket.socket.connect = _guarded_socket_connect
 
             if self.has_sandbox_exec and self.sandbox_exec_path:
                 if elastic_profile:
-                    applied_profile = elastic_profile
+                    # A caller profile may allow the network; the barrier is only claimed
+                    # because this last-match rule denies it (#3438).
+                    applied_profile = f"{elastic_profile}\n(deny network*)"
                 else:
                     # 動態影響路徑 (Blast Radius) 自動推導演算法
                     read_paths = [

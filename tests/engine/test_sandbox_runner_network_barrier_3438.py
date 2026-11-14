@@ -101,3 +101,46 @@ def test_os_sandbox_records_network_isolation_when_enforced(tmp_path, monkeypatc
     assert result["network_barrier"]["mode"] == "os_level_sandbox_exec"
     assert result["network_barrier"]["external_allowed"] is False
     assert result["network_barrier"]["os_sandbox_enforced"] is True
+
+
+def test_caller_elastic_profile_still_denies_network(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    fake_exec = tmp_path / "sandbox-exec"
+    fake_exec.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_exec.chmod(0o755)
+    monkeypatch.setattr(sandbox_runner_mod, "SANDBOX_EXEC", str(fake_exec))
+    monkeypatch.setattr(sandbox_runner_mod.sys, "platform", "darwin")
+    seen: list[list[str]] = []
+
+    def _capture(argv, *_args, **_kwargs):
+        seen.append(list(argv))
+        return _run_success()
+
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", _capture)
+    permissive = "(version 1)\n(allow default)"
+    result = SandboxRunner(root).run_task(
+        "probe", command=[sys.executable, "probe.py"], elastic_profile=permissive
+    )
+    profiles = [argv[2] for argv in seen if len(argv) > 2 and argv[1] == "-p"]
+    assert profiles, seen
+    # SBPL: the last matching rule wins, so the denial must come after the caller's rules.
+    assert profiles[0].index("(deny network*)") > profiles[0].index("(allow default)")
+    assert result["network_allowed"] is False
+
+
+def test_isolation_requiring_callers_pass_require_os_sandbox(tmp_path):
+    from scripts.engine.commands.sandbox_actions import run_sandbox_task
+
+    calls: list[dict] = []
+
+    class _Runner:
+        def run_task(self, task, **kwargs):
+            calls.append(kwargs)
+            return {"success": True}
+
+    run_sandbox_task(tmp_path, "t", command="echo hi", runner_factory=lambda _root: _Runner())
+    assert calls and calls[0].get("require_os_sandbox") is True
+
+    source = Path("nexus/core/capability_executor_registry.py").read_text(encoding="utf-8")
+    start = source.index("result = inst.run_task(")
+    assert "require_os_sandbox=True" in source[start : start + 400]

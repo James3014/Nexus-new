@@ -1801,6 +1801,7 @@ def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
             cwd=".",
             timeout_sec=timeout_sec,
             cleanup=True,
+            require_os_sandbox=True,
         )
         ok = bool(result.get("success")) and int(result.get("exit_code") or 0) == 0
         elapsed = int((time.monotonic() - start) * 1000)

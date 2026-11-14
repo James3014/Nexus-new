@@ -44,6 +44,7 @@ def test_run_sandbox_task_returns_success_view(tmp_path: Path):
             "timeout_sec": 60,
             "output_file": None,
             "cleanup": True,
+            "require_os_sandbox": True,
         }
     ]
     assert result == SandboxRunResult(

@@ -76,6 +76,7 @@ def run_sandbox_task(
             timeout_sec=timeout_sec,
             output_file=output_file,
             cleanup=cleanup,
+            require_os_sandbox=True,
         )
     )
     return SandboxRunResult(
