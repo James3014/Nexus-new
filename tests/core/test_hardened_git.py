@@ -72,9 +72,16 @@ def test_history_pinned_env_overrides_history_controls_and_preserves_index():
 
 def test_history_pinned_args_strips_every_config_form():
     args = hardened_git.history_pinned_args((
-        "-c", "CoRe.CoMmItGrApH=true", "-ccore.useReplaceRefs=true",
-        "--config-env=core.graftFile=EVIL", "--config-env", "CORE.COMMITGRAPH=EVIL",
-        "-c", "user.name=test", "log", "HEAD",
+        "-c",
+        "CoRe.CoMmItGrApH=true",
+        "-ccore.useReplaceRefs=true",
+        "--config-env=core.graftFile=EVIL",
+        "--config-env",
+        "CORE.COMMITGRAPH=EVIL",
+        "-c",
+        "user.name=test",
+        "log",
+        "HEAD",
     ))
     assert args == ["-c", "user.name=test", "log", "HEAD"]
 

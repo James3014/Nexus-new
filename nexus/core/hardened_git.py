@@ -60,7 +60,7 @@ def history_pinned_args(args: Any) -> list[str]:
             index += 2
             continue
         if arg.startswith("--config-env="):
-            setting = arg[len("--config-env="):].split("=", 1)[0]
+            setting = arg[len("--config-env=") :].split("=", 1)[0]
             if setting.lower() in protected:
                 index += 1
                 continue
