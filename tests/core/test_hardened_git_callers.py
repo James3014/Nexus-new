@@ -61,15 +61,69 @@ def _is_pinning_call(value):
     return name in PINNING_HELPERS
 
 
+def _names_in(target):
+    return {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
+
+
+# Keys worktree_manager sets after pinning; they only disable system/global config, so they
+# cannot weaken the history pins. Any other GIT_* key (or a non-constant key) is tampering.
+HARMLESS_GIT_KEYS = {"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL"}
+
+
+def _is_safe_item_key(key):
+    if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+        return False
+    upper = key.value.upper()
+    return not upper.startswith("GIT_") or upper in HARMLESS_GIT_KEYS
+
+
+def _env_name_is_tampered(name, scope):
+    """True when the pinned-looking name is later changed in a way that could weaken the pins:
+    item set/delete (only constant non-GIT_* keys are allowed), update/pop/setdefault/clear,
+    annotated or augmented assignment, or a tuple/for/with rebinding."""
+    for node in ast.walk(scope):
+        if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            if name in _names_in(node.target):
+                return True
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript):
+                    if name in _names_in(target.value) and not _is_safe_item_key(target.slice):
+                        return True
+                elif not isinstance(target, ast.Name) and name in _names_in(target):
+                    return True
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if name in _names_in(target):
+                    return True
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            if name in _names_in(node.target):
+                return True
+        elif isinstance(node, ast.NamedExpr):
+            if name in _names_in(node.target):
+                return True
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            owner = node.func.value
+            if (
+                isinstance(owner, ast.Name)
+                and owner.id == name
+                and node.func.attr in {"update", "pop", "popitem", "setdefault", "clear"}
+            ):
+                return True
+    return False
+
+
 def _env_is_pinned(call, scope):
     """env= must be a history_pinned_env()/hardened_git_env() call, or a name that every
-    assignment in the enclosing scope sets from one (item assignment is allowed)."""
+    plain assignment in the enclosing scope sets from one and that is never tampered with."""
     env = next((kw.value for kw in call.keywords if kw.arg == "env"), None)
     if env is None:
         return False
     if _is_pinning_call(env):
         return True
     if not isinstance(env, ast.Name):
+        return False
+    if _env_name_is_tampered(env.id, scope):
         return False
     values = [
         node.value
@@ -132,6 +186,14 @@ def test_history_reading_subprocess_git_calls_pass_env():
         'subprocess.run(["git", "rev-list", "x"], env=env)',
         'def f():\n    env = dict(os.environ)\n    subprocess.run(["git", "log"], env=env)',
         'subprocess.check_output(["git", "show", "HEAD"], env={})',
+        'def f():\n    e = history_pinned_env()\n    e["GIT_NO_REPLACE_OBJECTS"] = "0"\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e[k] = "0"\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e.update(GIT_GRAFT_FILE="x")\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e.pop("GIT_NO_REPLACE_OBJECTS")\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    del e["GIT_NO_REPLACE_OBJECTS"]\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e: dict = os.environ.copy()\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e |= {"GIT_GRAFT_FILE": "x"}\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
+        'def f():\n    e = history_pinned_env()\n    e.setdefault("A", "1")\n    subprocess.run(["git", "rev-parse", "HEAD"], env=e)',
     ],
 )
 def test_guard_flags_unpinned_history_calls(source):
@@ -143,7 +205,7 @@ def test_guard_flags_unpinned_history_calls(source):
     [
         'subprocess.run(["git", "merge-base", "a", "b"], env=history_pinned_env())',
         'subprocess.run(["git", "-c", "k=v", "rev-parse", "HEAD"], env=m().hardened_git_env(p))',
-        'def f():\n    e = history_pinned_env(base)\n    e["X"] = "1"\n    subprocess.run(["git", "diff"], env=e)',
+        'def f():\n    e = history_pinned_env(base)\n    e["GIT_CONFIG_NOSYSTEM"] = "1"\n    e["X"] = "1"\n    subprocess.run(["git", "diff"], env=e)',
         'subprocess.run(["git", "status"])',
         'subprocess.run(["git", "init"])',
     ],
