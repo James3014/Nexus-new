@@ -496,6 +496,66 @@ def test_older_gemini_reject_does_not_start_round_two():
 
 
 @pytest.mark.parametrize(
+    "model",
+    ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5", "Fable 5.5", "Opus 6"],
+)
+def test_documented_claude_model_records_start_round_two(model):
+    body = (
+        f"## Review record — head `{OLD}`\n"
+        f"**Independent Claude review** (Claude {model}, separate agent): "
+        f"**ACCEPT at `{OLD}`**."
+    )
+    result = evaluate(
+        LOW,
+        [comment(body), accept("gemini"), accept("codex")],
+    )
+    assert result["route"] == "r2+"
+    assert result["status"] == "OK"
+    assert result["satisfied_by"] == "gemini+codex"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["Claude review", "Claude reviewer", "Claude", "**Claude**"],
+)
+def test_claude_verdict_label_forms_start_round_two(label):
+    result = evaluate(
+        LOW,
+        [
+            comment(f"{label}: REJECT@`{OLD}`"),
+            accept("gemini"),
+            accept("codex"),
+        ],
+    )
+    assert result["route"] == "r2+"
+    assert result["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "older_verdict",
+    [
+        f"> ## Review record — head `{OLD}`\n> **Independent Claude review** "
+        f"(Claude Opus 5.5, separate agent): **REJECT at `{OLD}`**.",
+        f"```\nClaude review: REJECT@{OLD}\n```",
+        f"`Claude review: REJECT@{OLD}`",
+        f"| Claude | REJECT@{OLD} |",
+        f"Claude review: REJECT@{OLD}\n[x]: /url",
+        f"Claude review: REJECT@{OLD}\n===",
+        f"Claude Review: REJECT@{OLD}",
+        f"Claude review: REJECT@{OLD.upper()}",
+        f"Claude review: REJECT@{OLD}\n- Scope: `x.py`",
+    ],
+)
+def test_documented_non_record_shapes_stay_round_one(older_verdict):
+    result = evaluate(
+        LOW,
+        [comment(older_verdict), accept("gemini"), accept("codex")],
+    )
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
     "older_verdict",
     [
         f"<details>\nClaude review: REJECT@{OLD}\n</details>",

@@ -1937,15 +1937,17 @@ def _contributes(
 
 
 _OLDER_REVIEW_LINE = re.compile(
-    r"Claude review: (?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)@([0-9a-f]{40})",
+    r"(?:\*\*)?Claude(?: (?:review|reviewer))?(?:\*\*)?: "
+    r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)@`?([0-9a-f]{40})`?",
     re.ASCII,
 )
 _OLDER_INDEPENDENT_LINE = re.compile(
-    r"\*\*Independent Claude review\*\* \(Claude Opus [A-Za-z0-9. ]+, separate agent\): "
-    r"\*\*(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES) at ([0-9a-f]{40})\*\*\.",
+    r"\*\*Independent Claude review\*\* \(Claude (?:Opus|Sonnet|Haiku|Fable) "
+    r"[0-9]+(?:\.[0-9]+)*, separate agent\): "
+    r"\*\*(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES) at `?([0-9a-f]{40})`?\*\*\.",
     re.ASCII,
 )
-_OLDER_RECORD_HEADER = re.compile(r"## Review record (?:--|—|–) head ([0-9a-f]{40})", re.ASCII)
+_OLDER_RECORD_HEADER = re.compile(r"## Review record (?:--|—|–) head `?([0-9a-f]{40})`?", re.ASCII)
 _OLDER_REFERENCE_DEFINITION = re.compile(r"^\[[^\]\n]+\]:[ \t]*\S", re.ASCII | re.MULTILINE)
 
 
@@ -1954,6 +1956,23 @@ def _older_verdict_candidate_lines(body: str) -> list[str]:
     normalized = body.replace("\r\n", "\n")
     if "~~~" in normalized:
         return []
+    # Markdown code is permitted only for a balanced pair directly around the SHA
+    # in a whitelisted record header or verdict line. Strip those exact wrappers,
+    # then retain the existing body-wide prohibition on every other backtick.
+    lines = normalized.split("\n")
+    sanitized = []
+    for line in lines:
+        if "`" in line:
+            unwrapped = re.sub(r"`([0-9a-f]{40})`", r"\1", line, flags=re.ASCII)
+            if unwrapped != line and not (
+                _OLDER_RECORD_HEADER.fullmatch(unwrapped)
+                or _OLDER_REVIEW_LINE.fullmatch(unwrapped)
+                or _OLDER_INDEPENDENT_LINE.fullmatch(unwrapped)
+            ):
+                return []
+            line = unwrapped
+        sanitized.append(line)
+    normalized = "\n".join(sanitized)
     for character in normalized:
         category = unicodedata.category(character)
         if character in "`<\t" or category == "Cf" or (category == "Cc" and character != "\n"):
