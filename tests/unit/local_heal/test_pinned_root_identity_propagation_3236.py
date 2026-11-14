@@ -136,13 +136,20 @@ def test_micro_scratch_copy_rejects_replacement_after_identity_capture(tmp_path,
     assert list(replacement.iterdir()) == []
 
 
-def test_micro_verifier_requires_captured_workspace_identity(tmp_path, monkeypatch):
+@pytest.mark.parametrize("replacement_kind", ["directory", "symlink"])
+def test_micro_verifier_requires_captured_workspace_identity(
+    tmp_path, monkeypatch, replacement_kind
+):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     replacement = tmp_path / "replacement"
     replacement.mkdir()
     identity = root_identity(workspace)
-    _replace_with_symlink(workspace, replacement)
+    if replacement_kind == "directory":
+        workspace.rename(tmp_path / "workspace-original")
+        workspace.mkdir()
+    else:
+        _replace_with_symlink(workspace, replacement)
     called = False
 
     def run_model(*args, **kwargs):
@@ -189,6 +196,32 @@ def test_isolated_verifier_without_workspace_identity_blocks_before_sandbox(tmp_
     assert not called
 
 
+def test_isolated_verifier_blocks_relative_workspace_path(tmp_path, monkeypatch):
+    from nexus.services.local_heal import isolated_verifier
+
+    called = False
+
+    def run_model(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("relative workspace must be refused before sandbox entry")
+
+    monkeypatch.setattr(isolated_verifier, "run_model_argv", run_model)
+    receipt = run_isolated_verifier(
+        IsolatedVerifierRequest(
+            task_id="relative-workspace",
+            workspace_path="relative-workspace",
+            workspace_identity=root_identity(tmp_path),
+            verifier_command=("python", "-c", "pass"),
+            verifier_allowed=True,
+        )
+    )
+
+    assert receipt.verifier_status == "blocked"
+    assert "workspace_path_not_absolute" in receipt.verifier_error
+    assert not called
+
+
 def test_micro_verifier_without_workspace_identity_blocks_before_reads(tmp_path, monkeypatch):
     called = False
 
@@ -207,4 +240,165 @@ def test_micro_verifier_without_workspace_identity_blocks_before_reads(tmp_path,
 
     assert not result.passed
     assert result.error_message == "MICRO_VERIFY_ROOT_IDENTITY_MISSING"
+    assert not called
+
+
+@pytest.mark.parametrize("replacement_kind", ["directory", "symlink"])
+def test_pinned_root_rejects_workspace_replaced_at_original_path(
+    tmp_path, replacement_kind
+):
+    from nexus.core.contained_write import PinnedRoot
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    identity = root_identity(workspace)
+    original = tmp_path / "workspace-original"
+    workspace.rename(original)
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    if replacement_kind == "directory":
+        workspace.mkdir()
+    else:
+        workspace.symlink_to(replacement, target_is_directory=True)
+
+    with pytest.raises(SandboxError, match="work_dir_replaced"):
+        _bind_root(PinnedRoot(str(workspace), identity), "work_dir")
+
+
+def test_pinned_root_rejects_relative_workspace_path(tmp_path):
+    from nexus.core.contained_write import PinnedRoot
+
+    with pytest.raises(SandboxError, match="work_dir_replaced"):
+        _bind_root(PinnedRoot("relative-workspace", root_identity(tmp_path)), "work_dir")
+
+
+def test_resolved_workspace_under_symlink_parent_is_accepted(tmp_path):
+    from nexus.core.contained_write import PinnedRoot
+
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.symlink_to(real_parent, target_is_directory=True)
+    workspace = alias_parent / "workspace"
+    workspace.mkdir()
+    resolved_workspace = workspace.resolve()
+
+    bound, _ = _bind_root(PinnedRoot(str(resolved_workspace), root_identity(resolved_workspace)), "work_dir")
+
+    assert bound == resolved_workspace
+
+
+def test_audit_verifier_passes_workspace_identity(tmp_path, monkeypatch):
+    from nexus.services.local_heal import isolated_verifier
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    captured = {}
+
+    def run(request):
+        captured["request"] = request
+        return isolated_verifier.IsolatedVerifierReceipt(
+            task_id=request.task_id,
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+    monkeypatch.setattr(isolated_verifier, "run_isolated_verifier", run)
+    from scripts.ops.capability_wiring_audit import make_verifier
+
+    make_verifier(
+        workspace,
+        ("python", "-c", "pass"),
+        "audit-task",
+        root_identity(workspace),
+    )({})
+
+    assert captured["request"].workspace_identity == root_identity(workspace)
+
+
+def test_canary_resolves_workspace_under_symlink_parent(tmp_path, monkeypatch):
+    from nexus.services import product_capability_canary_helper as helper
+    from nexus.services.local_heal import isolated_verifier
+
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.symlink_to(real_parent, target_is_directory=True)
+    original_path = Path
+
+    def canary_path(*parts):
+        if parts == ("/tmp/nexus_family_canary",):
+            return alias_parent
+        return original_path(*parts)
+
+    captured = {}
+
+    def run_mainchain(_request, *, verifier, **_kwargs):
+        return verifier({"task_id": "task", "capability_evidence_bundle": {}})
+
+    def run_verifier(request):
+        captured["request"] = request
+        return isolated_verifier.IsolatedVerifierReceipt(
+            task_id=request.task_id,
+            verifier_status="pass",
+            exit_code=0,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+    monkeypatch.setattr(helper, "Path", canary_path)
+    monkeypatch.setattr(helper, "run_mainchain", run_mainchain)
+    monkeypatch.setattr(isolated_verifier, "run_isolated_verifier", run_verifier)
+
+    helper._run_canary_mainchain_cached("semantic_searcher", positive=False, task_id_override="task")
+
+    request = captured["request"]
+    assert Path(request.workspace_path) == Path(request.workspace_path).resolve()
+    assert request.workspace_identity == root_identity(Path(request.workspace_path))
+
+
+def test_same_oracle_rejects_execution_identity_drift_before_verifier(tmp_path, monkeypatch):
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierRequest
+    from nexus.services.local_heal.phases import verification
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    held_workspace = verification._HeldWorkspace(
+        path=workspace,
+        descriptor=-1,
+        file_id=root_identity(workspace),
+    )
+    request = IsolatedVerifierRequest(
+        task_id="task",
+        workspace_path=str(workspace),
+        verifier_command=("python", "-c", "pass"),
+        verifier_allowed=True,
+        workspace_identity=(held_workspace.file_id[0], held_workspace.file_id[1] + 1),
+    )
+    called = False
+
+    def run(_request):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(verification, "run_isolated_verifier", run)
+
+    receipt, reason = verification._execute(
+        frozen=None,
+        identity_request=None,
+        execution_request=request,
+        held=None,
+        sealed=None,
+        workspace=held_workspace,
+        prefix="CANDIDATE",
+    )
+
+    assert receipt is None
+    assert reason == "CANDIDATE_WORKSPACE_IDENTITY_DRIFT"
     assert not called

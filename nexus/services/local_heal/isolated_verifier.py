@@ -82,6 +82,8 @@ def run_isolated_verifier(request: IsolatedVerifierRequest) -> IsolatedVerifierR
         if request.workspace_identity is None:
             raise SandboxError("verifier_workspace_identity_missing")
         workspace = Path(request.workspace_path)
+        if not workspace.is_absolute():
+            raise SandboxError("verifier_workspace_path_not_absolute")
         # The workspace holds a model-written patch: run its tests under the OS sandbox (no
         # network, writes only in the workspace, allowlisted env). No barrier, no run (#2936).
         res = run_model_argv(

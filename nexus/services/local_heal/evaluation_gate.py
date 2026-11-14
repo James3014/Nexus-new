@@ -275,7 +275,6 @@ class EvaluationGate:
         with disposable_repo_copy(self.repo_dir, prefix="eval-gate-") as work:
             work_identity = root_identity(work)
             source_root = Path(self.repo_dir).resolve()
-            source_identity = root_identity(source_root)
             benchmarks_dir = str(work / "scripts/benchmarks")
             env = {"PYTHONPATH": f"{work}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"}
             return run_model_argv(
@@ -285,7 +284,7 @@ class EvaluationGate:
                 extra_env=env,
                 readable=(
                     *(interpreter_readable_roots(cmd[0]) if cmd else ()),
-                    PinnedRoot(source_root, source_identity),
+                    source_root,
                 ),
             )
 

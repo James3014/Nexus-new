@@ -14,8 +14,8 @@ import subprocess
 import sys
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.engine.model_output_sandbox import SandboxError
 from nexus.services.local_heal import evaluation_gate as eg
 from nexus.services.local_heal import micro_verifier as mv
@@ -89,7 +89,13 @@ def test_an_import_probe_that_times_out_fails_closed(tmp_path, monkeypatch):
         raise subprocess.TimeoutExpired(argv, 10)
 
     monkeypatch.setattr(mv, "run_model_argv", _fake_runner([], on_import=on_import))
-    res = MicroVerifier.verify("", tmp_path, ["calc.py"], verifier_env_metadata={"interpreter": PY}, workspace_identity=root_identity(tmp_path))
+    res = MicroVerifier.verify(
+        "",
+        tmp_path,
+        ["calc.py"],
+        verifier_env_metadata={"interpreter": PY},
+        workspace_identity=root_identity(tmp_path),
+    )
     assert res.passed is False
     assert res.error_message == "IMPORT_ERROR"
 
@@ -100,7 +106,13 @@ def test_an_import_probe_that_times_out_fails_closed(tmp_path, monkeypatch):
 def test_no_test_files_records_false_pass_risk(tmp_path, monkeypatch):
     _write(tmp_path, "calc.py")
     monkeypatch.setattr(mv, "run_model_argv", _fake_runner([]))
-    res = MicroVerifier.verify("", tmp_path, ["calc.py"], verifier_env_metadata={"interpreter": PY}, workspace_identity=root_identity(tmp_path))
+    res = MicroVerifier.verify(
+        "",
+        tmp_path,
+        ["calc.py"],
+        verifier_env_metadata={"interpreter": PY},
+        workspace_identity=root_identity(tmp_path),
+    )
     assert res.passed is True
     assert res.test_step == "not_applicable"
     assert "false_pass_risk" in res.classifications
@@ -120,7 +132,13 @@ def test_syntax_error_is_reported_as_such_and_runs_nothing(tmp_path, monkeypatch
             calls, on_import=lambda a: subprocess.CompletedProcess(a, 1, "", "SyntaxError")
         ),
     )
-    res = MicroVerifier.verify("", tmp_path, ["calc.py"], verifier_env_metadata={"interpreter": PY}, workspace_identity=root_identity(tmp_path))
+    res = MicroVerifier.verify(
+        "",
+        tmp_path,
+        ["calc.py"],
+        verifier_env_metadata={"interpreter": PY},
+        workspace_identity=root_identity(tmp_path),
+    )
     assert res.passed is False
     assert res.syntax_ok is False
     assert res.error_message == "SYNTAX_ERROR"

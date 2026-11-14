@@ -1,23 +1,19 @@
-import pytest
 import sys
-from pathlib import Path
+
+import pytest
+
 from nexus.core.contained_write import root_identity
-from nexus.services.local_heal.micro_verifier import MicroVerifier, MicroVerifyResult
+from nexus.services.local_heal.micro_verifier import MicroVerifier
 from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
 
 # #2945: with no OS sandbox on the host (Linux CI) model commands are refused; these tests
 # exercise local_heal logic, so they run them unconfined there (sandbox stays on macOS).
 pytestmark = pytest.mark.usefixtures("model_exec_without_barrier_runs_unconfined")
 
-_MicroVerifier = MicroVerifier
-
-
-class MicroVerifier:
-    @staticmethod
-    def verify(*args, **kwargs):
-        repo_dir = kwargs.get("repo_dir", args[1] if len(args) > 1 else None)
-        kwargs.setdefault("workspace_identity", root_identity(repo_dir))
-        return _MicroVerifier.verify(*args, **kwargs)
+def _verify_with_workspace_identity(*args, **kwargs):
+    repo_dir = kwargs.get("repo_dir", args[1] if len(args) > 1 else None)
+    kwargs.setdefault("workspace_identity", root_identity(repo_dir))
+    return MicroVerifier.verify(*args, **kwargs)
 
 
 def test_generic_python3_not_full_verifier(tmp_path):
@@ -25,7 +21,7 @@ def test_generic_python3_not_full_verifier(tmp_path):
     (tmp_path / "hello.py").write_text("print('hello')\n", encoding="utf-8")
     
     # 預設不允許 bare python3
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -42,7 +38,7 @@ def test_task_scoped_interpreter_recorded(tmp_path):
     
     current_interpreter = sys.executable
     
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -57,7 +53,7 @@ def test_env_mismatch_classified(tmp_path):
     """When interpreter is missing and allow_bare_python=False, context-missing is classified."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -77,7 +73,7 @@ def test_syntax_parse_not_import_success(tmp_path):
     
     current_interpreter = sys.executable
     
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["bad_import.py"],
@@ -98,7 +94,7 @@ def test_verifier_command_context_preserved(tmp_path):
     current_interpreter = sys.executable
     
     # We use python as mock pytest command to simulate FileNotFoundError or direct run
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["test_dummy.py"],
@@ -120,7 +116,7 @@ def test_env_taxonomy_provides_task_scoped_interpreter(tmp_path):
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     
     import sys
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -137,7 +133,7 @@ def test_env_taxonomy_verifier_command(tmp_path):
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     
     import sys
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -152,7 +148,7 @@ def test_no_context_no_taxonomy_fails_closed(tmp_path):
     """No interpreter, no taxonomy, no allow_bare_python → MICRO_VERIFY_CONTEXT_MISSING."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],
@@ -170,7 +166,7 @@ def test_metadata_interpreter_not_task_scoped(tmp_path):
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     
     import sys
-    res = MicroVerifier.verify(
+    res = _verify_with_workspace_identity(
         patch_content="",
         repo_dir=tmp_path,
         patched_files=["hello.py"],

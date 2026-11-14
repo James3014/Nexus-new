@@ -395,7 +395,6 @@ class ReproductionRunner:
             with disposable_repo_copy(self.repo_dir, prefix="repro-run-") as work:
                 work_identity = root_identity(work)
                 source_root = Path(self.repo_dir).resolve()
-                source_identity = root_identity(source_root)
                 subprocess_started = True
                 res = run_model_argv(
                     [self.python_executable, "reproduce_bug.py"],
@@ -404,7 +403,7 @@ class ReproductionRunner:
                     extra_env={self._FAILURE_RECORD_ENV: str(record_path)},
                     readable=(
                         *interpreter_readable_roots(self.python_executable),
-                        PinnedRoot(source_root, source_identity),
+                        source_root,
                     ),
                     writable=(record_dir,),
                 )

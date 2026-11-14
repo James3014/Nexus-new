@@ -79,10 +79,11 @@ def _run_canary_mainchain_cached(
     task_id_override: str = "",
 ) -> dict[str, Any]:
     """Production canary invocation via MainchainEntry -> Planner -> UnifiedRuntime."""
-    contract = PLANNER_EXECUTION_CONTRACTS[name]
+    _contract = PLANNER_EXECUTION_CONTRACTS[name]
     task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
     canary_root = Path("/tmp/nexus_family_canary") / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
+    canary_root = canary_root.resolve()
     from nexus.core.contained_write import root_identity
 
     canary_root_identity = root_identity(canary_root)
