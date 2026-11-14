@@ -2052,9 +2052,10 @@ def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
             quote_continuation = True
             continue
         if quote_continuation:
-            # CommonMark permits lazy paragraph continuation after a quote marker.
+            # CommonMark keeps lazy paragraph continuation until a blank line or a new block.
+            if not re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", line, re.ASCII):
+                continue
             quote_continuation = False
-            continue
         if (
             _OLDER_LIST_ITEM.match(line)
             or line.startswith("|")
