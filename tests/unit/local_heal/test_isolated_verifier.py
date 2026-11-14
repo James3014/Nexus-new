@@ -7,8 +7,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.services.local_heal.isolated_verifier import (
     IsolatedVerifierReceipt,
     IsolatedVerifierRequest,

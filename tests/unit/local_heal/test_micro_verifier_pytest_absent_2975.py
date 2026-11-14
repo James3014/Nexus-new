@@ -16,8 +16,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.services.local_heal.micro_verifier import MicroVerifier, is_test_file
 from tests.model_sandbox_passthrough import model_exec_without_barrier_runs_unconfined  # noqa: F401
 

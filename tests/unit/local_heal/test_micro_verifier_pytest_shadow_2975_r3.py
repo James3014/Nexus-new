@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.services.local_heal import micro_verifier as mv
 from nexus.services.local_heal.evaluation_gate import EvaluationGate
 from nexus.services.local_heal.micro_verifier import MicroVerifier

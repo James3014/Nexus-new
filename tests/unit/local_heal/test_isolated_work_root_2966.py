@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.engine.model_output_sandbox import denied_subtrees
 from nexus.engine.sandboxed_lane import os_sandbox_available
 from nexus.services.local_heal import armor_artifact_storage

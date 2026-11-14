@@ -18,8 +18,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from nexus.core.contained_write import root_identity
 
+from nexus.core.contained_write import root_identity
 from nexus.services.local_heal import micro_verifier as mv
 from nexus.services.local_heal.interface import PhaseResult
 from nexus.services.local_heal.micro_verifier import MicroVerifier, MicroVerifyResult

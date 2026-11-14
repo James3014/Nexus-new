@@ -16,13 +16,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from nexus.core.contained_write import root_identity
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nexus.core.contained_write import PathContainmentError, read_text_in_root
+from nexus.core.contained_write import PathContainmentError, read_text_in_root, root_identity
 from nexus.services.local_heal.context import GovernanceContext, HealContext, OperationalContext
 from nexus.services.local_heal.context_budget import ContextBudgetManager
 from nexus.services.local_heal.granular_localizer import GranularMethodLocalizer

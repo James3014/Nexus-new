@@ -12,11 +12,11 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from nexus.core.contained_write import root_identity
 from unittest.mock import MagicMock
 
 import pytest
 
+from nexus.core.contained_write import root_identity
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
