@@ -169,6 +169,28 @@ def test_real_old_claude_record_header_starts_round_two():
     assert result["status"] == "OK"
 
 
+@pytest.mark.parametrize(
+    "quoted_reject",
+    [
+        f"> Claude review: REJECT@{OLD}",
+        f"```\nClaude review: REJECT@{OLD}\n```",
+        f"| Claude | REJECT@{OLD} |",
+        f"intro\n\n    Claude review: REJECT@{OLD}",
+        f"`Claude review: REJECT@{OLD}`",
+        (
+            f"> ## Review record — head `{OLD}`\n"
+            f"> **Independent Claude review** (Claude Opus 5.5, separate agent): "
+            f"**REJECT at {OLD}**."
+        ),
+        f"Claude summary follows. Gemini review: REJECT@{OLD}",
+    ],
+)
+def test_quoted_old_claude_reject_does_not_start_round_two(quoted_reject):
+    result = evaluate(LOW, [comment(quoted_reject), accept("gemini"), accept("codex")])
+    assert result["route"] == "r1"
+    assert result["status"] == "MISSING_RECORD"
+
+
 def test_high_risk_round_two_prefers_existing_claude_and_cross_model_route():
     result = evaluate(
         HIGH,
@@ -424,14 +446,26 @@ def test_older_gemini_reject_does_not_start_round_two():
     assert result["status"] == "MISSING_RECORD"
 
 
-def test_older_sha_scan_is_linear_enough():
-    comments = []
-    for comment_index in range(3):
-        lines = [
+@pytest.mark.parametrize(
+    "line_factory",
+    [
+        lambda comment_index, line_index: (
+            f"> Claude review: ACCEPT@{comment_index:02x}{line_index:038x}"
+        ),
+        lambda comment_index, line_index: (
+            f"Claude review record head note {comment_index:02x}{line_index:038x}"
+        ),
+        lambda comment_index, line_index: (
             f"finding {line_index} {comment_index:02x}{line_index:038x}"
-            for line_index in range(400)
-        ]
-        comments.append(comment("\n".join(lines)))
+        ),
+    ],
+)
+def test_older_sha_scan_is_linear_enough(line_factory):
+    # Candidate SHA work is capped at 64 distinct tokens per comment.
+    comments = [
+        comment("\n".join(line_factory(comment_index, line_index) for line_index in range(400)))
+        for comment_index in range(3)
+    ]
     import time
 
     started = time.perf_counter()

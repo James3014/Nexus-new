@@ -165,6 +165,7 @@ REPO_HIGH_RISK_FILES: dict[str, frozenset[str]] = {
 }
 
 _HEX_TOKEN = re.compile(rf"(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])")
+MAX_OLDER_SHA_CANDIDATES_PER_COMMENT = 64
 _TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
 # Verdict position: after a "Verdict:" label, bound as "ACCEPT@<sha>", after a colon,
 # dash or round marker ("r3 ACCEPT", "Round 2 @ sha: ACCEPT"), or alone on the line.
@@ -1940,23 +1941,41 @@ def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
         body = comment.get("body") if isinstance(comment, dict) else None
         if not isinstance(body, str):
             continue
-        candidate_lines = [
-            line
-            for line in body.splitlines()
-            if ("claude" in line.lower() or "opus" in line.lower())
-            and (
-                re.search(r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b", line)
-                or ("review record" in line.lower() and "head" in line.lower())
-            )
-        ]
-        # _classify uses the same read-vs-quoted rules as standing verdicts: it
-        # ignores blockquotes, fences, and inline-quoted verdicts while retaining
-        # the ordinary reviewer/verdict positions used by the standing logic.
+        candidate_lines = []
+        fenced = False
+        for line in body.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("```", "~~~")):
+                fenced = not fenced
+                continue
+            if fenced or line.startswith(("    ", "\t")):
+                continue
+            if re.match(r"^\s*[>|]", line):
+                continue
+            candidate = re.sub(r"(`+).*?\1", "", line)
+            lowered = candidate.lower()
+            if ("claude" in lowered or "opus" in lowered) and (
+                re.search(r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b", candidate)
+                or ("review record" in lowered and "head" in lowered)
+            ):
+                candidate_lines.append(candidate)
         candidate_text = "\n".join(candidate_lines)
-        for sha in dict.fromkeys(match.group(1) for match in _HEX_TOKEN.finditer(candidate_text)):
+        if not re.search(
+            r"\b(?:ACCEPT(?:ED)?|APPROVE(?:D)?|REJECT|REQUEST_CHANGES)\b",
+            candidate_text,
+        ):
+            continue
+        considered: set[str] = set()
+        for match in _HEX_TOKEN.finditer(candidate_text):
+            sha = match.group(1)
+            if sha in considered:
+                continue
+            if len(considered) >= MAX_OLDER_SHA_CANDIDATES_PER_COMMENT:
+                break
+            considered.add(sha)
             if head.lower().startswith(sha.lower()):
                 continue
-            parsed = _classify(body, sha)
+            parsed = _classify(candidate_text, sha)
             if any(
                 event["family"] == "claude" and event["kind"] in {"accept", "reject"}
                 for event in parsed["events"]
