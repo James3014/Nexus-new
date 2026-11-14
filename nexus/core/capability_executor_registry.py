@@ -1804,6 +1804,7 @@ def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
             require_os_sandbox=True,
         )
         ok = bool(result.get("success")) and int(result.get("exit_code") or 0) == 0
+        refused = str(result.get("error") or "") == "os_sandbox_unavailable"
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "sandbox_runner",
@@ -1819,9 +1820,9 @@ def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> Capab
                     "report_path": str(result.get("report_path") or ""),
                     "duration_sec": float(result.get("duration_sec") or 0.0),
                 },
-                sandbox_executed=True,
+                sandbox_executed=not refused,
                 workspace_isolated=(
-                    str(result.get("workspace_source") or "") == "local_project_copy"
+                    not refused and str(result.get("workspace_source") or "") == "local_project_copy"
                 ),
                 exit_code=result.get("exit_code"),
                 network_allowed=bool(result.get("network_allowed", True)),

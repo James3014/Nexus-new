@@ -144,3 +144,71 @@ def test_isolation_requiring_callers_pass_require_os_sandbox(tmp_path):
     source = Path("nexus/core/capability_executor_registry.py").read_text(encoding="utf-8")
     start = source.index("result = inst.run_task(")
     assert "require_os_sandbox=True" in source[start : start + 400]
+
+
+def _timeout(*_args, **_kwargs):
+    raise sandbox_runner_mod.subprocess.TimeoutExpired(cmd="probe", timeout=1)
+
+
+def test_timeout_record_without_os_sandbox_is_not_isolated(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    monkeypatch.setattr(sandbox_runner_mod.sys, "platform", "linux")
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", _timeout)
+
+    result = SandboxRunner(root).run_task("probe", command=[sys.executable, "probe.py"])
+    record = json.loads(Path(result["report_path"]).read_text(encoding="utf-8"))
+
+    assert result["timed_out"] is True
+    for payload in (result, record):
+        assert payload["network_allowed"] is True
+        assert payload["network_barrier"]["external_allowed"] is True
+        assert payload["network_barrier"]["os_sandbox_enforced"] is False
+
+
+def test_timeout_record_with_os_sandbox_keeps_isolation(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    runner = SandboxRunner(root)
+    monkeypatch.setattr(runner, "has_sandbox_exec", True)
+    monkeypatch.setattr(runner, "sandbox_exec_path", "/usr/bin/sandbox-exec")
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", _timeout)
+
+    result = runner.run_task("probe", command=[sys.executable, "probe.py"])
+    record = json.loads(Path(result["report_path"]).read_text(encoding="utf-8"))
+
+    assert result["timed_out"] is True
+    for payload in (result, record):
+        assert payload["network_allowed"] is False
+        assert payload["network_barrier"]["mode"] == "os_level_sandbox_exec"
+        assert payload["network_barrier"]["os_sandbox_enforced"] is True
+        assert payload["network_barrier"]["loopback_allowed"] is False
+
+
+def test_refusal_record_is_not_isolated_and_not_a_workspace_run(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    runner = SandboxRunner(root)
+    monkeypatch.setattr(runner, "has_sandbox_exec", False)
+
+    result = runner.run_task("probe", command=[sys.executable, "probe.py"], require_os_sandbox=True)
+    record = json.loads(Path(result["report_path"]).read_text(encoding="utf-8"))
+
+    for payload in (result, record):
+        assert payload["network_allowed"] is True
+        assert payload["network_barrier"]["mode"] == "not_enforced"
+        assert payload["workspace_source"] == "none_refused"
+
+
+def test_default_run_without_sandbox_still_runs(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    runner = SandboxRunner(root)
+    monkeypatch.setattr(runner, "has_sandbox_exec", False)
+    monkeypatch.setattr(sandbox_runner_mod, "run_reaping_process_group", _run_success)
+
+    result = runner.run_task("probe", command=[sys.executable, "probe.py"])
+
+    assert result["success"] is True
+
+
+def test_capability_receipt_does_not_claim_execution_on_refusal():
+    source = Path("nexus/core/capability_executor_registry.py").read_text(encoding="utf-8")
+    assert 'refused = str(result.get("error") or "") == "os_sandbox_unavailable"' in source
+    assert "sandbox_executed=not refused" in source

@@ -293,8 +293,12 @@ class SandboxRunner:
         timed_out: bool = False,
         duration_sec: float = 0.0,
         os_sandbox_enforced: bool = False,
+        workspace_source: str = "local_project_copy",
+        barrier_mode: str | None = None,
     ) -> dict[str, Any]:
         network_allowed = not os_sandbox_enforced
+        if barrier_mode is None:
+            barrier_mode = "os_level_sandbox_exec" if os_sandbox_enforced else "python_sitecustomize"
         return {
             "schema": "nexus.sandbox_run_task.v1",
             "task": task,
@@ -306,7 +310,7 @@ class SandboxRunner:
             "duration_sec": duration_sec,
             "command": command,
             "cwd": str(cwd),
-            "workspace_source": "local_project_copy",
+            "workspace_source": workspace_source,
             "workspace_path": str(workspace_path),
             "run_id": run_id,
             "report_path": str(run_dir / "sandbox_result.json"),
@@ -318,7 +322,7 @@ class SandboxRunner:
             "sandbox_exec_sha256": self.sandbox_exec_sha256,
             "network_allowed": network_allowed,
             "network_barrier": {
-                "mode": "os_level_sandbox_exec" if os_sandbox_enforced else "not_enforced",
+                "mode": barrier_mode,
                 "loopback_allowed": not os_sandbox_enforced,
                 "external_allowed": network_allowed,
                 "os_sandbox_enforced": os_sandbox_enforced,
@@ -537,6 +541,8 @@ socket.socket.connect = _guarded_socket_connect
                     cleanup=cleanup,
                     error="os_sandbox_unavailable",
                     duration_sec=time.time() - start_time,
+                    workspace_source="none_refused",
+                    barrier_mode="not_enforced",
                 )
                 return self._write_result(run_dir, result_payload, run_dir_identity)
 
