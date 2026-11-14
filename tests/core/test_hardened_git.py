@@ -872,6 +872,45 @@ def test_hardened_git_env_ignores_the_grafts_file(tmp_path):
     assert hardened_git.hardened_git_env(tmp_path)["GIT_GRAFT_FILE"] == os.devnull
 
 
+def test_hardened_git_does_not_read_the_commit_graph(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "a",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "commit-graph", "write", "--reachable"], cwd=repo, check=True)
+    env = hardened_git.hardened_git_env(repo)
+    out = subprocess.run(
+        ["git", "config", "--type=bool", "core.commitGraph"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert out.stdout.strip() == "false"
+    graph = repo / ".git" / "objects" / "info" / "commit-graph"
+    graph.unlink()
+    graph.write_bytes(b"corrupt")
+    head = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, env=env, capture_output=True, text=True
+    )
+    assert head.stdout.strip() == "1" and "commit-graph" not in head.stderr
+
+
 def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp_path):
     """A replacement ref (writable by anyone who can write the ref store) does not change
     what the hardened runner reads under a recorded sha (#3226)."""
