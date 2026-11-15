@@ -350,9 +350,9 @@ _POST_NOT = re.compile(r"^\s*not\b", re.IGNORECASE)  # "ACCEPT not given yet" (#
 # and neither is one used as an adjective ("withdrawn findings: none", "denied-path tests").
 _POST_WITHDRAWN = re.compile(
     r"\s*(?:(?:@|\bat\b|\bon\b)\s*[0-9a-f]{7,40}\b)?[\s.,;:!\-\u2013\u2014(\[]*"
-    r"(?:pending|withdrawn|stale|void|withheld|revoked|retracted|rescinded|denied"
+    r"(?:pending\s+ci|pending|withdrawn|stale|void|withheld|revoked|retracted|rescinded|denied"
     r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b"
-    r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending|ci)\b))",
+    r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending)\b))",
     re.IGNORECASE,
 )
 _PREFIX_WITHDRAWN = re.compile(
@@ -361,6 +361,17 @@ _PREFIX_WITHDRAWN = re.compile(
 )
 _INLINE_PREFIX_WITHDRAWN = re.compile(
     r"\b(?:withdrawn|retracted|void|stale|superseded|pending|withheld|revoked|rescinded|denied)\s*[:：]",
+    re.IGNORECASE,
+)
+_WITHDRAWN_LABEL_CHAIN = re.compile(
+    r"(?:\s|[,：:]|[\-–—])*"
+    r"(?:(?:claude|opus|sonnet|codex|gemini|gpt)(?:\s+(?:review|reviewer))?"
+    r"|review(?:er)?|verdict)\s*[:：]",
+    re.IGNORECASE,
+)
+_WITHDRAWN_REVIEWER_PREFIX = re.compile(
+    r"\s*(?:(?:claude|opus|sonnet|codex|gemini|gpt)(?:\s+(?:review|reviewer))?"
+    r"|review(?:er)?)\s*[:：]\s*",
     re.IGNORECASE,
 )
 # Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
@@ -728,6 +739,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
             continue
         token_at = start + span[0]
         withdrawn = any(begin <= token_at < end for begin, end in struck)  # "~~ACCEPT~~"
+        prior_token_end = prev_token_end
         window_start = prev_token_end
         asides: dict[int, int] = {}  # closing index -> start of its last round marker
         for marker in _ROUND_MARKER.finditer(plain_line, prev_token_end, token_at):
@@ -758,11 +770,28 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         # The window runs from the previous verdict token on the line (a round list
         # names several) to this one.
         line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
-        prefix_withdrawn = _PREFIX_WITHDRAWN.match(plain_line)
+        prefix_start = max(prior_token_end, plain_line.rfind(";", 0, token_at) + 1)
+        prefix_text = plain_line[prefix_start:token_at]
+        prefix_withdrawn = _PREFIX_WITHDRAWN.match(prefix_text)
         if not prefix_withdrawn:
-            prefix_withdrawn = _INLINE_PREFIX_WITHDRAWN.search(plain_line, 0, token_at)
+            for candidate in _INLINE_PREFIX_WITHDRAWN.finditer(prefix_text):
+                reviewer_prefix = prefix_text[: candidate.start()]
+                if reviewer_prefix.strip() and not _WITHDRAWN_REVIEWER_PREFIX.fullmatch(
+                    reviewer_prefix
+                ):
+                    continue
+                suffix = prefix_text[candidate.end() :]
+                cursor = 0
+                while cursor < len(suffix):
+                    label = _WITHDRAWN_LABEL_CHAIN.match(suffix, cursor)
+                    if not label:
+                        break
+                    cursor = label.end()
+                if not suffix[cursor:].strip():
+                    prefix_withdrawn = candidate
+                    break
         if prefix_withdrawn:
-            line_before = line_before.replace(plain_line[: prefix_withdrawn.end()], "", 1)
+            line_before = line_before.replace(prefix_text[: prefix_withdrawn.end()], "", 1)
         after = clause[span[1] :]
         if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
             continue  # a quoted or negated verdict is prose about a verdict, not one

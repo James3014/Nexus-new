@@ -41,6 +41,36 @@ def test_accept_pending_ci_retracts_prior_accept():
     assert _status_after_withdrawal(f"Claude review: ACCEPT@{HEAD} pending CI") == "MISSING_RECORD"
 
 
+def test_accept_pending_ci_followed_by_passed_does_not_retract_prior_accept():
+    assert _status_after_withdrawal(
+        f"Claude review: ACCEPT@{HEAD} pending CI passed afterwards"
+    ) == "OK"
+
+
+def test_stale_finding_prose_before_verdict_does_not_retract_accept():
+    assert (
+        _status_after_withdrawal(
+            f"The stale: finding was resolved; Claude Verdict: ACCEPT@{HEAD}"
+        )
+        == "OK"
+    )
+
+
+def test_withdrawal_tag_only_applies_until_next_verdict_or_reviewer():
+    reads = rrc._verdict_reads(
+        f"Claude: Withdrawn: ACCEPT@{HEAD}; Gemini Verdict: ACCEPT@{HEAD}"
+    )
+    assert [withdrawn for _clause, withdrawn in reads] == [True, False]
+
+
+def test_withdrawal_labels_are_case_insensitive():
+    for label in ("WITHDRAWN", "withdrawn"):
+        assert (
+            _status_after_withdrawal(f"Claude review: {label}: Verdict: ACCEPT@{HEAD}")
+            == "MISSING_RECORD"
+        )
+
+
 def test_normal_bold_accept_at_sha_still_passes():
     comments = [_comment(f"Claude review: **ACCEPT** at {HEAD}")]
     assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "OK"
