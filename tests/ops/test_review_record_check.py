@@ -228,11 +228,51 @@ def test_decoy_bold_accept_does_not_free_the_bullets(decoy):
 @pytest.mark.parametrize(
     "form",
     [
-        pytest.param(f"~~**ACCEPT at {HEAD}**~~", id="struck"),
-        pytest.param(f"**ACCEPT at {HEAD} withdrawn**", id="withdrawn"),
-        pytest.param(f"    **ACCEPT at {HEAD}**", id="indented"),
-        pytest.param(f"<details>\n**ACCEPT at {HEAD}**\n</details>", id="details"),
-        pytest.param(f"````\n**ACCEPT at {HEAD}**\n```\n````", id="long fence"),
+        pytest.param(f"- item\n    ```\n  **ACCEPT at {HEAD}**\n    ```", id="list-space-fence"),
+        pytest.param(
+            f"1. item\n     ```\n   **ACCEPT at {HEAD}**\n     ```", id="ordered-list-fence"
+        ),
+        pytest.param(f"- item\n    ~~~\n  **ACCEPT at {HEAD}**\n    ~~~", id="tilde-list-fence"),
+        pytest.param(f"- item\n    ```\n  **ACCEPT at {HEAD}**", id="open-list-fence"),
+        pytest.param(f"```\n  **ACCEPT at {HEAD}**\n  ```", id="indented-fence"),
+        pytest.param(f"\n \t**ACCEPT at {HEAD}**", id="tab-indent-one"),
+        pytest.param(f"  \t**ACCEPT at {HEAD}**", id="tab-indent-two"),
+        pytest.param(f"   \t**ACCEPT at {HEAD}**", id="tab-indent-three"),
+        pytest.param(
+            f"<details>\n<details>\nx\n</details>\n**ACCEPT at {HEAD}**\n</details>",
+            id="nested-details",
+        ),
+        pytest.param(
+            f"<details>\nuse `</details>` here\n**ACCEPT at {HEAD}**\n</details>",
+            id="details-inline-code",
+        ),
+        pytest.param(f"~~old\n**ACCEPT at {HEAD}**~~", id="multiline-tilde-strike"),
+        pytest.param(f"<del>\n**ACCEPT at {HEAD}**\n</del>", id="multiline-del"),
+        pytest.param(f"<s>\n**ACCEPT at {HEAD}**\n</s>", id="multiline-s"),
+        pytest.param(f"<strike>\n**ACCEPT at {HEAD}**\n</strike>", id="multiline-strike-tag"),
+        pytest.param(f"`` **ACCEPT at {HEAD}** ``", id="double-backtick"),
+        pytest.param(f"`foo\n**ACCEPT at {HEAD}** bar\n`", id="multiline-inline-code"),
+        pytest.param(f"<pre>\n**ACCEPT at {HEAD}**\n</pre>", id="pre-block"),
+        pytest.param(f"<pre>**ACCEPT at {HEAD}**</pre>", id="pre-inline"),
+        pytest.param(f"<code>**ACCEPT at {HEAD}**</code>", id="code-inline"),
+        pytest.param(f"Not **ACCEPT at {HEAD}**", id="negated-prefix"),
+        pytest.param(f"| x | **ACCEPT at {HEAD}** |", id="table-row"),
+        pytest.param(f"- [ ] **ACCEPT at {HEAD}**", id="unticked-checklist"),
+        pytest.param(f"Withdrawn: **ACCEPT at {HEAD}**", id="withdrawn-prefix"),
+        pytest.param(f"Retracted: **ACCEPT at {HEAD}**", id="retracted-prefix"),
+        pytest.param(f"Superseded: **ACCEPT at {HEAD}**", id="superseded-prefix"),
+        pytest.param(f"Pending: **ACCEPT at {HEAD}**", id="pending-prefix"),
+        pytest.param(f"Previously **ACCEPT at {HEAD}**", id="previously-prefix"),
+        pytest.param(f"```\n~~~\n**ACCEPT at {HEAD}**\n```", id="mismatched-fence"),
+        pytest.param(f"````\n```\n**ACCEPT at {HEAD}**\n````", id="longer-fence"),
+        pytest.param(f"``` x\n**ACCEPT at {HEAD}**\n```", id="fence-close-text"),
+        pytest.param(f"\t```\n**ACCEPT at {HEAD}**\n\t```", id="tab-fence-marker"),
+        pytest.param(f"~~**ACCEPT at {HEAD}**~~", id="inline-strike"),
+        pytest.param(f"**ACCEPT at {HEAD} withdrawn**", id="suffix-withdrawal"),
+        pytest.param(f"```\n``` x\n**ACCEPT at {HEAD}**\n```", id="close-marker-text"),
+        pytest.param(f"    **ACCEPT at {HEAD}**", id="space-indent"),
+        pytest.param(f"<details>\n**ACCEPT at {HEAD}**\n</details>", id="details-block"),
+        pytest.param(f"````\n**ACCEPT at {HEAD}**\n```\n````", id="fence-short-close"),
     ],
 )
 def test_invalid_bold_accept_forms_do_not_free_the_bullets(form):
@@ -243,17 +283,51 @@ def test_invalid_bold_accept_forms_do_not_free_the_bullets(form):
 @pytest.mark.parametrize(
     "form",
     [
-        pytest.param(f"**ACCEPT at {HEAD}?**", id="withdrawn"),
-        pytest.param(f"<del>**ACCEPT at {HEAD}**</del>", id="struck"),
-        pytest.param(f"<s>**ACCEPT at {HEAD}**</s>", id="struck"),
-        pytest.param(f"<strike>**ACCEPT at {HEAD}**</strike>", id="struck"),
-        pytest.param(f"**ACCEPT at {HEAD}** retracted", id="withdrawn"),
-        pytest.param(f"**ACCEPT at {HEAD}** (superseded)", id="withdrawn"),
+        pytest.param(f"**ACCEPT at {HEAD}?**", id="question-withdrawal"),
+        pytest.param(f"<del>**ACCEPT at {HEAD}**</del>", id="inline-del"),
+        pytest.param(f"<s>**ACCEPT at {HEAD}**</s>", id="inline-s"),
+        pytest.param(f"<strike>**ACCEPT at {HEAD}**</strike>", id="inline-strike-tag"),
+        pytest.param(f"**ACCEPT at {HEAD}** retracted", id="suffix-retracted"),
+        pytest.param(f"**ACCEPT at {HEAD}** (superseded)", id="suffix-superseded"),
     ],
 )
 def test_other_invalid_bold_accept_forms_do_not_free_the_bullets(form):
     body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"**ACCEPT at {HEAD}**", id="plain-span"),
+        pytest.param(f"Verdict: **ACCEPT at {HEAD}**", id="verdict-prefix"),
+        pytest.param(f"```\ncode\n```\n**ACCEPT at {HEAD}**", id="after-fence"),
+        pytest.param(f"````\n```\n````\n**ACCEPT at {HEAD}**", id="after-nested-fence"),
+        pytest.param(f"<details>\nx\n</details>\n**ACCEPT at {HEAD}**", id="after-details"),
+        pytest.param(f"    ```\n**ACCEPT at {HEAD}**", id="lazy-continuation"),
+        pytest.param(f"- item\n  ```\n  code\n  ```\n**ACCEPT at {HEAD}**", id="list-fence-closed"),
+        pytest.param(f"``` `x`\n**ACCEPT at {HEAD}**", id="backtick-info"),
+    ],
+)
+def test_valid_bold_accept_forms_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_conditional_selection_uses_valid_record_before_fenced_text():
+    valid = _conditional_body(sha=HEAD)
+    body = valid + "\n```\n~~~\n" + _conditional_body(sha=HEAD) + "```\n"
+    selected = rrc._conditional_record([_c(body)], HEAD)
+    assert selected is not None
+    assert selected[0] == 0
+
+
+def test_fence_marker_indentation_uses_spaces():
+    assert rrc._commonmark_fenced_lines(["\t```", "**ACCEPT at " + HEAD + "**", "\t```"]) == set()
+
+
+def test_fenced_lines_keep_the_base_toggle_result():
+    assert rrc._fenced_lines(["\t```", "code", "\t```"]) == {0, 1, 2}
 
 
 def test_bold_accept_for_another_head_does_not_free_the_bullets():

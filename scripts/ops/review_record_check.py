@@ -457,31 +457,54 @@ def _hex_tokens(text: str) -> list[str]:
 
 
 _BOLD_ACCEPT = re.compile(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*")
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_INLINE_CODE = re.compile(r"(`+)(.*?)\1", re.S)
 _NEGATED_ACCEPT = re.compile(
     r"\b(?:not|never|no|cannot|can't|until|pending|awaiting|unless|without)\b|n't\b", re.I
 )
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
-_FENCE_MARKER = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FENCE_MARKER = re.compile(r"^( *)(?:(?:[-+*]|\d+[.)])[ \t]+)*( *)(`{3,}|~{3,})(.*)$")
+_LIST_MARKER = re.compile(r"^ {0,3}(?:[-+*]|\d+[.)])[ \t]+")
 
 
-def _fenced_lines(lines: list[str]) -> set[int]:
+def _legacy_fenced_lines(lines: list[str]) -> set[int]:
+    fenced: set[int] = set()
+    inside = False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(("```", "~~~")):
+            inside = not inside
+            fenced.add(index)
+        elif inside:
+            fenced.add(index)
+    return fenced
+
+
+def _commonmark_fenced_lines(lines: list[str]) -> set[int]:
     """Indexes inside CommonMark fenced code blocks, including their delimiters."""
     fenced: set[int] = set()
     opener: tuple[str, int] | None = None
+    in_list = False
     for index, line in enumerate(lines):
         marker = _FENCE_MARKER.match(line)
+        if _LIST_MARKER.match(line):
+            in_list = True
+        if marker and len(marker.group(1)) > 3 and not in_list:
+            marker = None
         if opener is None:
-            if marker and not (marker.group(1).startswith("`") and "`" in marker.group(2)):
-                opener = (marker.group(1)[0], len(marker.group(1)))
+            if marker and not (marker.group(3).startswith("`") and "`" in marker.group(4)):
+                opener = (marker.group(3)[0], len(marker.group(3)))
                 fenced.add(index)
             continue
         fenced.add(index)
         if marker:
-            run = marker.group(1)
-            if run[0] == opener[0] and len(run) >= opener[1] and not marker.group(2).strip():
+            run = marker.group(3)
+            if run[0] == opener[0] and len(run) >= opener[1] and not marker.group(4).strip():
                 opener = None
     return fenced
+
+
+def _fenced_lines(lines: list[str]) -> set[int]:
+    """Fence lines recognized by either the base toggle or the CommonMark tracker."""
+    return _legacy_fenced_lines(lines) | _commonmark_fenced_lines(lines)
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
@@ -493,18 +516,77 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
     those are read exactly as before. Comments without a bold ACCEPT at the head are
     unchanged too.
     """
-    fenced = _fenced_lines(lines)
-    in_details = False
+    fenced = _commonmark_fenced_lines(lines)
+    details_depth = 0
+    html_depth: dict[str, int] = {"pre": 0, "code": 0}
+    strike_open: set[str] = set()
+    inline_code_run = 0
     for index, raw in enumerate(lines):
         if index in fenced:
             continue
-        if re.search(r"<details\b", raw, re.I):
-            in_details = True
-        if re.search(r"</details\s*>", raw, re.I):
-            in_details = False
+        # Remove inline code before tracking HTML tags, including details closers.
+        prior_inline_code = inline_code_run
+        code_scan = re.sub(
+            r"^(?: {0,3}(?:(?:[-+*]|\d+[.)])[ \t]+)?| {4,})(`{3,}|~{3,}).*$", "", raw
+        )
+        code_runs = list(re.finditer(r"`+", code_scan))
+        run_index = 0
+        while run_index < len(code_runs):
+            run = code_runs[run_index]
+            width = len(run.group())
+            if inline_code_run:
+                if width == inline_code_run:
+                    inline_code_run = 0
+                run_index += 1
+                continue
+            close = next(
+                (
+                    position
+                    for position in range(run_index + 1, len(code_runs))
+                    if len(code_runs[position].group()) == width
+                ),
+                None,
+            )
+            if close is None:
+                inline_code_run = width
+                run_index += 1
+            else:
+                run_index = close + 1
+        visible = _INLINE_CODE.sub(" ", raw)
+        html_tag_present = bool(re.search(r"</?(?:pre|code)\b", visible, re.I))
+        if details_depth or html_depth["pre"] or html_depth["code"] or strike_open:
+            blocked = True
+        else:
+            blocked = False
+        details_depth += len(re.findall(r"<details\b", visible, re.I))
+        details_depth -= min(details_depth, len(re.findall(r"</details\s*>", visible, re.I)))
+        for tag in ("pre", "code"):
+            html_depth[tag] += len(re.findall(rf"<{tag}\b[^>]*>", visible, re.I))
+            html_depth[tag] -= min(html_depth[tag], len(re.findall(rf"</{tag}\s*>", visible, re.I)))
+        if details_depth or html_depth["pre"] or html_depth["code"]:
+            blocked = True
+        prior_strike = bool(strike_open)
+        for match in _STRIKE_MARK.finditer(raw):
+            token = match.group(2).lower() if match.group(2) else match.group()
+            key = token if token in {"del", "s", "strike"} else "~~"
+            if match.group(1):
+                strike_open.discard(key)
+            elif key in strike_open:
+                strike_open.discard(key)
+            else:
+                strike_open.add(key)
+        indent = raw[: len(raw) - len(raw.lstrip(" \t"))]
+        if (
+            blocked
+            or prior_inline_code
+            or prior_strike
+            or strike_open
+            or "\t" in indent
+            or raw.lstrip().startswith(">")
+            or html_tag_present
+        ):
             continue
-        if in_details or raw.startswith(("    ", "\t")) or raw.lstrip().startswith(">"):
-            continue
+        # Carry strike markers over physical lines; any line within the span is ignored.
         struck = _struck_spans(raw)
         for match in _BOLD_ACCEPT.finditer(raw):
             span = match.group(0)
@@ -519,11 +601,23 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
             ):
                 continue
             plain_span = span.replace("**", "")
-            read_ahead = plain_span + raw[end:]
-            withdrawn_after = re.match(r"\s*[.,;:!()\-]*superseded\b", raw[end:], re.I)
+            whole_line = raw.replace("**", "")
+            clauses = verdict_clauses(whole_line)
+            prefix = raw[:start]
+            withdrawn_before = re.search(
+                r"\b(?:withdrawn|retracted|superseded|pending|previously)\s*:?\s*$", prefix, re.I
+            )
             if (
-                verdict_clauses(read_ahead)
-                and not withdrawn_after
+                any(
+                    re.search(r"\bACCEPT(?:ED)?\b", clause, re.I) and names_head(clause, head)
+                    for clause in clauses
+                )
+                and not withdrawn_before
+                and not re.match(
+                    r"\s*[.,;:!()\-]*\b(?:withdrawn|retracted|superseded|pending|previously)\b",
+                    raw[end:],
+                    re.I,
+                )
                 and head
                 and names_head(plain_span, head)
             ):
@@ -1599,12 +1693,12 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
     source_lines = _HTML_COMMENT.sub(" ", body).splitlines()
     lines: list[str] = []
     fenced_lines: set[int] = set()
-    fenced = False
-    for raw in source_lines:
+    legacy_fenced = _legacy_fenced_lines(source_lines)
+    commonmark_fenced = _commonmark_fenced_lines(source_lines)
+    for source_index, raw in enumerate(source_lines):
         if raw.strip().startswith(("```", "~~~")):
-            fenced = not fenced
             continue
-        if fenced:
+        if source_index in legacy_fenced or source_index in commonmark_fenced:
             fenced_lines.add(len(lines))
         lines.append(raw)
     unfenced = ["" if index in fenced_lines else line for index, line in enumerate(lines)]
