@@ -5206,3 +5206,24 @@ def test_conditional_withdrawal_scan_fails_closed_past_twenty_named_commits():
     many = " ".join(f"{i:040x}" for i in range(1, 22))
     assert _conditional_case(later=[_c("notes " + few)]) == (OLD,)
     assert _conditional_case(later=[_c("notes " + many)]) == ()
+
+
+@pytest.mark.parametrize(
+    "opener",
+    [
+        pytest.param("note <!--", id="midline-comment"),
+        pytest.param("x <details>", id="midline-details"),
+        pytest.param("x <pre>", id="midline-pre"),
+        pytest.param("x <code>", id="midline-code"),
+        pytest.param("x <del>", id="midline-del"),
+        pytest.param("x <s>", id="midline-s"),
+        pytest.param("x <strike>", id="midline-strike"),
+        pytest.param("x <DEL>", id="midline-upper-del"),
+    ],
+)
+def test_midline_blocker_contexts_block_the_anchor(opener):
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n{opener}\n**ACCEPT at {HEAD}**\n"
+        f"- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
