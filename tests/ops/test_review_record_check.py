@@ -180,6 +180,93 @@ def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
     assert rrc.verdict_clauses(conditional) == []
 
 
+@pytest.mark.parametrize(
+    "withdrawal",
+    [
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "retracted",
+        "revoked",
+        "rescinded",
+        "denied",
+        "no longer stands",
+        "no longer holds",
+        "no longer valid",
+    ],
+    ids=[
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "retracted",
+        "revoked",
+        "rescinded",
+        "denied",
+        "no-longer-stands",
+        "no-longer-holds",
+        "no-longer-valid",
+    ],
+)
+@pytest.mark.parametrize(
+    "decoration",
+    ["{word}", "({word})", "— {word}", ", {word}"],
+    ids=["bare", "parentheses", "dash", "comma"],
+)
+@pytest.mark.parametrize("binding", ["@{sha}", "at {sha}"], ids=["at-sign", "at-word"])
+@pytest.mark.parametrize("sha", [HEAD[:9], HEAD], ids=["nine-hex", "forty-hex"])
+@pytest.mark.parametrize("mixed_case", [False, True], ids=["lowercase", "mixed-case"])
+def test_withdrawal_after_bound_accept_is_not_a_verdict(
+    withdrawal, decoration, binding, sha, mixed_case
+):
+    if mixed_case:
+        withdrawal = withdrawal.upper()
+    tail = decoration.format(word=withdrawal)
+    line = f"Claude review: Verdict: ACCEPT {binding.format(sha=sha)} {tail}"
+    assert rrc.verdict_clauses(line) == []
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["Withdrawn", "Retracted", "Void", "Stale", "Superseded", "Pending"],
+    ids=["withdrawn", "retracted", "void", "stale", "superseded", "pending"],
+)
+@pytest.mark.parametrize("binding", ["@{sha}", "at {sha}"], ids=["at-sign", "at-word"])
+@pytest.mark.parametrize("sha", [HEAD[:9], HEAD], ids=["nine-hex", "forty-hex"])
+@pytest.mark.parametrize("mixed_case", [False, True], ids=["lowercase", "mixed-case"])
+def test_withdrawal_prefix_before_accept_is_not_a_verdict(prefix, binding, sha, mixed_case):
+    if mixed_case:
+        prefix = prefix.upper()
+    line = f"{prefix}: Verdict: ACCEPT {binding.format(sha=sha)}"
+    assert rrc.verdict_clauses(line) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude review: Verdict: ACCEPT@{HEAD}",
+        f"Claude review: ACCEPT@{HEAD}; Codex review still pending",
+        f"Claude review: ACCEPT@{HEAD} — all checks green",
+        f"Claude r1 ACCEPT@{HEAD}; r2 ACCEPT@{HEAD}",
+        f"Claude round 2: ACCEPT@{HEAD}",
+        "Codex review (pending)\nClaude review: ACCEPT@" + HEAD,
+    ],
+    ids=[
+        "plain-bound",
+        "other-review-pending",
+        "checks-green",
+        "round-list",
+        "round-marker",
+        "separate-header",
+    ],
+)
+def test_normal_accept_writings_remain_verdicts(line):
+    assert rrc.verdict_clauses(line)
+
+
 _BOLD_ACCEPT_LINE = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
 
 
@@ -4672,6 +4759,58 @@ def _status_after_accept(line, files=DOCS, accept=CLAUDE_AT_HEAD):
 )
 def test_full_reading_rejects_withdraw_the_claude_accept(line):
     assert _status_after_accept(line) == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "Withdrawn",
+        "Pending",
+        "Withheld",
+        "Revoked",
+        "Rescinded",
+        "Denied",
+        "Retracted",
+        "Void",
+        "Stale",
+        "Superseded",
+    ],
+)
+def test_prefixed_withdrawal_retracts_prior_accept(prefix):
+    line = f"{prefix}: Claude Verdict: ACCEPT@{HEAD}\n"
+    assert _status_after_accept(line) == "MISSING_RECORD"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "revoked",
+        "retracted",
+        "rescinded",
+        "denied",
+    ],
+)
+def test_post_hash_withdrawal_retracts_prior_accept(suffix):
+    line = f"Claude Verdict: ACCEPT@{HEAD} {suffix}\n"
+    assert _status_after_accept(line) == "MISSING_RECORD"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
+
+
+def test_later_comment_without_withdrawal_keeps_accept():
+    comments = [_c(f"Claude Verdict: ACCEPT@{HEAD}"), _c("Review notes: no new issues.")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "OK"
+
+
+@pytest.mark.parametrize("prefix", ["Pending", "Withheld", "Withdrawn"])
+def test_rejects_only_parse_keeps_prefixed_withdrawal_event(prefix):
+    line = f"{prefix}: Claude Verdict: ACCEPT@{HEAD}"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
 
 
 def test_a_codex_label_with_instead_of_withdraws_the_codex_accept():
