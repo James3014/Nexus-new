@@ -494,39 +494,34 @@ def _hex_tokens(text: str) -> list[str]:
     return _HEX_TOKEN.findall(text.lower())
 
 
-_BOLD_ACCEPT = re.compile(r"\*\*[^*\n]*\bACCEPT(?:ED)?\b[^*\n]*\*\*")
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
-_NEGATED_ACCEPT = re.compile(
-    r"\b(?:not|never|no|cannot|can't|until|pending|awaiting|unless|without)\b|n't\b", re.I
+_BOLD_ACCEPT_ANCHOR = re.compile(
+    r"^(?:\*\*Independent [^*]+ review\*\*(?: \([^)]*\))?: )?"
+    r"\*\*ACCEPT(?:ED)? at (?P<h>[0-9a-fA-F]{9,40})\*\*\.?$"
+)
+_BOLD_ACCEPT_BLOCKERS = re.compile(
+    r"```|~~~|<details|<pre|<code|<del|<s>|<strike|(?<!~)~~(?!~)|<!--", re.IGNORECASE
 )
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
-    """True when a line holds a bold plain ACCEPT verdict that names the head (#3429).
-
-    Rule: in a comment with such a line, an unbolded list bullet is findings text. It may
-    quote REJECT or CONDITIONAL words without taking the ACCEPT back. A verdict that
-    changes a bold ACCEPT is written as a bold verdict line or a plain (non-bullet) line;
-    those are read exactly as before. Comments without a bold ACCEPT at the head are
-    unchanged too.
-    """
-    fenced = False
+    """True only for an exact, unambiguous bold ACCEPT anchor for this head."""
+    blocked = False
     for raw in lines:
-        if raw.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+        if (
+            _BOLD_ACCEPT_BLOCKERS.search(raw)
+            or re.match(r"^(?: {4,}|\t)", raw)
+            or re.match(r"^\s*<", raw)
+            or "$$" in raw
+            or re.match(r"^\s{0,3}\[[^\]]+\]:", raw)
+        ):
+            blocked = True
+        stripped = raw.strip()
+        if raw.rstrip() != stripped:
             continue
-        if fenced or raw.lstrip().startswith(">"):
-            continue
-        line = _INLINE_CODE.sub(" ", raw)
-        for match in _BOLD_ACCEPT.finditer(line):
-            span = match.group(0)
-            if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
-                continue
-            if _NEGATED_ACCEPT.search(span):
-                continue
-            if not head or names_head(span, head):
-                return True
+        match = _BOLD_ACCEPT_ANCHOR.fullmatch(stripped)
+        if match and not blocked and head and names_head(match.group("h"), head):
+            return True
     return False
 
 
@@ -1639,7 +1634,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             }
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
-    free_text_ok = _bold_accept_lines(unfenced, head)
+    free_text_ok = _bold_accept_lines(body.splitlines(), head)
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
         reads: list[tuple[str, bool]] = []
@@ -2235,7 +2230,7 @@ def _conditional_record(
                 lines.append("")
             else:
                 lines.append(line)
-        free_text_ok = bool(head) and _bold_accept_lines(lines, head)
+        free_text_ok = bool(head) and _bold_accept_lines(comment["body"].splitlines(), head)
         for n, line in enumerate(lines):
             if free_text_ok and _is_free_text(line):
                 continue

@@ -225,6 +225,250 @@ def test_decoy_bold_accept_does_not_free_the_bullets(decoy):
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
 
 
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"- item\n    ```\n  **ACCEPT at {HEAD}**\n    ```", id="case-01"),
+        pytest.param(f"1. item\n     ```\n   **ACCEPT at {HEAD}**\n     ```", id="case-02"),
+        pytest.param(f"~~~\n~~~\n**ACCEPT at {HEAD}**", id="case-03"),
+        pytest.param(f"- item\n    ```\n  **ACCEPT at {HEAD}**", id="case-04"),
+        pytest.param(f"```\n  **ACCEPT at {HEAD}**\n  ```", id="case-05"),
+        pytest.param(f"\n \t**ACCEPT at {HEAD}**", id="case-06"),
+        pytest.param(f"  \t**ACCEPT at {HEAD}**", id="case-07"),
+        pytest.param(f"   \t**ACCEPT at {HEAD}**", id="case-08"),
+        pytest.param(
+            f"<details>\n<details>\nx\n</details>\n**ACCEPT at {HEAD}**\n</details>",
+            id="case-09",
+        ),
+        pytest.param(
+            f"<details>\nuse `</details>` here\n**ACCEPT at {HEAD}**\n</details>",
+            id="case-10",
+        ),
+        pytest.param(f"~~old\n**ACCEPT at {HEAD}**~~", id="case-11"),
+        pytest.param(f"<del>\n**ACCEPT at {HEAD}**\n</del>", id="case-12"),
+        pytest.param(f"<s>\n**ACCEPT at {HEAD}**\n</s>", id="case-13"),
+        pytest.param(f"<strike>\n**ACCEPT at {HEAD}**\n</strike>", id="case-14"),
+        pytest.param(f"`` **ACCEPT at {HEAD}** ``", id="case-15"),
+        pytest.param(f"`foo\n**ACCEPT at {HEAD}** bar\n`", id="case-16"),
+        pytest.param(f"<pre>\n**ACCEPT at {HEAD}**\n</pre>", id="case-17"),
+        pytest.param(f'<PRE class="note">\n**ACCEPT at {HEAD}**\n</PRE>', id="case-18"),
+        pytest.param(f"<code>\n**ACCEPT at {HEAD}**\n</code>", id="case-19"),
+        pytest.param(f"Not **ACCEPT at {HEAD}**", id="case-20"),
+        pytest.param(f"| x | **ACCEPT at {HEAD}** |", id="case-21"),
+        pytest.param(f"- [ ] **ACCEPT at {HEAD}**", id="case-22"),
+        pytest.param(f"Withdrawn: **ACCEPT at {HEAD}**", id="case-23"),
+        pytest.param(f"Retracted: **ACCEPT at {HEAD}**", id="case-24"),
+        pytest.param(f"Superseded: **ACCEPT at {HEAD}**", id="case-25"),
+        pytest.param(f"Pending: **ACCEPT at {HEAD}**", id="case-26"),
+        pytest.param(f"Previously **ACCEPT at {HEAD}**", id="case-27"),
+        pytest.param(f"```\n~~~\n**ACCEPT at {HEAD}**\n```", id="case-28"),
+        pytest.param(f"````\n```\n**ACCEPT at {HEAD}**\n````", id="case-29"),
+        pytest.param(f"``` x\n**ACCEPT at {HEAD}**\n```", id="case-30"),
+        pytest.param(f"\t```\n**ACCEPT at {HEAD}**\n\t```", id="case-31"),
+        pytest.param(f"~~**ACCEPT at {HEAD}**~~", id="case-32"),
+        pytest.param(f"**ACCEPT at {HEAD} withdrawn**", id="case-33"),
+        pytest.param(f"```\n``` x\n**ACCEPT at {HEAD}**\n```", id="case-34"),
+        pytest.param(f"    **ACCEPT at {HEAD}**", id="case-35"),
+        pytest.param(f"   **ACCEPT at {HEAD}**", id="case-52"),
+        pytest.param(f"    note\n**ACCEPT at {HEAD}**", id="case-53"),
+        pytest.param(f"<details>\n**ACCEPT at {HEAD}**\n</details>", id="case-36"),
+        pytest.param(f"````\n**ACCEPT at {HEAD}**\n```\n````", id="case-37"),
+        pytest.param(f"-\n    ```\n**ACCEPT at {HEAD}**", id="case-38"),
+        pytest.param(f"*\n    ~~~\n**ACCEPT at {HEAD}**", id="case-39"),
+        pytest.param(f"+\n    ```\n**ACCEPT at {HEAD}**", id="case-40"),
+        pytest.param(f"1.\n    ```\n**ACCEPT at {HEAD}**", id="case-41"),
+        pytest.param(f"- item\n        ```\n**ACCEPT at {HEAD}**", id="case-42"),
+        pytest.param(f"- item\n            ~~~\n**ACCEPT at {HEAD}**", id="case-43"),
+        pytest.param(f"`multi\nline {HEAD}\n**ACCEPT at {HEAD}**`\nend", id="case-44"),
+        pytest.param(f"Codex: ACCEPT at {HEAD}; Claude: **not ACCEPT at {HEAD}**", id="case-45"),
+        pytest.param(f"Opus **cannot ACCEPT at {HEAD}**", id="case-46"),
+        pytest.param(f"**ACCEPT at {HEAD} until fixed**", id="case-47"),
+        pytest.param(f"Status: ACCEPT at {HEAD}, **awaiting ACCEPT at {HEAD}**", id="case-48"),
+        pytest.param(f"<del>**ACCEPT at {HEAD}**\n</del>", id="case-49"),
+        pytest.param(f"<!-- note -->\n**ACCEPT at {HEAD}**", id="case-51"),
+        pytest.param(
+            f"- ``` **Independent Claude review** (Claude Opus 5.5, separate agent): "
+            f"**ACCEPT at {HEAD}** ```",
+            id="case-50",
+        ),
+    ],
+)
+def test_invalid_bold_accept_forms_do_not_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        pytest.param("```", id="case-01"),
+        pytest.param("~~~", id="case-02"),
+        pytest.param("<details>", id="case-03"),
+        pytest.param("<pre>", id="case-04"),
+        pytest.param("<code>", id="case-05"),
+        pytest.param("<del>", id="case-06"),
+        pytest.param("<s>", id="case-07"),
+        pytest.param("<strike>", id="case-08"),
+        pytest.param("~~", id="case-09"),
+        pytest.param("<!--", id="case-10"),
+        pytest.param("    note", id="case-11"),
+        pytest.param("\tnote", id="case-12"),
+    ],
+)
+def test_prior_context_blocks_the_anchor(context):
+    lines = [context, f"**ACCEPT at {HEAD}**"]
+    assert not rrc._bold_accept_lines(lines, HEAD)
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"**ACCEPT at {HEAD}?**", id="case-01"),
+        pytest.param(f"<del>\n**ACCEPT at {HEAD}**\n</del>", id="case-02"),
+        pytest.param(f"<s>\n**ACCEPT at {HEAD}**\n</s>", id="case-03"),
+        pytest.param(f"<strike>\n**ACCEPT at {HEAD}**\n</strike>", id="case-04"),
+        pytest.param(f"**ACCEPT at {HEAD}** retracted", id="case-05"),
+        pytest.param(f"**ACCEPT at {HEAD}** (superseded)", id="case-06"),
+    ],
+)
+def test_other_invalid_bold_accept_forms_do_not_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"**ACCEPT at {HEAD}**", id="case-01"),
+    ],
+)
+def test_valid_bold_accept_forms_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"[ref]: **ACCEPT at {HEAD}**", id="ref-definition-01"),
+        pytest.param(f"[ref]: destination\n**ACCEPT at {HEAD}**", id="ref-definition-prior-02"),
+        pytest.param(f"$$\n**ACCEPT at {HEAD}**\n$$", id="math-block-03"),
+        pytest.param(f"<div hidden>**ACCEPT at {HEAD}**</div>", id="hidden-div-inline-04"),
+        pytest.param(f"<div hidden>\n**ACCEPT at {HEAD}**\n</div>", id="hidden-div-block-05"),
+        pytest.param(f"<span hidden>**ACCEPT at {HEAD}**</span>", id="hidden-span-inline-06"),
+        pytest.param(f"<span hidden>\n**ACCEPT at {HEAD}**\n</span>", id="hidden-span-block-07"),
+        pytest.param(f"<kbd>**ACCEPT at {HEAD}**</kbd>", id="kbd-inline-08"),
+        pytest.param(f"<textarea>**ACCEPT at {HEAD}**</textarea>", id="textarea-inline-09"),
+        pytest.param(f"<textarea>\n**ACCEPT at {HEAD}**\n</textarea>", id="textarea-block-10"),
+        pytest.param(f"<template>**ACCEPT at {HEAD}**</template>", id="template-inline-11"),
+        pytest.param(f"<template>\n**ACCEPT at {HEAD}**\n</template>", id="template-block-12"),
+    ],
+)
+def test_wrapped_and_reference_forms_do_not_free_the_bullet(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "anchor",
+    [
+        pytest.param(f"**ACCEPT at {HEAD}**", id="bare-anchor-01"),
+        pytest.param(
+            f"**Independent Claude review**: **ACCEPT at {HEAD}**",
+            id="legacy-prefix-02",
+        ),
+        pytest.param(
+            f"**Independent Claude review** (Opus): **ACCEPT at {HEAD}**",
+            id="parenthetical-prefix-03",
+        ),
+        pytest.param(
+            f"**Independent Claude review** (Claude Opus 5.5, separate agent): "
+            f"**ACCEPT at {HEAD}**.",
+            id="template-prefix-04",
+        ),
+    ],
+)
+def test_supported_bold_accept_anchors_free_the_bullet(anchor):
+    body = f"Claude: ACCEPT at {HEAD}\n{anchor}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"Verdict: **ACCEPT at {HEAD}**", id="case-01"),
+        pytest.param(f"```\ncode\n```\n**ACCEPT at {HEAD}**", id="case-02"),
+        pytest.param(f"````\n```\n````\n**ACCEPT at {HEAD}**", id="case-03"),
+        pytest.param(f"<details>\nx\n</details>\n**ACCEPT at {HEAD}**", id="case-04"),
+        pytest.param(f"    ```\n**ACCEPT at {HEAD}**", id="case-05"),
+        pytest.param(f"- item\n  ```\n  code\n  ```\n**ACCEPT at {HEAD}**", id="case-06"),
+        pytest.param(f"``` `x`\n**ACCEPT at {HEAD}**", id="case-07"),
+    ],
+)
+def test_whitelist_stricter_forms_leave_the_bullet_as_a_reject(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_normal_independent_review_template_frees_the_bullet():
+    body = (
+        f"Tests: ~900 tests pass\n"
+        f"It's a `quote\n"
+        f"~2 min run\n"
+        f"**Independent Claude review** (Claude Opus 5.5, separate agent): "
+        f"**ACCEPT at {HEAD[:9]}**.\n"
+        f"- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_single_tilde_and_backtick_lines_above_anchor_do_not_block_it():
+    body = (
+        f"Tests: ~900 tests pass\nIt's a `quote\n~2 min run\n"
+        f"**Independent Claude review** (Claude Opus 5.5, separate agent): "
+        f"**ACCEPT at {HEAD[:9]}**\n- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_raw_strike_marker_blocks_free_text_in_the_classify_main_loop():
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n~~previous text~~\n"
+        f"**ACCEPT at {HEAD}**\n- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_html_comment_before_anchor_blocks_free_text_in_classification():
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n<!-- hidden\ntext -->\n"
+        f"**ACCEPT at {HEAD}**\n- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_html_comment_before_anchor_blocks_conditional_bullet_suppression():
+    body = f"<!-- hidden\ntext -->\n**ACCEPT at {HEAD}**\n- old CONDITIONAL ACCEPT form\n"
+    with pytest.raises(rrc.CheckError):
+        rrc._conditional_record([_c(body)], HEAD)
+
+
+def test_conditional_selection_uses_valid_record_before_fenced_text():
+    valid = _conditional_body(sha=HEAD)
+    body = valid + "\n```\n~~~\n" + _conditional_body(sha=HEAD) + "```\n"
+    selected = rrc._conditional_record([_c(body)], HEAD)
+    assert selected is not None
+    assert selected[0] == 0
+
+
+def test_conditional_selection_compares_the_selected_sha():
+    other = "1e9f3d4ec0000000000000000000000000000000"
+    comments = [_c(_conditional_body(sha=HEAD)), _c(_conditional_body(sha=other))]
+    selected = rrc._conditional_record(comments, HEAD)
+    assert selected is not None
+    assert selected[2] == other
+
+
 def test_bold_accept_for_another_head_does_not_free_the_bullets():
     other = "1e9f3d4ec0000000000000000000000000000000"
     body = (
@@ -241,7 +485,10 @@ def test_bullet_without_a_bold_accept_is_still_read():
 
 
 def test_conditional_selection_ignores_a_bullet_beside_a_bold_accept_for_the_head():
-    body = _BOLD_ACCEPT_LINE + "- the old CONDITIONAL ACCEPT form is gone\n"
+    body = (
+        f"**Independent Claude review** (reviewer): **ACCEPT at {HEAD}**\n"
+        "- the old CONDITIONAL ACCEPT form is gone\n"
+    )
     assert rrc._conditional_record([_c(body)], HEAD) is None
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
 
@@ -4959,3 +5206,24 @@ def test_conditional_withdrawal_scan_fails_closed_past_twenty_named_commits():
     many = " ".join(f"{i:040x}" for i in range(1, 22))
     assert _conditional_case(later=[_c("notes " + few)]) == (OLD,)
     assert _conditional_case(later=[_c("notes " + many)]) == ()
+
+
+@pytest.mark.parametrize(
+    "opener",
+    [
+        pytest.param("note <!--", id="midline-comment"),
+        pytest.param("x <details>", id="midline-details"),
+        pytest.param("x <pre>", id="midline-pre"),
+        pytest.param("x <code>", id="midline-code"),
+        pytest.param("x <del>", id="midline-del"),
+        pytest.param("x <s>", id="midline-s"),
+        pytest.param("x <strike>", id="midline-strike"),
+        pytest.param("x <DEL>", id="midline-upper-del"),
+    ],
+)
+def test_midline_blocker_contexts_block_the_anchor(opener):
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n{opener}\n**ACCEPT at {HEAD}**\n"
+        f"- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
