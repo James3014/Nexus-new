@@ -37,24 +37,27 @@ _SCRIPT = textwrap.dedent(
     """
     import importlib, json, pwd, sys
 
+    error = {"KeyError": KeyError, "OSError": OSError}[sys.argv[1]]
+
     def missing(_uid):
-        raise KeyError(_uid)
+        raise error(_uid)
 
     pwd.getpwuid = missing
-    module = importlib.import_module(sys.argv[1])
-    print(json.dumps({name: str(getattr(module, name)) for name in sys.argv[2:]}))
+    module = importlib.import_module(sys.argv[2])
+    print(json.dumps({name: str(getattr(module, name)) for name in sys.argv[3:]}))
     """
 )
 
 
+@pytest.mark.parametrize("error_name", ["KeyError", "OSError"])
 @pytest.mark.parametrize(("module_name", "attributes"), _CASES)
 def test_import_uses_fixed_home_fallback_ignoring_environment(
-    module_name: str, attributes: dict[str, str]
+    module_name: str, attributes: dict[str, str], error_name: str
 ) -> None:
     env = {**os.environ, "HOME": "/environment-home-must-be-ignored"}
     env["PYTHONPATH"] = str(_REPO_ROOT)
     result = subprocess.run(
-        [sys.executable, "-c", _SCRIPT, module_name, *attributes],
+        [sys.executable, "-c", _SCRIPT, error_name, module_name, *attributes],
         capture_output=True,
         text=True,
         env=env,
