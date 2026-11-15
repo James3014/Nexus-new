@@ -44,6 +44,10 @@ quotes the words never counts):
   a finding still open at round three goes back to design, not past a rebuttal).
 - A submitted ``APPROVED`` review whose ``commit_id`` is the head also counts as an
   independent record, unless the same reviewer later requested changes.
+- From round 2 onward, a Claude verdict on an older head enables the Gemini + Codex
+  alternative route; each family's ACCEPT must still stand at the current head.
+- Round 2+ is inferred only from verdict comments and their SHA bindings; no extra API
+  request is made.
 
 Verdict:
 - ``OK``: an independent record at head and, for a high-risk PR, a cross-model
@@ -74,8 +78,10 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any, Callable
 
 API_ROOT = "https://api.github.com"
@@ -92,6 +98,37 @@ MAX_VERDICTS_PER_LINE = 64
 # The PR files API lists at most 3000 files and then stops without an error (#2992).
 MAX_PR_FILES = 3000
 TRUNCATED_FILES = f"(file list of {MAX_PR_FILES}+ entries may be truncated)"
+
+
+@dataclass(frozen=True)
+class ReviewRoute:
+    risk: str
+    round: str
+    alternatives: tuple[tuple[str, ...], ...]
+
+
+REVIEW_ROUTES = (
+    ReviewRoute("low", "1", (("claude",),)),
+    ReviewRoute("high", "1", (("claude", "cross_model"),)),
+    ReviewRoute("low", "2+", (("claude",), ("gemini", "codex"))),
+    ReviewRoute("high", "2+", (("claude", "cross_model"), ("gemini", "codex"))),
+)
+
+
+def render_routes_markdown() -> str:
+    rows = [
+        "# Review routing",
+        "",
+        "由 `scripts/ops/review_record_check.py` 的 `REVIEW_ROUTES` 產生，勿手改。",
+        "",
+        "| Risk | Round | Required reviewer records |",
+        "| --- | --- | --- |",
+    ]
+    for route in REVIEW_ROUTES:
+        choices = " or ".join(" + ".join(group) for group in route.alternatives)
+        rows.append(f"| {route.risk} | {route.round} | {choices} |")
+    return "\n".join(rows) + "\n"
+
 
 # Paths whose change makes the PR high-risk (nexus-codex-review skill list, 2026-10-15).
 HIGH_RISK_PREFIXES = (
@@ -129,6 +166,7 @@ REPO_HIGH_RISK_FILES: dict[str, frozenset[str]] = {
 }
 
 _HEX_TOKEN = re.compile(rf"(?<![0-9a-f])([0-9a-f]{{{MIN_PREFIX},40}})(?![0-9a-f])")
+MAX_OLDER_SHA_CANDIDATES_PER_COMMENT = 64
 _TOKEN = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED)"
 # Verdict position: after a "Verdict:" label, bound as "ACCEPT@<sha>", after a colon,
 # dash or round marker ("r3 ACCEPT", "Round 2 @ sha: ACCEPT"), or alone on the line.
@@ -1942,6 +1980,198 @@ def _contributes(
     )
 
 
+_OLDER_SHA = r"`?([0-9a-f]{7,40})`?"
+_OLDER_SHA_HEX = r"`?[0-9a-f]{7,40}`?"
+_OLDER_DISPOSITION = r"(?:ACCEPT|ACCEPTED|APPROVE|APPROVED|REJECT|REJECTED|REQUEST_CHANGES)"
+_OLDER_REVIEW_LINE = re.compile(
+    rf"(?:\*\*Claude(?: (?:review|reviewer))?\*\*|Claude(?: (?:review|reviewer))?)(?: r[0-9]+)?: "
+    rf"(?:{_OLDER_DISPOSITION}@({_OLDER_SHA_HEX})|{_OLDER_DISPOSITION} \(({_OLDER_SHA_HEX})\))",
+    re.ASCII,
+)
+_OLDER_INDEPENDENT_LINE = re.compile(
+    rf"\*\*Independent Claude review\*\* \(Claude (?:(?:Sonnet(?: [0-9]+(?:\.[0-9]+)*)?|[A-Z][a-z]{{1,31}} [0-9]+(?:\.[0-9]+)*)(?: \([^)]+\))?|\([^)]+\)), "
+    rf"(?:separate agent(?:, (?:round [0-9]+|delta from [^)]*))?|review desk(?:, delta from [^)]*)?)\): "
+    rf"\*\*{_OLDER_DISPOSITION} at {_OLDER_SHA}\*\*\.",
+    re.ASCII,
+)
+_OLDER_RECORD_HEADER = re.compile(rf"## Review record (?:--|—|–) head {_OLDER_SHA}", re.ASCII)
+_OLDER_REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*\S", re.ASCII)
+_OLDER_LIST_ITEM = re.compile(r"^ {0,3}(?:[-+*]|[0-9]+[.)])[ \t]+", re.ASCII)
+_OLDER_HTML_RAW_START = re.compile(
+    r"^ {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)", re.IGNORECASE | re.ASCII
+)
+_OLDER_HTML_RAW_END = re.compile(r"</(?:pre|script|style|textarea)>", re.IGNORECASE | re.ASCII)
+_OLDER_HTML_STANDALONE_TAG = re.compile(
+    r"^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t][^<>]*)?/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$",
+    re.ASCII,
+)
+_OLDER_HTML_START = re.compile(
+    r"^ {0,3}(?:<!--|<\?|<![A-Z]|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$))",
+    re.IGNORECASE | re.ASCII,
+)
+
+
+def _older_verdict_candidate_lines(body: str) -> list[tuple[str, str | None]]:
+    """Collect whitelisted older-review lines only from top-level Markdown paragraphs."""
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    candidates = []
+    fence_char = None
+    fence_size = 0
+    html_end: re.Pattern[str] | None = None
+    html_until_blank = False
+    quote_continuation = False
+    for index, line in enumerate(lines):
+        fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line, re.ASCII)
+        if fence_char:
+            if (
+                fence
+                and fence.group(1)[0] == fence_char
+                and len(fence.group(1)) >= fence_size
+                and not line[fence.end() :].strip()
+            ):
+                fence_char = None
+            continue
+        if fence:
+            fence_char, fence_size = fence.group(1)[0], len(fence.group(1))
+            continue
+        if html_end is not None:
+            if html_end.search(line):
+                html_end = None
+            continue
+        if html_until_blank:
+            if not line.strip():
+                html_until_blank = False
+            else:
+                continue
+        if not line.strip():
+            quote_continuation = False
+            continue
+        if re.match(r"^ {4}|^\t", line):
+            continue
+        if re.match(r"^ {0,3}>", line):
+            quote_continuation = True
+            continue
+        if quote_continuation:
+            # CommonMark keeps lazy paragraph continuation until a blank line or a new block.
+            if not re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", line, re.ASCII):
+                continue
+            quote_continuation = False
+        if (
+            _OLDER_LIST_ITEM.match(line)
+            or line.startswith("|")
+            or _OLDER_REFERENCE_DEFINITION.match(line)
+        ):
+            continue
+        end_marker = None
+        if _OLDER_HTML_RAW_START.match(line):
+            end_marker = _OLDER_HTML_RAW_END
+        elif line.lstrip().startswith("<!--"):
+            end_marker = re.compile("-->")
+        elif line.lstrip().startswith("<?"):
+            end_marker = re.compile(r"\?>")
+        elif line.lstrip().startswith("<![CDATA["):
+            end_marker = re.compile(r"\]\]>")
+        elif re.match(r"^ {0,3}<![A-Z]", line, re.ASCII):
+            end_marker = re.compile(">")
+        if end_marker is not None:
+            if not end_marker.search(line[line.index("<") + 1 :]):
+                html_end = end_marker
+            continue
+        if _OLDER_HTML_START.match(line) or _OLDER_HTML_STANDALONE_TAG.match(line):
+            html_until_blank = True
+            continue
+        if index + 1 < len(lines) and re.fullmatch(
+            r" {0,3}(?:=+|-+) *", lines[index + 1], re.ASCII
+        ):
+            continue
+        if not (_OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)):
+            continue
+        if (
+            index
+            and lines[index - 1].strip()
+            and not _OLDER_RECORD_HEADER.fullmatch(lines[index - 1])
+        ):
+            continue
+        if any(
+            unicodedata.category(char) in {"Cf", "Cc"}
+            for nearby in lines[max(0, index - 1) : index + 2]
+            for char in nearby
+        ):
+            continue
+        header = next(
+            (
+                match
+                for earlier in reversed(lines[:index])
+                if (match := _OLDER_RECORD_HEADER.fullmatch(earlier))
+            ),
+            None,
+        )
+        candidates.append((line, header.group(1).lower() if header else None))
+    return candidates
+
+
+def _has_older_claude_verdict(head: str, comments: list[Any]) -> bool:
+    """Whether a real Claude record header has a verdict bound to another SHA."""
+    for comment in comments:
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str):
+            continue
+        considered: set[str] = set()
+        for line, header_sha in _older_verdict_candidate_lines(body):
+            match = _OLDER_REVIEW_LINE.fullmatch(line) or _OLDER_INDEPENDENT_LINE.fullmatch(line)
+            if match is None:
+                continue
+            sha = (
+                match.group(1) or match.group(2)
+                if match.re is _OLDER_REVIEW_LINE
+                else match.group(1)
+            )
+            sha = sha.strip("`").lower()
+            if header_sha is not None and not (
+                header_sha.startswith(sha) or sha.startswith(header_sha)
+            ):
+                continue
+            if sha in considered:
+                continue
+            if len(considered) >= MAX_OLDER_SHA_CANDIDATES_PER_COMMENT:
+                break
+            considered.add(sha)
+            if not head.lower().startswith(sha):
+                return True
+    return False
+
+
+def _standing_model_families(events: list[dict[str, Any]]) -> set[str]:
+    """Standing Gemini/Codex accepts, folded with the existing withdrawal semantics."""
+    specific = []
+    for event in events:
+        if event.get("rebuttal"):
+            continue
+        if event.get("family") == "claude":
+            specific.append(event)
+            continue
+        reviewer = event.get("reviewer")
+        word = reviewer.lower() if isinstance(reviewer, str) else ""
+        if word.startswith("gemini"):
+            family = "gemini"
+        elif word.startswith(("codex", "gpt")):
+            family = "codex"
+        elif event["kind"] == "reject":
+            # A REJECT that names neither family withdraws both route families.
+            specific.append(dict(event, family="gemini", reviewer=None))
+            specific.append(dict(event, family="codex", reviewer=None))
+            continue
+        elif event.get("family") == "cross_model":
+            specific.append(event)
+            continue
+        else:
+            # All non-Claude verdicts participate in the same route fold. This
+            # includes headers classified as cross-model or without a model name.
+            family = "codex"
+        specific.append(dict(event, family=family))
+    return standing_families(specific)
+
+
 def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> list[dict[str, Any]]:
     """Events bound to one head in comment order, for carrying a verified delta."""
     events: list[dict[str, Any]] = []
@@ -1957,6 +2187,25 @@ def _fold_events_at(head: str, comments: list[Any], allow_rebuttal: bool) -> lis
             if allow_rebuttal or not event.get("rebuttal"):
                 events.append(dict(event, comment=number))
     return events
+
+
+def _route_model_events_at(
+    head: str, comments: list[Any], allow_rebuttal: bool
+) -> list[dict[str, Any]]:
+    """Fold route-model events, including generic cross-model/OpenAI REJECT headers."""
+    events = _fold_events_at(head, comments, allow_rebuttal)
+    for number, comment in enumerate(comments):
+        body = comment.get("body") if isinstance(comment, dict) else None
+        if not isinstance(body, str) or not re.search(r"\b(?:cross-model|openai)\b", body, re.I):
+            continue
+        normalized = re.sub(r"\b(?:cross-model|openai)\b", "Gemini", body, flags=re.I)
+        record = classify_record(normalized, head)
+        if record is None:
+            continue
+        for event in record["events"]:
+            if event["kind"] == "reject" and (allow_rebuttal or not event.get("rebuttal")):
+                events.append(dict(event, comment=number, reviewer=None))
+    return sorted(events, key=lambda event: event.get("comment", 0))
 
 
 _CONDITIONAL_LINE = re.compile(r"\bCONDITIONAL\s+ACCEPT\b")
@@ -2091,9 +2340,12 @@ def evaluate(
     verified as merge-only (#2308); a record at one of those counts as a record at the head.
     The caller is the only place that may verify a delta; this function trusts nothing else.
     ``allow_rebuttal`` False (``rebuttal_counts(repo)``) drops rebuttals at the cap.
-    ``repo`` adds that repo's own high-risk paths.
+    ``repo`` adds that repo's own high-risk paths. From round 2 onward, the route
+    permits Gemini and Codex ACCEPTs at the current head in place of Claude.
+    Round 2+ is identified by an earlier Claude verdict bound to a different head.
     """
     risky = high_risk_paths(files, repo)
+    route = "r2+" if _has_older_claude_verdict(head, comments) else "r1"
     records, stale, unbound, approved_reviews, standing = _evidence_at(
         head, comments, reviews, allow_rebuttal
     )
@@ -2102,6 +2354,22 @@ def evaluate(
     # ACCEPT counts only while no later REJECT of that family at the head withdraws it.
     independent_head = approved_reviews > 0 or "claude" in standing or bool(conditional_verified)
     cross_head = "cross_model" in standing  # a rebuttal at the cap is a cross-model event
+    model_families = _standing_model_families(
+        _route_model_events_at(head, comments, allow_rebuttal)
+    )
+    gemini_codex = {"gemini", "codex"} <= model_families
+    route_row = next(
+        item
+        for item in REVIEW_ROUTES
+        if item.risk == ("high" if risky else "low") and item.round == route.removeprefix("r")
+    )
+    gemini_alternative = ("gemini", "codex") in route_row.alternatives
+    folded_events = _fold_events_at(head, comments, allow_rebuttal)
+    claude_events = [event for event in folded_events if event["family"] == "claude"]
+    claude_reject_standing = any(
+        event["kind"] == "reject" for event in claude_events
+    ) and "claude" not in standing_families(claude_events)
+    gemini_route = gemini_alternative and gemini_codex and not claude_reject_standing
     withdrawn = {
         event["family"]
         for record in records
@@ -2146,7 +2414,7 @@ def evaluate(
         )
         cross_model = "cross_model" in folded
     short = head[:12]
-    if not independent:
+    if not independent and not gemini_route:
         status = "MISSING_RECORD"
         if "claude" in withdrawn:
             reason = f"a later Claude/Opus REJECT at head {short} withdraws its ACCEPT"
@@ -2160,7 +2428,7 @@ def evaluate(
             reason = (
                 f"no Claude/Opus review record names head {short} with an ACCEPT/APPROVE verdict"
             )
-    elif risky and not cross_model:
+    elif risky and not cross_model and not gemini_route:
         status = "MISSING_CROSS_MODEL"
         if "cross_model" in withdrawn:
             reason = f"a later Codex/Gemini REJECT at head {short} withdraws its ACCEPT"
@@ -2184,8 +2452,20 @@ def evaluate(
             "OK",
             f"conditional accept at {conditional_verified[-1][:9]}, conditions verified (head {short})",
         )
+    elif gemini_route and (not independent or (risky and not cross_model)):
+        status, reason = "OK", f"round 2+ route: Gemini and Codex ACCEPT at head {short}"
     else:
         status, reason = "OK", f"review record present at head {short}"
+    if status == "OK" and gemini_route and (not independent or (risky and not cross_model)):
+        satisfied_by = "gemini+codex"
+    elif status == "OK" and conditional_verified:
+        satisfied_by = "conditional_accept"
+    elif independent and risky and cross_model:
+        satisfied_by = "claude+cross_model"
+    elif independent:
+        satisfied_by = "claude"
+    else:
+        satisfied_by = None
     return {
         "schema": "nexus.review_record_check.v1",
         "head": head,
@@ -2196,6 +2476,8 @@ def evaluate(
         "independent": independent,
         "cross_model": cross_model,
         "delta_verified_heads": delta_heads,
+        "route": route,
+        "satisfied_by": satisfied_by,
         "status": status,
         "reason": reason,
     }
