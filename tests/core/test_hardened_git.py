@@ -1185,3 +1185,62 @@ def test_revision_argument_refuses_an_option_or_malformed_revision(rev):
 def test_revision_argument_refuses_a_carriage_return_3361(rev):
     with pytest.raises(ValueError):
         hardened_git.revision_argument(rev)
+
+
+_UNPIN_FORMS = [
+    ("-c", "core.commitGraph=true"),
+    ("-c", "CORE.COMMITGRAPH=true"),
+    ("-c", "core.commitGraph"),
+    ("-c", "Core.CommitGraph=1"),
+    ("-c", "core.commitGraph=yes"),
+    ("-c", "core.useReplaceRefs=true"),
+]
+
+
+@pytest.mark.parametrize("form", _UNPIN_FORMS, ids=[f"form{i}" for i in range(len(_UNPIN_FORMS))])
+def test_run_hardened_git_caller_history_config_cannot_unpin(tmp_path, monkeypatch, form):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f").write_text("1\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "one")
+    seen: list[tuple[list[str], dict[str, str]]] = []
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **kw):
+        seen.append((list(cmd), dict(kw["env"])))
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(hardened_git.subprocess, "run", spy)
+    result = hardened_git.run_hardened_git(
+        repo, *form, "merge-base", "--is-ancestor", "HEAD", "HEAD"
+    )
+    assert result.returncode == 0
+    argv, env = seen[-1]
+    prefix = argv[: argv.index("merge-base")]
+    for key in ("core.commitGraph", "core.useReplaceRefs"):
+        effective = real_run(
+            [*prefix, "config", "--get", key],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert effective.stdout.strip() == "false", (key, effective.stdout)
+
+
+def test_run_hardened_git_ordinary_caller_config_is_kept(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f").write_text("1\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "one")
+    for args in (
+        ("-c", "user.name=a", "-c", "user.email=b", "rev-parse", "HEAD"),
+        ("-c", "core.useReplaceRefs=false", "log", "-1"),
+        (*hardened_git.history_pinned_args(["merge-base", "--is-ancestor", "HEAD", "HEAD"]),),
+    ):
+        assert hardened_git.run_hardened_git(repo, *args).returncode == 0, args

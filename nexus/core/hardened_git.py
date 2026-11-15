@@ -152,6 +152,18 @@ _PINNED_CONFIG_KEYS = frozenset(
         f"core.graftFile={os.devnull}",
     )
 )
+# A caller may name a history pin key with any value; these pairs follow its ``-c`` pairs so
+# git, which takes the last one, reads the pinned value. (core.graftFile is not a git
+# setting: only the GIT_GRAFT_FILE environment pin disables grafts; the pair is harmless.)
+_HISTORY_PIN_PAIRS = (
+    "-c",
+    "core.commitGraph=false",
+    "-c",
+    "core.useReplaceRefs=false",
+    "-c",
+    f"core.graftFile={os.devnull}",
+)
+_HISTORY_PIN_KEYS = frozenset({"core.commitgraph", "core.usereplacerefs", "core.graftfile"})
 _CALLER_CONFIG_KEYS = frozenset({
     "user.name",
     "user.email",
@@ -323,8 +335,16 @@ def run_hardened_git(
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
     try:
         # The pinned settings come after the caller's -c pairs, so the pinned values win.
+        caller_pairs = args[:caller_end]
+        repin = (
+            _HISTORY_PIN_PAIRS
+            if any(
+                pair.split("=", 1)[0].lower() in _HISTORY_PIN_KEYS for pair in caller_pairs[1::2]
+            )
+            else ()
+        )
         return subprocess.run(
-            ["git", *args[:caller_end], *_GIT_OVERRIDES, *args[caller_end:]],
+            ["git", *caller_pairs, *_GIT_OVERRIDES, *repin, *args[caller_end:]],
             cwd=None if repo_fd is not None else str(repo_dir),
             preexec_fn=None if repo_fd is None else (lambda: os.fchdir(repo_fd)),
             env=env,
