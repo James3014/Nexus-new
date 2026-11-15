@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from nexus.core.argv_command import run_reaping_process_group
+from nexus.core.hardened_git import history_pinned_env
 
 from .anti_drift import AntiDrift
 from .replay_runner import (
@@ -418,14 +419,16 @@ class EvidenceVerifier:
     def _check_git_diff_non_empty(self) -> bool:
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD"],
-            cwd=self.project_root, capture_output=True, text=True
+            cwd=self.project_root, capture_output=True, text=True,
+            env=history_pinned_env(),
         )
         return bool(result.stdout.strip())
     
     def _get_git_diff_stat(self) -> str:
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD"],
-            cwd=self.project_root, capture_output=True, text=True
+            cwd=self.project_root, capture_output=True, text=True,
+            env=history_pinned_env(),
         )
         return result.stdout.strip()[:500]
     
@@ -439,6 +442,7 @@ class EvidenceVerifier:
                 ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
                 cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
                 text=True, timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
+                env=history_pinned_env(),
             )
         except Exception as exc:
             return None, f"base_ref_error: {exc}"
@@ -459,6 +463,7 @@ class EvidenceVerifier:
                 ["git", "diff", "--name-status", "--no-renames", base_sha, "--"],
                 cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
                 text=True, timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
+                env=history_pinned_env(),
             )
         except Exception as exc:
             return {"status": "UNKNOWN", "reason": f"diff_error: {exc}"}
@@ -521,6 +526,7 @@ class EvidenceVerifier:
                 ["git", "archive", "--format=tar", base_sha],
                 cwd=self.project_root, stdin=subprocess.DEVNULL, capture_output=True,
                 timeout=TEST_SET_COLLECT_TIMEOUT_SECONDS,
+                env=history_pinned_env(),
             )
         except subprocess.TimeoutExpired:
             return "base_archive_timeout"

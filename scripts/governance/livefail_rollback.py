@@ -88,8 +88,30 @@ def sessions_in(*bodies: str) -> list[str]:
     return out
 
 
+def _history_pinned_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
 def run(cmd: list[str], cwd: str | Path | None = None, check: bool = True) -> str:
-    out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=_history_pinned_env())
     if check and out.returncode != 0:
         raise subprocess.CalledProcessError(out.returncode, cmd, out.stdout, out.stderr)
     return out.stdout
@@ -186,7 +208,9 @@ class Git:
 
     def has(self, sha: str) -> bool:
         probe = subprocess.run(
-            ["git", "-C", str(self.dir), "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True
+            ["git", "-C", str(self.dir), "cat-file", "-e", f"{sha}^{{commit}}"],
+            capture_output=True,
+            env=_history_pinned_env(),
         )
         return probe.returncode == 0
 
@@ -196,6 +220,7 @@ class Git:
         rc = subprocess.run(
             ["git", "-C", str(self.dir), "merge-base", "--is-ancestor", ancestor, commit],
             capture_output=True,
+            env=_history_pinned_env(),
         ).returncode
         return True if rc == 0 else False if rc == 1 else None
 
@@ -239,7 +264,12 @@ def plan_revert(git: Git, merge_shas: list[str]) -> dict[str, Any]:
         ordered = sorted(merge_shas, key=lambda m: -int(git("rev-list", "--count", m).strip()))
         for m in ordered:
             args = ["revert", "--no-commit", *(["-m", "1"] if git.parents(m) > 1 else []), m]
-            proc = subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+            proc = subprocess.run(
+                ["git", "-C", str(wt), *args],
+                capture_output=True,
+                text=True,
+                env=_history_pinned_env(),
+            )
             if proc.returncode != 0:
                 conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False)
                 return {

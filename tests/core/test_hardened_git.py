@@ -70,6 +70,63 @@ def test_history_pinned_env_overrides_history_controls_and_preserves_index():
     assert env["GIT_INDEX_FILE"] == "/tmp/index"
 
 
+def test_history_pinned_args_strips_every_config_form():
+    args = hardened_git.history_pinned_args((
+        "-c",
+        "CoRe.CoMmItGrApH=true",
+        "-ccore.useReplaceRefs=true",
+        "--config-env=core.graftFile=EVIL",
+        "--config-env",
+        "CORE.COMMITGRAPH=EVIL",
+        "-c",
+        "user.name=test",
+        "log",
+        "HEAD",
+    ))
+    assert args == [
+        "-c",
+        "user.name=test",
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+        "log",
+        "HEAD",
+    ]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        ("-c", "include.path={file}"),
+        ("-c", "INCLUDE.PATH={file}"),
+        ("-cinclude.path={file}",),
+        ("-c", "includeIf.gitdir:{repo}/.path={file}"),
+        ("-c", "includeif.onbranch:main.path={file}"),
+        ("--config-env=include.path=VAR",),
+        ("--config-env", "include.path=VAR"),
+    ],
+)
+def test_history_pinned_args_strips_include_config_reintroduction(override, tmp_path, monkeypatch):
+    config = tmp_path / "included.gitconfig"
+    config.write_text("[core]\n\tcommitGraph = true\n", encoding="utf-8")
+    args = tuple(part.format(file=config, repo=tmp_path) for part in override)
+    if "--config-env" in args[0]:
+        monkeypatch.setenv("VAR", str(config))
+    pinned = hardened_git.history_pinned_args((*args, "config", "--get", "core.commitGraph"))
+    result = subprocess.run(
+        ["git", *pinned],
+        cwd=tmp_path,
+        env=hardened_git.history_pinned_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "false"
+
+
 def _restore_candidate_files(repo: Path) -> Any:
     searcher = CandidatePatchSearcher(parser=MagicMock(), patch_applier=MagicMock())
     return searcher._restore_files(repo, [cast(Any, SimpleNamespace(file_path="notes.py"))])
@@ -1128,3 +1185,62 @@ def test_revision_argument_refuses_an_option_or_malformed_revision(rev):
 def test_revision_argument_refuses_a_carriage_return_3361(rev):
     with pytest.raises(ValueError):
         hardened_git.revision_argument(rev)
+
+
+_UNPIN_FORMS = [
+    ("-c", "core.commitGraph=true"),
+    ("-c", "CORE.COMMITGRAPH=true"),
+    ("-c", "core.commitGraph"),
+    ("-c", "Core.CommitGraph=1"),
+    ("-c", "core.commitGraph=yes"),
+    ("-c", "core.useReplaceRefs=true"),
+]
+
+
+@pytest.mark.parametrize("form", _UNPIN_FORMS, ids=[f"form{i}" for i in range(len(_UNPIN_FORMS))])
+def test_run_hardened_git_caller_history_config_cannot_unpin(tmp_path, monkeypatch, form):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f").write_text("1\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "one")
+    seen: list[tuple[list[str], dict[str, str]]] = []
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **kw):
+        seen.append((list(cmd), dict(kw["env"])))
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(hardened_git.subprocess, "run", spy)
+    result = hardened_git.run_hardened_git(
+        repo, *form, "merge-base", "--is-ancestor", "HEAD", "HEAD"
+    )
+    assert result.returncode == 0
+    argv, env = seen[-1]
+    prefix = argv[: argv.index("merge-base")]
+    for key in ("core.commitGraph", "core.useReplaceRefs"):
+        effective = real_run(
+            [*prefix, "config", "--get", key],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert effective.stdout.strip() == "false", (key, effective.stdout)
+
+
+def test_run_hardened_git_ordinary_caller_config_is_kept(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "f").write_text("1\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "one")
+    for args in (
+        ("-c", "user.name=a", "-c", "user.email=b", "rev-parse", "HEAD"),
+        ("-c", "core.useReplaceRefs=false", "log", "-1"),
+        (*hardened_git.history_pinned_args(["merge-base", "--is-ancestor", "HEAD", "HEAD"]),),
+    ):
+        assert hardened_git.run_hardened_git(repo, *args).returncode == 0, args

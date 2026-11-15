@@ -28,6 +28,27 @@ from scripts.ops.trusted_deletion_anchor import (
 )
 
 ROOT = Path(__file__).parents[2]
+
+
+def test_anchor_git_env_preserves_http_extraheader_and_commit_graph_pin(monkeypatch, tmp_path):
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.extraheader")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "<x>")
+    env = trusted_anchor._anchor_git_env()
+    assert (
+        subprocess.check_output(
+            ["git", "config", "--get", "core.commitGraph"], cwd=tmp_path, env=env, text=True
+        ).strip()
+        == "false"
+    )
+    assert (
+        subprocess.check_output(
+            ["git", "config", "--get", "http.extraheader"], cwd=tmp_path, env=env, text=True
+        ).strip()
+        == "<x>"
+    )
+
+
 WORKFLOW = ROOT / ".github/workflows/trusted-deletion-anchor.yml"
 
 

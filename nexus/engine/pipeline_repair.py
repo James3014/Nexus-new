@@ -11,6 +11,7 @@ from nexus.core.protocols import PipelineContextProtocol
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event
+from nexus.core.hardened_git import history_pinned_env
 from nexus.learning.cycle_analyzer import analyze_cycle
 from nexus.engine.recursive_repair_loop import RecursiveRepairLoop, recursive_repair_enabled
 from nexus.engine.repair.audit_evaluator import evaluate_audit_result
@@ -144,6 +145,7 @@ class PipelineRepairMixin:
                 cwd=root,
                 capture_output=True,
                 text=True,
+                env=history_pinned_env(),
                 check=True,
             ).stdout.strip()
         except (OSError, subprocess.SubprocessError):
@@ -1380,6 +1382,7 @@ class PipelineRepairMixin:
             cwd=project_root,
             capture_output=True,
             text=True,
+            env=history_pinned_env(),
         )
         if diff_cmd.returncode != 0 or not diff_cmd.stdout:
             return []

@@ -29,6 +29,49 @@ SCHEMA_VERSION = "trusted-deletion-anchor.v4"
 RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v2"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
+
+
+def _history_pinned_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
+def _anchor_git_env() -> dict[str, str]:
+    env = _history_pinned_env()
+    try:
+        count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    for index in range(max(0, count)):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{index}", "")
+        if key.lower() == "http.extraheader":
+            # Preserve the trusted runner's exact one-entry HTTP auth contract;
+            # pin commit-graph through Git's protected config-parameters env.
+            env["GIT_CONFIG_KEY_0"] = key
+            env["GIT_CONFIG_VALUE_0"] = os.environ[f"GIT_CONFIG_VALUE_{index}"]
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_PARAMETERS"] = "'core.commitGraph'='false'"
+            break
+    return env
+
+
 BASE_REF = "refs/trusted-anchor/base"
 HEAD_REF = "refs/trusted-anchor/head"
 WORKFLOW_REF = "refs/trusted-anchor/workflow"
@@ -1309,7 +1352,12 @@ def verify_evidence(
 
 
 def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
-    result = subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        env=_anchor_git_env(),
+    )
     return result.stdout if binary else result.stdout.decode().strip()
 
 
@@ -1356,6 +1404,7 @@ def _unique_merge_base(repo: Path, base_sha: str, head_sha: str) -> str:
         ["git", "-C", str(repo), "merge-base", "--all", base_sha, head_sha],
         capture_output=True,
         text=True,
+        env=_anchor_git_env(),
     )
     bases = result.stdout.split() if result.returncode == 0 else []
     if len(bases) != 1:
@@ -1376,10 +1425,18 @@ def _corpus_blob(repo: Path, revision: str) -> bytes | None:
     """The corpus at ``revision``; None only when the path is absent there."""
 
     spec = f"{revision}:{GOLDEN_CORPUS_PATH}"
-    exists = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", spec], capture_output=True)
+    exists = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "-e", spec],
+        capture_output=True,
+        env=_anchor_git_env(),
+    )
     if exists.returncode != 0:
         return None
-    result = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True)
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", spec],
+        capture_output=True,
+        env=_anchor_git_env(),
+    )
     if result.returncode != 0:
         raise _corpus_unverifiable(f"corpus at {revision[:12]} is unreadable")
     return result.stdout
@@ -1774,6 +1831,7 @@ def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str
         cwd=source,
         capture_output=True,
         text=True,
+        env=_anchor_git_env(),
     )
     if (
         merge_bases.returncode != 0

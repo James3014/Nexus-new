@@ -1837,19 +1837,21 @@ def test_r1_git_subprocess_disables_background_maintenance(monkeypatch):
     g._r1_run("git", "--version")
     g._r1_run("true")
     env = seen["git"]
-    assert env["GIT_CONFIG_COUNT"] == "2"
-    assert env["GIT_CONFIG_KEY_0"] == "gc.auto" and env["GIT_CONFIG_VALUE_0"] == "0"
-    assert env["GIT_CONFIG_KEY_1"] == "maintenance.auto"
-    assert env["GIT_CONFIG_VALUE_1"] == "false"
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_KEY_0"] == "core.commitGraph"
+    assert env["GIT_CONFIG_VALUE_0"] == "false"
+    assert env["GIT_CONFIG_KEY_1"] == "gc.auto" and env["GIT_CONFIG_VALUE_1"] == "0"
+    assert env["GIT_CONFIG_KEY_2"] == "maintenance.auto"
+    assert env["GIT_CONFIG_VALUE_2"] == "false"
     assert seen["true"] is None
-    # A caller's own GIT_CONFIG_* entries are kept, ours are appended after them.
+    # Caller config overlays are removed; history and maintenance settings remain pinned.
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "always")
     g._r1_run("git", "--version")
     env = seen["git"]
     assert env["GIT_CONFIG_COUNT"] == "3"
-    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("protocol.file.allow", "always")
+    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("core.commitGraph", "false")
     assert (env["GIT_CONFIG_KEY_1"], env["GIT_CONFIG_VALUE_1"]) == ("gc.auto", "0")
     assert (env["GIT_CONFIG_KEY_2"], env["GIT_CONFIG_VALUE_2"]) == ("maintenance.auto", "false")
 

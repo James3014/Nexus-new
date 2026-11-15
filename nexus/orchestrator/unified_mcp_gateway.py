@@ -69,7 +69,7 @@ from nexus.contracts.lifecycle_action import (
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,  # noqa: F401 - kept on the facade after the G10 move
 )
-from nexus.core.hardened_git import history_pinned_env
+from nexus.core.hardened_git import history_pinned_args, history_pinned_env
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,  # noqa: F401 - kept on the facade after the G7b move
     build_canonical_dispatch_envelope,  # noqa: F401 - kept on the facade after the G7b move
@@ -626,7 +626,7 @@ def _loaded_git(*args: str, timeout: float = 3.0) -> str:
     if not CONTROLLER_IS_SEPARATE:
         return _git(*args)
     result = subprocess.run(
-        ["git", *args],
+        ["git", *history_pinned_args(args)],
         cwd=LOADED_SOURCE_ROOT,
         capture_output=True,
         text=True,
@@ -641,7 +641,7 @@ def _loaded_git(*args: str, timeout: float = 3.0) -> str:
 
 def _git(*args: str, timeout: float = 3.0) -> str:
     result = subprocess.run(
-        ["git", *args],
+        ["git", *history_pinned_args(args)],
         cwd=CANONICAL_SOURCE_ROOT,
         env=history_pinned_env(),
         capture_output=True,

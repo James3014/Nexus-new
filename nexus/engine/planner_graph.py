@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import logging
 import subprocess
 import json
+from nexus.core.hardened_git import history_pinned_env
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ class HierarchicalGraphPlanner:
         conflicts = []
         try:
             # 1. 檢查 Git 暫存區與工作區
-            res = subprocess.run(["git", "-C", str(self.project_root), "diff", "--name-only"], capture_output=True, text=True)
+            res = subprocess.run(["git", "-C", str(self.project_root), "diff", "--name-only"], capture_output=True, text=True, env=history_pinned_env())
             hot_files = res.stdout.splitlines()
             if len(hot_files) > 5:
                 conflicts.extend(hot_files[:3])

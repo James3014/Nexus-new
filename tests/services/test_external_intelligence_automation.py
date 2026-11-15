@@ -1483,6 +1483,26 @@ def test_source_binding_ancestor_commit_passes(tmp_path):
     assert len(sidecar.calls) == 1
 
 
+def test_source_lineage_ignores_repository_grafts(tmp_path):
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(["git", "checkout", "--orphan", "unrelated"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "orphan"], cwd=repo, check=True)
+    orphan_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(["git", "checkout", "main"], cwd=repo, check=True)
+    (repo / ".git" / "info" / "grafts").write_text(f"{base_sha} {orphan_sha}\n")
+    automation = _automation(tmp_path, repo, store)
+
+    with pytest.raises(AutomationError, match="MAIN_SHA_LINEAGE_MISMATCH"):
+        automation._validate_source_lineage("James3014/Nexus-new", orphan_sha)
+
+
 def test_task_card_read_from_exact_main_sha_not_stale_worktree_file(tmp_path):
     repo, card, contract, body, store = _setup(
         tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"

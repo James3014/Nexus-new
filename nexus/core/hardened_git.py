@@ -38,6 +38,84 @@ _HISTORY_ENV_PINS = {
 }
 
 
+def history_pinned_args(args: Any) -> list[str]:
+    """Strip caller overrides of the history pins from a git argv.
+
+    Git command-line config wins over environment config, so a caller's
+    ``-c core.commitGraph=true`` would undo the env pin. Remove every supported
+    spelling of the protected keys; the env pins then apply. Other argv is unchanged.
+    """
+    values = [str(arg) for arg in args]
+    protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+
+    def is_protected(setting: str) -> bool:
+        key = setting.split("=", 1)[0].lower()
+        return key in protected or key.startswith(("include.", "includeif."))
+
+    result: list[str] = []
+    index = 0
+    while index < len(values):
+        arg = values[index]
+        if arg == "-c" and index + 1 < len(values):
+            setting = values[index + 1]
+            if is_protected(setting):
+                index += 2
+                continue
+            result.extend((arg, setting))
+            index += 2
+            continue
+        if arg.startswith("--config-env="):
+            setting = arg[len("--config-env=") :].split("=", 1)[0]
+            if is_protected(setting):
+                index += 1
+                continue
+        elif arg == "--config-env" and index + 1 < len(values):
+            setting = values[index + 1].split("=", 1)[0]
+            if is_protected(setting):
+                index += 2
+                continue
+            result.extend((arg, values[index + 1]))
+            index += 2
+            continue
+        elif arg.startswith("-c") and len(arg) > 2:
+            setting = arg[2:].split("=", 1)[0]
+            if is_protected(setting):
+                index += 1
+                continue
+        result.append(arg)
+        index += 1
+    # Keep global options ahead of the command and let our pins win last.
+    at = 0
+    takes_value = {
+        "-c",
+        "-C",
+        "--config-env",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--super-prefix",
+    }
+    while at < len(result) and result[at].startswith("-"):
+        if result[at] in takes_value and at + 1 < len(result):
+            at += 2
+            continue
+        option = result[at].split("=", 1)[0]
+        if option in takes_value and "=" not in result[at]:
+            at += 2
+        else:
+            at += 1
+    result[at:at] = [
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+    ]
+    return result
+
+
 def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """Copy an environment while removing overrides to git's history pins."""
     env = dict(os.environ if base is None else base)
@@ -65,7 +143,27 @@ def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, st
 # pinned above (whose pinned value comes after the caller's and so wins). Any other key, and
 # any other option ahead of the subcommand (``--config-env``, ``-C``, ``--exec-path`` ...),
 # is refused. Keys are matched as git does, ignoring case.
-_PINNED_CONFIG_KEYS = frozenset(pair.split("=", 1)[0].lower() for pair in _GIT_OVERRIDES[1::2])
+_PINNED_CONFIG_KEYS = frozenset(
+    pair.split("=", 1)[0].lower()
+    for pair in (
+        *_GIT_OVERRIDES[1::2],
+        "core.commitGraph=false",
+        "core.useReplaceRefs=false",
+        f"core.graftFile={os.devnull}",
+    )
+)
+# A caller may name a history pin key with any value; these pairs follow its ``-c`` pairs so
+# git, which takes the last one, reads the pinned value. (core.graftFile is not a git
+# setting: only the GIT_GRAFT_FILE environment pin disables grafts; the pair is harmless.)
+_HISTORY_PIN_PAIRS = (
+    "-c",
+    "core.commitGraph=false",
+    "-c",
+    "core.useReplaceRefs=false",
+    "-c",
+    f"core.graftFile={os.devnull}",
+)
+_HISTORY_PIN_KEYS = frozenset({"core.commitgraph", "core.usereplacerefs", "core.graftfile"})
 _CALLER_CONFIG_KEYS = frozenset({
     "user.name",
     "user.email",
@@ -237,8 +335,16 @@ def run_hardened_git(
         _RUNNING[key] = _RUNNING.get(key, 0) + 1
     try:
         # The pinned settings come after the caller's -c pairs, so the pinned values win.
+        caller_pairs = args[:caller_end]
+        repin = (
+            _HISTORY_PIN_PAIRS
+            if any(
+                pair.split("=", 1)[0].lower() in _HISTORY_PIN_KEYS for pair in caller_pairs[1::2]
+            )
+            else ()
+        )
         return subprocess.run(
-            ["git", *args[:caller_end], *_GIT_OVERRIDES, *args[caller_end:]],
+            ["git", *caller_pairs, *_GIT_OVERRIDES, *repin, *args[caller_end:]],
             cwd=None if repo_fd is not None else str(repo_dir),
             preexec_fn=None if repo_fd is None else (lambda: os.fchdir(repo_fd)),
             env=env,
