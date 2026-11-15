@@ -4761,6 +4761,58 @@ def test_full_reading_rejects_withdraw_the_claude_accept(line):
     assert _status_after_accept(line) == "MISSING_RECORD"
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "Withdrawn",
+        "Pending",
+        "Withheld",
+        "Revoked",
+        "Rescinded",
+        "Denied",
+        "Retracted",
+        "Void",
+        "Stale",
+        "Superseded",
+    ],
+)
+def test_prefixed_withdrawal_retracts_prior_accept(prefix):
+    line = f"{prefix}: Claude Verdict: ACCEPT@{HEAD}\n"
+    assert _status_after_accept(line) == "MISSING_RECORD"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "revoked",
+        "retracted",
+        "rescinded",
+        "denied",
+    ],
+)
+def test_post_hash_withdrawal_retracts_prior_accept(suffix):
+    line = f"Claude Verdict: ACCEPT@{HEAD} {suffix}\n"
+    assert _status_after_accept(line) == "MISSING_RECORD"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
+
+
+def test_later_comment_without_withdrawal_keeps_accept():
+    comments = [_c(f"Claude Verdict: ACCEPT@{HEAD}"), _c("Review notes: no new issues.")]
+    assert rrc.evaluate(HEAD, DOCS, comments, [])["status"] == "OK"
+
+
+@pytest.mark.parametrize("prefix", ["Pending", "Withheld", "Withdrawn"])
+def test_rejects_only_parse_keeps_prefixed_withdrawal_event(prefix):
+    line = f"{prefix}: Claude Verdict: ACCEPT@{HEAD}"
+    assert rrc._classify(line, HEAD, rejects_only=True)["events"]
+
+
 def test_a_codex_label_with_instead_of_withdraws_the_codex_accept():
     line = _HL + "Codex r2 instead of Gemini: REJECT — race\n"
     assert _status_after_accept(line, RISKY, _CODEX_AT) == "MISSING_CROSS_MODEL"

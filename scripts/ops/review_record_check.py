@@ -356,7 +356,8 @@ _POST_WITHDRAWN = re.compile(
     re.IGNORECASE,
 )
 _PREFIX_WITHDRAWN = re.compile(
-    r"^\s*(?:withdrawn|retracted|void|stale|superseded|pending)\s*:", re.IGNORECASE
+    r"^\s*(?:withdrawn|retracted|void|stale|superseded|pending|withheld|revoked|rescinded|denied)\s*:",
+    re.IGNORECASE,
 )
 # Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
 # is withdrawn: an ACCEPT inside it is not read. A REJECT inside it still is (fail closed).
@@ -753,6 +754,9 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         # The window runs from the previous verdict token on the line (a round list
         # names several) to this one.
         line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
+        prefix_withdrawn = _PREFIX_WITHDRAWN.match(plain_line)
+        if prefix_withdrawn:
+            line_before = line_before.replace(plain_line[: prefix_withdrawn.end()], "", 1)
         after = clause[span[1] :]
         if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
             continue  # a quoted or negated verdict is prose about a verdict, not one
@@ -768,7 +772,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         withdrawn = withdrawn or (
             start >= 0 and bool(_POST_WITHDRAWN.match(plain_line, start + span[1]))
         )
-        withdrawn = withdrawn or bool(_PREFIX_WITHDRAWN.match(plain_line))
+        withdrawn = withdrawn or bool(prefix_withdrawn)
         if not _hex_tokens(clause):
             # A verdict not bound by its own clause borrows the sha from later on the
             # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
