@@ -5293,3 +5293,86 @@ def test_single_line_closed_inline_code_keeps_record_reading():
 def test_single_line_closed_double_backtick_span_keeps_accept_reading():
     body = f"Claude: ACCEPT at ``{HEAD}``\n"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    ("header_run", "trailing_run", "escaped"),
+    [
+        pytest.param(1, 0, False, id="probe-01"),
+        pytest.param(2, 0, False, id="probe-02"),
+        pytest.param(3, 0, False, id="probe-03"),
+        pytest.param(4, 0, False, id="probe-04"),
+        pytest.param(5, 0, False, id="probe-05"),
+        pytest.param(0, 1, False, id="probe-06"),
+        pytest.param(0, 2, False, id="probe-07"),
+        pytest.param(0, 3, False, id="probe-08"),
+        pytest.param(0, 4, False, id="probe-09"),
+        pytest.param(0, 5, False, id="probe-10"),
+        pytest.param(0, 1, True, id="probe-22"),
+    ],
+)
+def test_unclosed_inline_runs_block_record(header_run, trailing_run, escaped):
+    header = "**Independent Claude " + ("`" * header_run) + " header review**"
+    anchor = f"{header}: **ACCEPT at {HEAD}**" if header_run else ""
+    note = "Note " + ("`" * trailing_run) + " opens a span" if trailing_run else ""
+    if escaped:
+        note = note.replace("`", "\\`", 1)
+    body = "\n".join(
+        part
+        for part in (
+            f"Claude: ACCEPT at {HEAD}",
+            anchor,
+            note,
+            f"- later Claude REJECT at {HEAD}",
+        )
+        if part
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "opening,closing",
+    [
+        pytest.param(1, 2, id="probe-12"),
+        pytest.param(2, 3, id="probe-13"),
+        pytest.param(3, 4, id="probe-14"),
+        pytest.param(4, 5, id="probe-15"),
+        pytest.param(5, 1, id="probe-16"),
+    ],
+)
+def test_different_inline_run_lengths_do_not_pair(opening, closing):
+    anchor = f"**Independent Claude review**: **ACCEPT at {HEAD}**"
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n{anchor}\n"
+        f"Note {'`' * opening} text {'`' * closing}\n"
+        f"- later Claude REJECT at {HEAD}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "run_length",
+    [
+        pytest.param(1, id="probe-17"),
+        pytest.param(2, id="probe-18"),
+        pytest.param(3, id="probe-19"),
+        pytest.param(4, id="probe-20"),
+        pytest.param(5, id="probe-21"),
+    ],
+)
+def test_exact_inline_pairs_across_lines_block_record(run_length):
+    ticks = "`" * run_length
+    anchor = f"**Independent Claude review**: **ACCEPT at {HEAD}**"
+    body = (
+        f"Claude: ACCEPT at {HEAD}\n{anchor}\n"
+        f"Note {ticks} opens here\n"
+        f"- later Claude REJECT at {HEAD} {ticks}\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize("run_length", [1, 2, 3, 4, 5], ids=[f"pair-{i}" for i in range(1, 6)])
+def test_exact_inline_pairs_on_one_line_remain_closed(run_length):
+    ticks = "`" * run_length
+    body = f"Claude: ACCEPT at {ticks}{HEAD}{ticks}"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"

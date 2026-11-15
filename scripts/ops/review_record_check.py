@@ -501,15 +501,20 @@ _BOLD_ACCEPT_ANCHOR = re.compile(
 _BOLD_ACCEPT_BLOCKERS = re.compile(
     r"```|~~~|<details|<pre|<code|<del|<s>|<strike|(?<!~)~~(?!~)|<!--", re.IGNORECASE
 )
-_INLINE_CODE_RUN = re.compile(r"(?<!`)(`{1,2})(?!`)")
+_INLINE_CODE_RUN = re.compile(r"(?<!`)(`+)(?!`)")
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
-def _has_unclosed_inline_code(line: str) -> bool:
-    counts = {1: 0, 2: 0}
-    for match in _INLINE_CODE_RUN.finditer(line):
-        counts[len(match.group(1))] += 1
-    return any(count % 2 for count in counts.values())
+def _has_unclosed_inline_code(text: str) -> bool:
+    open_runs: dict[int, int] = {}
+    for match in _INLINE_CODE_RUN.finditer(text):
+        length = len(match.group(1))
+        opener = open_runs.pop(length, None)
+        if opener is None:
+            open_runs[length] = match.start()
+        elif "\n" in text[opener : match.start()]:
+            return True
+    return bool(open_runs)
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
@@ -529,7 +534,7 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
             continue
         match = _BOLD_ACCEPT_ANCHOR.fullmatch(stripped)
         if match and not blocked and head and names_head(match.group("h"), head):
-            return not any(_has_unclosed_inline_code(after) for after in lines[index + 1 :])
+            return not _has_unclosed_inline_code("\n".join(lines[index:]))
     return False
 
 
