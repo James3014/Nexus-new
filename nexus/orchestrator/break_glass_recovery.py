@@ -32,11 +32,18 @@ from nexus.contracts.break_glass_recovery import (
 )
 
 
+def _home_for_uid(uid: int) -> Path:
+    try:
+        return Path(pwd.getpwuid(uid).pw_dir)
+    except (KeyError, OSError):
+        return Path(f"/nonexistent-home-uid-{uid}")
+
+
 def _utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
+_HOME = _home_for_uid(os.getuid())
 DEFAULT_BREAK_GLASS_ROOT = _HOME / ".local/state/nexus/authority/break-glass"
 _MAX_TRANSITION_BYTES = 64 * 1024
 _PHASE_FILE = {

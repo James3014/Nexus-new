@@ -97,7 +97,15 @@ from nexus.orchestrator.standing_grant_store import (
     authorize_durable_standing_grant_effect,
 )
 
-_HOME = pwd.getpwuid(os.getuid()).pw_dir
+
+def _home_for_uid(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_dir
+    except (KeyError, OSError):
+        return f"/nonexistent-home-uid-{uid}"
+
+
+_HOME = _home_for_uid(os.getuid())
 DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT = (
     Path(_HOME) / ".local/state/nexus/authority/owner-representation"
 )

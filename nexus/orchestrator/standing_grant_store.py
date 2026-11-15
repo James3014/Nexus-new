@@ -48,7 +48,15 @@ from nexus.orchestrator.autonomy_policy import (
     evaluate_standing_grant_decision,
 )
 
-_HOME = pwd.getpwuid(os.getuid()).pw_dir
+
+def _home_for_uid(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_dir
+    except (KeyError, OSError):
+        return f"/nonexistent-home-uid-{uid}"
+
+
+_HOME = _home_for_uid(os.getuid())
 DEFAULT_RECEIPT_PATH = Path(_HOME) / ".local/state/nexus/authority/standing-grant.json"
 DEFAULT_TRANSITIONS_DIR = DEFAULT_RECEIPT_PATH.parent / "transitions"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
