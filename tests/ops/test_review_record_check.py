@@ -5227,3 +5227,69 @@ def test_midline_blocker_contexts_block_the_anchor(opener):
         f"- later Claude REJECT at {HEAD}\n"
     )
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "span_lines",
+    [
+        pytest.param(("`", f"- later Claude REJECT at {HEAD}", "`"), id="single-run-lines"),
+        pytest.param(("``", f"- later Claude REJECT at {HEAD}", "``"), id="double-run-lines"),
+        pytest.param(
+            ("` open", f"- later Claude REJECT at {HEAD}", "close `"), id="single-midline"
+        ),
+        pytest.param(
+            ("`` open", f"- later Claude REJECT at {HEAD}", "close ``"), id="double-midline"
+        ),
+        pytest.param(
+            ("note `", f"- later Claude REJECT at {HEAD}", "` tail"), id="single-after-text"
+        ),
+        pytest.param(
+            ("note ``", f"- later Claude REJECT at {HEAD}", "`` tail"), id="double-after-text"
+        ),
+        pytest.param(("- `", f"- later Claude REJECT at {HEAD}", "`"), id="single-list-opener"),
+        pytest.param(("- ``", f"- later Claude REJECT at {HEAD}", "``"), id="double-list-opener"),
+        pytest.param(("> `", f"- later Claude REJECT at {HEAD}", "`"), id="single-quote-opener"),
+        pytest.param(("> ``", f"- later Claude REJECT at {HEAD}", "``"), id="double-quote-opener"),
+        pytest.param(
+            ("| note ` |", f"- later Claude REJECT at {HEAD}", "`"), id="single-table-opener"
+        ),
+        pytest.param(
+            ("| note `` |", f"- later Claude REJECT at {HEAD}", "``"), id="double-table-opener"
+        ),
+        pytest.param(
+            ("`", "intervening text", f"- later Claude REJECT at {HEAD}", "close `"),
+            id="single-four-line-span",
+        ),
+        pytest.param(
+            ("| note `` |", "intervening text", f"- later Claude REJECT at {HEAD}", "close ``"),
+            id="double-four-line-span",
+        ),
+        pytest.param(("`", f"- later Claude REJECT at {HEAD}"), id="single-unclosed-span"),
+        pytest.param(
+            ("note ``", "intervening text", f"- later Claude REJECT at {HEAD}"),
+            id="double-unclosed-span",
+        ),
+        pytest.param(("`", f"- later Claude REJECT at {HEAD} `"), id="single-close-after-verdict"),
+        pytest.param(
+            ("``", "closing ``", f"- later Claude REJECT at {HEAD}"),
+            id="double-close-before-verdict",
+        ),
+    ],
+)
+def test_cross_line_inline_code_does_not_hide_later_reject(span_lines):
+    anchor = f"**Independent Claude review**: **ACCEPT at {HEAD}**"
+    body = "\n".join((anchor, *span_lines))
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+def test_single_line_closed_inline_code_keeps_record_reading():
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
+        "- tests: `tests/ops/test_review_record_check.py`\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+def test_single_line_closed_double_backtick_span_keeps_accept_reading():
+    body = f"Claude: ACCEPT at ``{HEAD}``\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"

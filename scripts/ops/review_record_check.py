@@ -501,13 +501,21 @@ _BOLD_ACCEPT_ANCHOR = re.compile(
 _BOLD_ACCEPT_BLOCKERS = re.compile(
     r"```|~~~|<details|<pre|<code|<del|<s>|<strike|(?<!~)~~(?!~)|<!--", re.IGNORECASE
 )
+_INLINE_CODE_RUN = re.compile(r"(?<!`)(`{1,2})(?!`)")
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+
+
+def _has_unclosed_inline_code(line: str) -> bool:
+    counts = {1: 0, 2: 0}
+    for match in _INLINE_CODE_RUN.finditer(line):
+        counts[len(match.group(1))] += 1
+    return any(count % 2 for count in counts.values())
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
     """True only for an exact, unambiguous bold ACCEPT anchor for this head."""
     blocked = False
-    for raw in lines:
+    for index, raw in enumerate(lines):
         if (
             _BOLD_ACCEPT_BLOCKERS.search(raw)
             or re.match(r"^(?: {4,}|\t)", raw)
@@ -521,7 +529,7 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
             continue
         match = _BOLD_ACCEPT_ANCHOR.fullmatch(stripped)
         if match and not blocked and head and names_head(match.group("h"), head):
-            return True
+            return not any(_has_unclosed_inline_code(after) for after in lines[index + 1 :])
     return False
 
 
