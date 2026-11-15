@@ -363,3 +363,17 @@ def test_verify_claims_git_timeout_handling(tmp_path: Path) -> None:
         # 由於超時，git 執行失敗，安全閘門應當返回 Fail (passed=False) 而非卡死
         assert report["passed"] is False
 
+
+def test_report_git_reader_ignores_replace_ref(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    real = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+    (tmp_path / "fake.txt").write_text("fake\n", encoding="utf-8")
+    subprocess.run(["git", "add", "fake.txt"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "fake"], cwd=tmp_path, check=True, capture_output=True)
+    fake = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(["git", "update-ref", f"refs/replace/{fake}", real], cwd=tmp_path, check=True)
+
+    from scripts.ops.verify_report_claims import _run_git
+
+    assert _run_git(tmp_path, ["show", "--name-only", "--pretty=format:", "HEAD"]) == "fake.txt"
+

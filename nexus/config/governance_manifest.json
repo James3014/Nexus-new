@@ -1,8 +1,8 @@
 {
-  "scripts/ops/verify_report_claims.py": "3c166ae43c5e0fefd7c30fb117183b1bc561bb3be35502620e67caeb42c57ec7",
+  "scripts/ops/verify_report_claims.py": "d97f3aa59d46e3b7285239201641315789fef92874dfb26d4fc529efad89c7ec",
   "scripts/ops/nexus_delivery_gate.sh": "c3825d11c99a465fef9701effe4c145b8e34e28f2422c13893d7e5901cb7fd0a",
   "nexus/schemas/evidence_bundle_v1.json": "e00f95191405bafd282aea98a11c8c9f605311f276025436d7d7ce1830e511cd",
-  "nexus/delivery/evidence_verifier.py": "2c5cfadb75311c396b56fa19627a2ee4d39af6cde7c867732114368efba8e13e",
+  "nexus/delivery/evidence_verifier.py": "5f4ce0d160612b1d1f8ee619efb929e22d8085ed75b5281cdbdf027d46bf2d55",
   "nexus/delivery/replay_runner.py": "9c7bc57e80697d225d41cc2bdf02729b2207f93ea0252f1b4753dd2c81fc8612",
   "nexus/delivery/anti_drift.py": "cb0c74882737b91919c73797b6dfa88913a7196025c4400bb4a19f3a4335de9e"
 }

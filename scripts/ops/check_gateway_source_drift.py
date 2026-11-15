@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -80,12 +81,35 @@ class ProbeError(Exception):
         self.detail = detail
 
 
+def _history_pinned_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
         check=False,
         capture_output=True,
         text=True,
+        env=_history_pinned_env(),
     )
 
 

@@ -122,8 +122,93 @@ UID_TARGET = f"gui/{os.getuid()}"
 
 class GateError(RuntimeError): pass
 
+def _history_pinned_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base is None else base)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
+def _history_pinned_args(args: tuple[str, ...]) -> list[str]:
+    protected = {"core.commitgraph", "core.usereplacerefs", "core.graftfile"}
+
+    def is_protected(setting: str) -> bool:
+        key = setting.split("=", 1)[0].lower()
+        return key in protected or key.startswith(("include.", "includeif."))
+
+    kept: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "-c" and i + 1 < len(args):
+            if is_protected(args[i + 1]):
+                i += 2
+                continue
+            kept.extend(args[i : i + 2])
+            i += 2
+            continue
+        if arg.startswith("-c") and len(arg) > 2 and is_protected(arg[2:]):
+            i += 1
+            continue
+        if arg.startswith("--config-env=") and is_protected(arg[13:]):
+            i += 1
+            continue
+        if arg == "--config-env" and i + 1 < len(args):
+            if is_protected(args[i + 1]):
+                i += 2
+                continue
+            kept.extend(args[i : i + 2])
+            i += 2
+            continue
+        kept.append(arg)
+        i += 1
+    at = 0
+    takes_value = {
+        "-c",
+        "-C",
+        "--config-env",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--exec-path",
+        "--super-prefix",
+    }
+    while at < len(kept) and kept[at].startswith("-"):
+        if kept[at] in takes_value and at + 1 < len(kept):
+            at += 2
+            continue
+        option = kept[at].split("=", 1)[0]
+        at += 2 if option in takes_value and "=" not in kept[at] else 1
+    kept[at:at] = [
+        "-c",
+        "core.commitGraph=false",
+        "-c",
+        "core.useReplaceRefs=false",
+        "-c",
+        f"core.graftFile={os.devnull}",
+    ]
+    return kept
+
+
 def _git(root: Path, *args: str) -> str:
-    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+    return subprocess.check_output(
+        ["git", *_history_pinned_args(("-C", str(root), *args))], text=True, env=_history_pinned_env()
+    ).strip()
 
 def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     """True if `ancestor` is reachable from `descendant` (forward-only floor check)."""
@@ -132,6 +217,7 @@ def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
         capture_output=True,
         text=True,
         check=False,
+        env=_history_pinned_env(),
     )
     return result.returncode == 0
 
@@ -777,14 +863,14 @@ def _fixed_authority_command_runner(*args: Any) -> Any:
     if len(command) == 7 and command[:5] == ("git", "-C", root, "merge-base", "--is-ancestor"):
         if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) for value in command[5:]):
             raise _gateway_error("caller-selected authority ancestry rejected")
-        return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, env=_history_pinned_env())
     if command not in allowed and not (
         len(command) == 5
         and command[:4] == ("git", "-C", root, "show")
         and re.fullmatch(r"[0-9a-f]{40}:" + re.escape(HOST_AUTHORITY_SOURCE_PATH), command[4])
     ):
         raise _gateway_error("caller-selected authority command rejected")
-    return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, env=_history_pinned_env())
 
 
 def _authority_command_output(
@@ -1008,8 +1094,8 @@ _R1_GIT_NO_BACKGROUND_CONFIG = (("gc.auto", "0"), ("maintenance.auto", "false"))
 
 
 def _r1_git_env() -> dict[str, str]:
-    """Environment for git children: appends to any caller GIT_CONFIG_* entries."""
-    env = dict(os.environ)
+    """Pin history and disable background maintenance for Git children."""
+    env = _history_pinned_env()
     try:
         count = max(0, int(env.get("GIT_CONFIG_COUNT", "0")))
     except ValueError:

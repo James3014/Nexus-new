@@ -142,6 +142,29 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def test_sanitised_git_ignores_repository_grafts(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "Nexus Test")
+    _git(repo, "config", "user.email", "nexus-test@example.invalid")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "--orphan", "unrelated")
+    _git(repo, "commit", "--allow-empty", "-qm", "orphan")
+    orphan = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "main")
+    (repo / ".git" / "info" / "grafts").write_text(f"{base} {orphan}\n")
+
+    result = ControlledIntegrationManager._run_sanitised_git(
+        ["rev-list", "--parents", "-n", "1", base], repo
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == base
+
+
 def _marker_program(tmp_path: Path, *, process_filter: bool = False) -> tuple[Path, Path]:
     marker = tmp_path / "PROGRAM_RAN"
     program = tmp_path / "marker_filter.py"

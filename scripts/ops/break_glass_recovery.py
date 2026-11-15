@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -165,6 +166,28 @@ def _assert_not_globally_terminal(envelope: OwnerActivationEnvelope) -> None:
     assert_source_not_globally_terminal(envelope, _fetch_terminals())
 
 
+def _history_pinned_env() -> dict[str, str]:
+    env = dict(os.environ)
+    for key in tuple(env):
+        upper = key.upper()
+        if upper in {
+            "GIT_REPLACE_REF_BASE",
+            "GIT_GRAFT_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+        } or upper.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(key)
+    env.update(
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_GRAFT_FILE=os.devnull,
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0="core.commitGraph",
+        GIT_CONFIG_VALUE_0="false",
+    )
+    return env
+
+
 def _git(repo_root: Path, *args: str) -> bytes:
     if not repo_root.is_dir():
         raise BreakGlassRecoveryError("REPOSITORY_ROOT_INVALID")
@@ -175,6 +198,7 @@ def _git(repo_root: Path, *args: str) -> bytes:
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=_history_pinned_env(),
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise BreakGlassRecoveryError("GIT_EVIDENCE_READ_FAILED") from exc

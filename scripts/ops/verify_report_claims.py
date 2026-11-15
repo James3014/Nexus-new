@@ -11,6 +11,7 @@ from nexus.delivery.report_claims import ReportClaimsOptions
 from nexus.delivery.report_claims import load_ignore_dirty_paths as _load_ignore_dirty_paths_core
 from nexus.delivery.report_claims import parse_porcelain_paths as _parse_porcelain_paths_core
 from nexus.delivery.report_claims import verify_claims_core
+from nexus.core.hardened_git import history_pinned_env
 
 
 def _run_git(project_root: Path, args: List[str]) -> str:
@@ -26,7 +27,8 @@ def _run_git(project_root: Path, args: List[str]) -> str:
             ["git", *args], 
             cwd=str(project_root), 
             stderr=subprocess.DEVNULL,
-            timeout=15.0 # Fail-safe strict timeout to prevent infinite blocking
+            timeout=15.0,  # Fail-safe strict timeout to prevent infinite blocking
+            env=history_pinned_env(),
         )
         return out.decode("utf-8", errors="replace").rstrip("\n")
     except Exception:

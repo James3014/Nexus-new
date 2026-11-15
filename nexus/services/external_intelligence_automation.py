@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
+from nexus.core.hardened_git import history_pinned_args, history_pinned_env
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
     build_canonical_planner_admission,
@@ -659,12 +660,13 @@ class ExternalIntelligenceAutomation:
 
     def _run_git(self, *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["git", *args],
+            ["git", *history_pinned_args(args)],
             cwd=self.repository_root,
             capture_output=True,
             text=True,
             check=False,
             timeout=timeout,
+            env=history_pinned_env(),
         )
 
     def _validate_source_lineage(self, repository: str, main_sha: str) -> None:
@@ -722,6 +724,7 @@ class ExternalIntelligenceAutomation:
             capture_output=True,
             check=False,
             timeout=30.0,
+            env=history_pinned_env(),
         )
         if res.returncode != 0:
             raise AutomationError("TASK_CARD_NOT_FOUND")
@@ -756,6 +759,7 @@ class ExternalIntelligenceAutomation:
             capture_output=True,
             check=False,
             timeout=30.0,
+            env=history_pinned_env(),
         )
         if res.returncode != 0:
             return False, f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:{rel.as_posix()}"

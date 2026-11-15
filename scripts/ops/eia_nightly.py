@@ -45,6 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from nexus.core.hardened_git import history_pinned_env  # noqa: E402
 from nexus.services.external_intelligence_automation import (  # noqa: E402
     FENCE_RE,
     ISSUE_SCHEMA,
@@ -748,6 +749,16 @@ class Nightly:
         return json.loads(self._ok([self.gh, *args], code="GH_FAILED") or "null")
 
     def _git(self, repo: Path, *args: str, code: str = "GIT_FAILED", **kw: Any) -> str:
+        if args and args[0] in {
+            "cat-file",
+            "diff",
+            "log",
+            "merge-base",
+            "rev-list",
+            "rev-parse",
+            "show",
+        }:
+            kw.setdefault("env", history_pinned_env())
         return self._ok(["git", "-C", str(repo), *args], code=code, **kw).strip()
 
     def _push(self, repo: Path, sha: str, branch: str) -> None:
@@ -763,7 +774,7 @@ class Nightly:
 
     def _has_commit(self, repo: Path, sha: str) -> bool:
         argv = ["git", "-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}"]
-        return self.run(argv).returncode == 0
+        return self.run(argv, env=history_pinned_env()).returncode == 0
 
     def _remote_sha(self, branch: str) -> str | None:
         ref = f"refs/heads/{branch}"
@@ -772,7 +783,7 @@ class Nightly:
 
     def _is_ancestor(self, repo: Path, older: str, newer: str) -> bool:
         argv = ["git", "-C", str(repo), "merge-base", "--is-ancestor", older, newer]
-        return self.run(argv).returncode == 0
+        return self.run(argv, env=history_pinned_env()).returncode == 0
 
     def _fetch_main(self) -> str:
         refspec = "+refs/heads/main:refs/remotes/origin/main"
