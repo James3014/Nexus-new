@@ -506,6 +506,8 @@ _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
 def _has_unclosed_inline_code(text: str) -> bool:
+    if "\\`" in text:
+        return True
     open_runs: dict[int, int] = {}
     for match in _INLINE_CODE_RUN.finditer(text):
         length = len(match.group(1))

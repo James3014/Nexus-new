@@ -5376,3 +5376,20 @@ def test_exact_inline_pairs_on_one_line_remain_closed(run_length):
     ticks = "`" * run_length
     body = f"Claude: ACCEPT at {ticks}{HEAD}{ticks}"
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "OK"
+
+
+@pytest.mark.parametrize(
+    "middle",
+    [
+        pytest.param("x `a \\`", id="escaped-run-after-opener"),
+        pytest.param("`a\\` b", id="escaped-run-inside-span"),
+        pytest.param("see \\`x", id="escaped-run-alone"),
+        pytest.param("``a \\`", id="double-opener-escaped-run"),
+    ],
+)
+def test_escaped_backtick_after_anchor_fails_closed(middle):
+    body = (
+        f"**Independent Claude review**: **ACCEPT at {HEAD}**\n{middle}\n"
+        f"- later Claude REJECT at {HEAD} `\\`\n"
+    )
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
