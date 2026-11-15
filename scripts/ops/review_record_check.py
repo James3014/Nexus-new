@@ -352,11 +352,15 @@ _POST_WITHDRAWN = re.compile(
     r"\s*(?:(?:@|\bat\b|\bon\b)\s*[0-9a-f]{7,40}\b)?[\s.,;:!\-\u2013\u2014(\[]*"
     r"(?:pending|withdrawn|stale|void|withheld|revoked|retracted|rescinded|denied"
     r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b"
-    r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending)\b))",
+    r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending|ci)\b))",
     re.IGNORECASE,
 )
 _PREFIX_WITHDRAWN = re.compile(
-    r"^\s*(?:withdrawn|retracted|void|stale|superseded|pending|withheld|revoked|rescinded|denied)\s*:",
+    r"^\s*(?:[-*+]\s+)?(?:withdrawn|retracted|void|stale|superseded|pending|withheld|revoked|rescinded|denied)\s*[:：]",
+    re.IGNORECASE,
+)
+_INLINE_PREFIX_WITHDRAWN = re.compile(
+    r"\b(?:withdrawn|retracted|void|stale|superseded|pending|withheld|revoked|rescinded|denied)\s*[:：]",
     re.IGNORECASE,
 )
 # Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
@@ -755,6 +759,8 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         # names several) to this one.
         line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
         prefix_withdrawn = _PREFIX_WITHDRAWN.match(plain_line)
+        if not prefix_withdrawn:
+            prefix_withdrawn = _INLINE_PREFIX_WITHDRAWN.search(plain_line, 0, token_at)
         if prefix_withdrawn:
             line_before = line_before.replace(plain_line[: prefix_withdrawn.end()], "", 1)
         after = clause[span[1] :]
