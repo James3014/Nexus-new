@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -60,6 +61,38 @@ from nexus.services.runtime_workforce_admission import (  # noqa: E402
 )
 
 _REAL_POPEN = subprocess.Popen
+
+
+def test_gateway_git_ignores_replace_ref_for_head_tree(tmp_path, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    repo = tmp_path / "controller"
+    repo.mkdir()
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Gateway Test")
+    git("config", "user.email", "gateway@example.test")
+    (repo / "head.txt").write_text("head\n", encoding="utf-8")
+    git("add", "head.txt")
+    git("commit", "-m", "head")
+    head = git("rev-parse", "HEAD")
+    tree_before = git("rev-parse", "HEAD^{tree}")
+    (repo / "replacement.txt").write_text("replacement\n", encoding="utf-8")
+    git("add", "replacement.txt")
+    git("commit", "-m", "replacement")
+    replacement = git("rev-parse", "HEAD")
+    git("checkout", head)
+    git("update-ref", f"refs/replace/{head}", replacement)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", repo)
+
+    assert git("rev-parse", "HEAD^{tree}") != tree_before
+    assert gateway_module._git("rev-parse", "HEAD^{tree}").strip() == tree_before
 
 
 @pytest.fixture(autouse=True)

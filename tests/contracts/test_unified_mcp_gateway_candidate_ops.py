@@ -448,7 +448,7 @@ def test_bind_uses_the_contract_controller_root_and_git_head_without_separate_co
     probes.separate_head = None
     runs: list[tuple] = []
 
-    def run(argv, *, cwd, capture_output, text, check):
+    def run(argv, *, cwd, capture_output, text, check, env):
         runs.append((tuple(argv), Path(cwd)))
         return SimpleNamespace(returncode=0, stdout=OTHER_HEAD + "\n")
 

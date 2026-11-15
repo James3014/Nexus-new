@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.core.contained_write import root_identity
 from nexus.services.local_heal.isolated_verifier import (
     IsolatedVerifierReceipt,
     IsolatedVerifierRequest,
@@ -70,11 +71,21 @@ def _case(
         "verifier_command": command,
         "verifier_allowed": True,
     }
+    base_identity = root_identity(base_workspace)
+    candidate_identity = root_identity(candidate_workspace)
     return _Case(
         verification.freeze_oracle_identity(command=command, material=material),
-        IsolatedVerifierRequest(task_id="g2-base", workspace_path=str(base_workspace), **request),
         IsolatedVerifierRequest(
-            task_id="g2-candidate", workspace_path=str(candidate_workspace), **request
+            task_id="g2-base",
+            workspace_path=str(base_workspace),
+            workspace_identity=base_identity,
+            **request,
+        ),
+        IsolatedVerifierRequest(
+            task_id="g2-candidate",
+            workspace_path=str(candidate_workspace),
+            workspace_identity=candidate_identity,
+            **request,
         ),
         material,
     )
@@ -325,6 +336,7 @@ def test_isolated_verifier_pass(tmp_path: Path) -> None:
     request = IsolatedVerifierRequest(
         task_id="t2",
         workspace_path=str(tmp_path),
+        workspace_identity=root_identity(tmp_path),
         verifier_command=("python3", "-c", "import sys; sys.exit(0)"),
         verifier_allowed=True,
     )
@@ -339,6 +351,7 @@ def test_isolated_verifier_fail(tmp_path: Path) -> None:
     request = IsolatedVerifierRequest(
         task_id="t3",
         workspace_path=str(tmp_path),
+        workspace_identity=root_identity(tmp_path),
         verifier_command=("python3", "-c", "import sys; sys.exit(1)"),
         verifier_allowed=True,
     )
@@ -352,6 +365,7 @@ def test_isolated_verifier_timeout(tmp_path: Path) -> None:
     request = IsolatedVerifierRequest(
         task_id="t4",
         workspace_path=str(tmp_path),
+        workspace_identity=root_identity(tmp_path),
         verifier_command=("python3", "-c", "import time; time.sleep(2)"),
         timeout_sec=0.1,
         verifier_allowed=True,
@@ -366,6 +380,7 @@ def test_isolated_verifier_calls_semantic_correctness_after_tests() -> None:
     request = IsolatedVerifierRequest(
         task_id="t5",
         workspace_path=".",
+        workspace_identity=root_identity("."),
         verifier_command=("python3", "-c", "import sys; sys.exit(0)"),
         verifier_allowed=True,
     )

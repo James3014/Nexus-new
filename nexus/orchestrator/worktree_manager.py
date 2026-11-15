@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.core import hardened_git as target_git
-from nexus.core.hardened_git import revision_argument
+from nexus.core.hardened_git import history_pinned_env, revision_argument
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.measure_external_target import (
     FILTER_DRIVER_PRESENT,
@@ -1232,7 +1232,7 @@ class WorktreeManager:
         target = self._live_target(cwd)
         if target is not None:
             return self._run_target_git(args, target, text=True).stdout.strip()
-        git_env = os.environ.copy() if env is None else env.copy()
+        git_env = history_pinned_env(os.environ if env is None else env)
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
@@ -1283,7 +1283,7 @@ class WorktreeManager:
         target = self._live_target(cwd)
         if target is not None:
             return self._run_target_git(args, target, text=False).stdout
-        git_env = os.environ.copy()
+        git_env = history_pinned_env()
         git_env["GIT_CONFIG_NOSYSTEM"] = "1"
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
@@ -1604,11 +1604,13 @@ class WorktreeManager:
                     check=True,
                     capture_output=True,
                     text=True,
-                    env={
-                        **os.environ,
-                        "GIT_CONFIG_NOSYSTEM": "1",
-                        "GIT_CONFIG_GLOBAL": "/dev/null",
-                    },
+                    env=history_pinned_env(
+                        {
+                            **os.environ,
+                            "GIT_CONFIG_NOSYSTEM": "1",
+                            "GIT_CONFIG_GLOBAL": "/dev/null",
+                        }
+                    ),
                 ).stdout.strip()
             )
         common_dir = (

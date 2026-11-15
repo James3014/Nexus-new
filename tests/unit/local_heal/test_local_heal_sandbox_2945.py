@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nexus.core.contained_write import root_identity
 from nexus.engine.model_output_sandbox import (
     SandboxError,
     interpreter_readable_roots,
@@ -48,7 +49,11 @@ def listener():
 
 def _verify(repo: Path, patched: list[str]):
     return MicroVerifier.verify(
-        patch_content="", repo_dir=repo, patched_files=patched, verifier_env_metadata=_META
+        patch_content="",
+        repo_dir=repo,
+        workspace_identity=root_identity(repo),
+        patched_files=patched,
+        verifier_env_metadata=_META,
     )
 
 

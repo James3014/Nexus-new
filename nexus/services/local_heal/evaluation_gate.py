@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+from nexus.core.contained_write import PinnedRoot, root_identity
 from nexus.engine.model_output_sandbox import interpreter_readable_roots, run_model_argv
 from nexus.services.local_heal.scratch_copy import disposable_repo_copy
 
@@ -272,16 +273,18 @@ class EvaluationGate:
         # copy of repo_dir, so nothing it writes is left for a later verification of repo_dir;
         # repo_dir itself stays readable for paths that name it.
         with disposable_repo_copy(self.repo_dir, prefix="eval-gate-") as work:
+            work_identity = root_identity(work)
+            source_root = Path(self.repo_dir).resolve()
             benchmarks_dir = str(work / "scripts/benchmarks")
             env = {"PYTHONPATH": f"{work}:{benchmarks_dir}:{os.environ.get('PYTHONPATH', '')}"}
             return run_model_argv(
                 cmd,
-                work_dir=work,
+                work_dir=PinnedRoot(work, work_identity),
                 timeout=timeout,
                 extra_env=env,
                 readable=(
                     *(interpreter_readable_roots(cmd[0]) if cmd else ()),
-                    Path(self.repo_dir).resolve(),
+                    source_root,
                 ),
             )
 

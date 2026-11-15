@@ -431,6 +431,8 @@ def _execute(
     workspace: _HeldWorkspace,
     prefix: str,
 ) -> tuple[IsolatedVerifierReceipt | None, str]:
+    if execution_request.workspace_identity != workspace.file_id:
+        return None, f"{prefix}_WORKSPACE_IDENTITY_DRIFT"
     reason = _workspace_error(workspace, f"{prefix}_PRE")
     if not reason:
         reason = _observe(frozen, identity_request, held, f"{prefix}_PRE")

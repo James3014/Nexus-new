@@ -61,6 +61,7 @@ import pytest
 
 import nexus.orchestrator.self_hosted_task_service as service_module
 from nexus.contracts.lifecycle_action import LifecycleActionType
+from nexus.core.hardened_git import history_pinned_env
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 MEMBERS = (
@@ -197,8 +198,17 @@ class _Proc:
         return SimpleNamespace(returncode=code, stdout=stdout)
 
 
-def _kwargs(cwd: Path) -> dict[str, Any]:
-    return {"cwd": cwd, "capture_output": True, "text": True, "check": False}
+def _kwargs(cwd: Path, *, pinned: bool = True) -> dict[str, Any]:
+    kwargs = {
+        "cwd": cwd,
+        "capture_output": True,
+        "text": True,
+        "check": False,
+        "env": history_pinned_env(),
+    }
+    if not pinned:
+        del kwargs["env"]
+    return kwargs
 
 
 def _reading(service: Any, monkeypatch: pytest.MonkeyPatch, state: Any) -> list[str]:
@@ -289,7 +299,7 @@ def test_direct_action_probe_order_arguments_and_record(action, monkeypatch) -> 
     assert action.service._reconcile_direct_action("t") == "RECORDED"
     assert action.log == [
         (("git", "rev-parse", "HEAD"), _kwargs(action.controller)),
-        (("git", "status", "--porcelain=v1"), _kwargs(action.controller)),
+        (("git", "status", "--porcelain=v1"), _kwargs(action.controller, pinned=False)),
         (("git", "diff", "--name-only", f"{HEAD}..HEAD"), _kwargs(action.controller)),
         (("git", "diff", "--name-only"), _kwargs(action.controller)),
     ]

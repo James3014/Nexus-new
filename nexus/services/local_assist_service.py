@@ -1161,6 +1161,7 @@ class LocalAssistService:
                 else "failed"
             ),
             "isolated_workspace": apply_receipt.workspace_path,
+            "isolated_workspace_identity": apply_receipt.workspace_identity,
             "patch_apply_status": apply_receipt.patch_apply_status,
             "patch_apply_error": apply_receipt.patch_apply_error,
             "selected_candidate_hash_matches_applied": hash_matches,
@@ -1176,6 +1177,7 @@ class LocalAssistService:
                 task_id=request.task_id,
                 workspace_path=workspace,
                 verifier_command=request.verifier_command,
+                workspace_identity=candidate_summary.get("isolated_workspace_identity"),
                 timeout_sec=request.time_budget,
                 verifier_allowed=True,
             )

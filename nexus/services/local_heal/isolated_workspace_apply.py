@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from typing import Any
 
-from nexus.core.contained_write import copy_file_in_root
+from nexus.core.contained_write import copy_file_in_root, root_identity
 from nexus.services.local_heal.armor_artifact_storage import make_isolated_workspace
 
 
@@ -43,6 +43,7 @@ class IsolatedApplyReceipt:
     public_claim_allowed: bool = False
     production_ready: bool = False
     applied_patch_hash_source: str = ""
+    workspace_identity: tuple[int, int] | None = None
 
 
 def _names_a_git_dir_entry(relative: str) -> bool:
@@ -443,6 +444,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
     # root when that one is sandbox-denied, #2966).
     # When work_dir is set, isolate under that durable/operator-supplied parent.
     tmpdir = str(make_isolated_workspace(work_dir=request.work_dir or None, prefix="armor-apply-"))
+    tmpdir_identity = root_identity(tmpdir)
 
     try:
         subprocess.run(["git", "init"], cwd=tmpdir, shell=False, capture_output=True, timeout=5.0, check=True)
@@ -496,7 +498,9 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                     task_id=request.task_id,
                 )
                 if retry_result is not None:
-                    return retry_result
+                    from dataclasses import replace as _with_identity
+
+                    return _with_identity(retry_result, workspace_identity=tmpdir_identity)
 
             return IsolatedApplyReceipt(
                 task_id=request.task_id,
@@ -509,6 +513,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
                 selected_candidate_hash_matches_applied=False,
                 candidate_output_isolated=False,
                 mutation_allowed=True,
+                workspace_identity=tmpdir_identity,
             )
 
         diff_res = subprocess.run(
@@ -547,6 +552,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             candidate_output_isolated=True,
             mutation_allowed=True,
             applied_patch_hash_source="git_diff",
+            workspace_identity=tmpdir_identity,
         )
     except Exception as e:
         return IsolatedApplyReceipt(
@@ -560,6 +566,7 @@ def run_isolated_workspace_apply(request: IsolatedApplyRequest) -> IsolatedApply
             selected_candidate_hash_matches_applied=False,
             candidate_output_isolated=False,
             mutation_allowed=True,
+            workspace_identity=tmpdir_identity,
         )
 
 

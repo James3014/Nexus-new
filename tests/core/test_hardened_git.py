@@ -9,6 +9,7 @@ file under ``tmp_path``.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,6 +47,27 @@ def _repo_with_local_work(root: Path) -> Path:
     _git(root, "commit", "-qm", "base")
     (root / "notes.py").write_text(DIRTY_EDIT, encoding="utf-8")
     return root
+
+
+def test_history_pinned_env_overrides_history_controls_and_preserves_index():
+    env = hardened_git.history_pinned_env({
+        "GIT_GRAFT_FILE": "/x",
+        "GIT_NO_REPLACE_OBJECTS": "0",
+        "GIT_CONFIG_COUNT": "5",
+        "GIT_CONFIG_KEY_0": "core.commitGraph",
+        "GIT_CONFIG_VALUE_0": "true",
+        "GIT_CONFIG_PARAMETERS": "core.commitGraph=true",
+        "GIT_REPLACE_REF_BASE": "refs/evil/",
+        "GIT_INDEX_FILE": "/tmp/index",
+    })
+    assert env["GIT_GRAFT_FILE"] == os.devnull
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "core.commitGraph"
+    assert env["GIT_CONFIG_VALUE_0"] == "false"
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    assert "GIT_REPLACE_REF_BASE" not in env
+    assert env["GIT_INDEX_FILE"] == "/tmp/index"
 
 
 def _restore_candidate_files(repo: Path) -> Any:
@@ -865,6 +887,49 @@ def test_the_runner_refuses_caller_options_its_hardening_does_not_cover(env, mon
 
 def test_hardened_git_env_ignores_replacement_refs(tmp_path):
     assert hardened_git.hardened_git_env(tmp_path)["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_hardened_git_env_ignores_the_grafts_file(tmp_path):
+    assert hardened_git.hardened_git_env(tmp_path)["GIT_GRAFT_FILE"] == os.devnull
+
+
+def test_hardened_git_does_not_read_the_commit_graph(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "a",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "commit-graph", "write", "--reachable"], cwd=repo, check=True)
+    env = hardened_git.hardened_git_env(repo)
+    out = subprocess.run(
+        ["git", "config", "--type=bool", "core.commitGraph"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert out.stdout.strip() == "false"
+    graph = repo / ".git" / "objects" / "info" / "commit-graph"
+    graph.unlink()
+    graph.write_bytes(b"corrupt")
+    head = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=repo, env=env, capture_output=True, text=True
+    )
+    assert head.stdout.strip() == "1" and "commit-graph" not in head.stderr
 
 
 def test_hardened_runner_reads_objects_as_recorded_despite_a_replacement_ref(tmp_path):

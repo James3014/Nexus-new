@@ -59,6 +59,38 @@ def test_worktree_create_and_cleanup(temp_git_repo):
     finally:
         os.chdir(original_cwd)
 
+
+def test_run_git_ignores_grafts_and_replace_refs(temp_git_repo):
+    manager = WorktreeManager(root_dir=str(temp_git_repo))
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=temp_git_repo, env=env, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    ancestor = git("rev-parse", "HEAD")
+    git("checkout", "--orphan", "orphan")
+    (temp_git_repo / "orphan.txt").write_text("orphan\n", encoding="utf-8")
+    git("add", "orphan.txt")
+    git("commit", "-m", "orphan")
+    orphan = git("rev-parse", "HEAD")
+    assert (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, orphan], cwd=temp_git_repo, env=env
+        ).returncode
+        != 0
+    )
+
+    info = temp_git_repo / ".git" / "info"
+    (info / "grafts").write_text(f"{orphan} {ancestor}\n", encoding="ascii")
+    with pytest.raises(RuntimeError):
+        manager._run_git(["merge-base", "--is-ancestor", ancestor, orphan], cwd=temp_git_repo)
+    (info / "grafts").unlink()
+    git("update-ref", f"refs/replace/{orphan}", ancestor)
+    with pytest.raises(RuntimeError):
+        manager._run_git(["merge-base", "--is-ancestor", ancestor, orphan], cwd=temp_git_repo)
+
 def test_worktree_idempotent(temp_git_repo):
     worktree_root = temp_git_repo / ".nexus" / "worktrees"
     manager = WorktreeManager(root_dir=str(worktree_root))

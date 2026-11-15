@@ -1845,8 +1845,9 @@ class LocalModelExecutor:
                 verifier_receipt = run_isolated_verifier(
                     IsolatedVerifierRequest(
                         task_id=request.task_id,
-                        workspace_path=apply_receipt.workspace_path or request.repo_root,
+                        workspace_path=apply_receipt.workspace_path,
                         verifier_command=verifier_command,
+                        workspace_identity=apply_receipt.workspace_identity,
                         verifier_allowed=verifier_allowed,
                     )
                 )
@@ -2532,8 +2533,9 @@ class LocalModelExecutor:
                     verifier_receipt = run_isolated_verifier(
                         IsolatedVerifierRequest(
                             task_id=request.task_id,
-                            workspace_path=apply_receipt.workspace_path or request.repo_root,
+                            workspace_path=apply_receipt.workspace_path,
                             verifier_command=verifier_command,
+                            workspace_identity=apply_receipt.workspace_identity,
                             verifier_allowed=verifier_allowed,
                         )
                     )
@@ -3331,6 +3333,7 @@ class LocalModelExecutor:
                                             task_id=f"{request.task_id}#committee-{_dr_cand_resolved}",
                                             workspace_path=_cp_apply.workspace_path,
                                             verifier_command=tuple(request.route_context.get("verifier_command", []) or []),
+                                            workspace_identity=_cp_apply.workspace_identity,
                                             verifier_allowed=True,
                                         )
                                     )

@@ -44,6 +44,7 @@ def test_run_sandbox_task_returns_success_view(tmp_path: Path):
             "timeout_sec": 60,
             "output_file": None,
             "cleanup": True,
+            "require_os_sandbox": True,
         }
     ]
     assert result == SandboxRunResult(
@@ -88,6 +89,7 @@ def test_default_sandbox_runner_executes_local_command_and_collects_output(tmp_p
         command=[sys.executable, "-c", script],
         output_file="out/result.txt",
         timeout_sec=5,
+        require_os_sandbox=False,  # these tests exercise copy/guard behavior, not the OS barrier
     )
 
     artifact_path = Path(str(result.raw_result["output_artifact_path"]))
@@ -116,6 +118,7 @@ def test_default_sandbox_runner_blocks_cwd_escape_before_command_execution(tmp_p
         command=[sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).write_text('bad')"],
         cwd="../outside",
         timeout_sec=5,
+        require_os_sandbox=False,  # these tests exercise copy/guard behavior, not the OS barrier
     )
 
     assert result.success is False
@@ -141,6 +144,7 @@ def test_default_sandbox_runner_does_not_follow_source_symlinks(tmp_path: Path):
             "from pathlib import Path; print(Path('linked_secret.txt').exists())",
         ],
         timeout_sec=5,
+        require_os_sandbox=False,  # these tests exercise copy/guard behavior, not the OS barrier
     )
 
     assert result.success is True
@@ -161,6 +165,7 @@ def test_default_sandbox_runner_does_not_copy_source_git_hooks(tmp_path: Path):
             "from pathlib import Path; print(Path('.git/hooks/pre-commit').exists())",
         ],
         timeout_sec=5,
+        require_os_sandbox=False,  # these tests exercise copy/guard behavior, not the OS barrier
     )
 
     assert result.success is True
@@ -182,6 +187,7 @@ def test_default_sandbox_runner_blocks_python_external_socket(tmp_path: Path):
             "import socket; socket.create_connection(('example.com', 80), timeout=1)",
         ],
         timeout_sec=5,
+        require_os_sandbox=False,  # these tests exercise copy/guard behavior, not the OS barrier
     )
 
     assert result.success is False

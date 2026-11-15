@@ -13,7 +13,7 @@ import stat
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 GIT_TIMEOUT_S = 120.0
 # Command-line config outranks repository config: hooks and fsmonitor are switched off,
@@ -29,6 +29,37 @@ _GIT_OVERRIDES = (
     "-c",
     "commit.gpgSign=false",
 )
+_HISTORY_ENV_PINS = {
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_GRAFT_FILE": os.devnull,
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.commitGraph",
+    "GIT_CONFIG_VALUE_0": "false",
+}
+
+
+def history_pinned_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """Copy an environment while removing overrides to git's history pins."""
+    env = dict(os.environ if base is None else base)
+    for key in tuple(env):
+        upper = key.upper()
+        if (
+            upper
+            in {
+                "GIT_REPLACE_REF_BASE",
+                "GIT_GRAFT_FILE",
+                "GIT_NO_REPLACE_OBJECTS",
+                "GIT_CONFIG_COUNT",
+                "GIT_CONFIG_PARAMETERS",
+            }
+            or upper.startswith("GIT_CONFIG_KEY_")
+            or upper.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(key)
+    env.update(_HISTORY_ENV_PINS)
+    return env
+
+
 # Caller-supplied git settings never take precedence over the runner's hardening: a caller
 # may put ``-c`` pairs ahead of the subcommand only for the commit identity or for a setting
 # pinned above (whose pinned value comes after the caller's and so wins). Any other key, and
@@ -63,23 +94,22 @@ _RUNNING_GUARD = threading.Lock()
 def hardened_git_env(
     repo_dir: Path, git_dir: Optional[Path] = None, common_dir: Optional[Path] = None
 ) -> dict[str, str]:
-    """The caller's environment without any GIT_* variable (GIT_DIR, GIT_WORK_TREE,
-    GIT_CONFIG_*, GIT_EXEC_PATH ...); system and global config are not read, missing objects
-    are never fetched, replacement refs are ignored (#3226), and discovery stops at
-    ``repo_dir``. With ``git_dir`` (a probed git
-    dir) GIT_DIR and GIT_WORK_TREE are pinned to it and ``repo_dir``, so a rewritten ``.git``
-    pointer cannot redirect the call; ``common_dir`` (a verified linked worktree's) pins
-    GIT_COMMON_DIR too."""
+    """The caller's environment minus every GIT_* variable, then pinned: no system or global
+    config, no lazy fetch, no replacement refs, grafts file or commit-graph (#3226, #3437)
+    (GIT_CONFIG_COUNT carries core.commitGraph=false), discovery stops at ``repo_dir``.
+    With ``git_dir`` (a probed git dir) GIT_DIR and GIT_WORK_TREE are pinned to it and
+    ``repo_dir``, so a rewritten ``.git`` pointer cannot redirect the call; ``common_dir``
+    (a verified linked worktree's) pins GIT_COMMON_DIR too."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,
         GIT_ATTR_NOSYSTEM="1",
         GIT_NO_LAZY_FETCH="1",
-        GIT_NO_REPLACE_OBJECTS="1",
         GIT_TERMINAL_PROMPT="0",
         GIT_CEILING_DIRECTORIES=str(repo_dir.parent),
     )
+    env.update(_HISTORY_ENV_PINS)
     if git_dir is not None:
         env.update(GIT_DIR=str(git_dir), GIT_WORK_TREE=str(repo_dir))
     if common_dir is not None:
