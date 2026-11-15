@@ -462,6 +462,26 @@ _NEGATED_ACCEPT = re.compile(
     r"\b(?:not|never|no|cannot|can't|until|pending|awaiting|unless|without)\b|n't\b", re.I
 )
 _FREE_TEXT_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+_FENCE_MARKER = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fenced_lines(lines: list[str]) -> set[int]:
+    """Indexes inside CommonMark fenced code blocks, including their delimiters."""
+    fenced: set[int] = set()
+    opener: tuple[str, int] | None = None
+    for index, line in enumerate(lines):
+        marker = _FENCE_MARKER.match(line)
+        if opener is None:
+            if marker and not (marker.group(1).startswith("`") and "`" in marker.group(2)):
+                opener = (marker.group(1)[0], len(marker.group(1)))
+                fenced.add(index)
+            continue
+        fenced.add(index)
+        if marker:
+            run = marker.group(1)
+            if run[0] == opener[0] and len(run) >= opener[1] and not marker.group(2).strip():
+                opener = None
+    return fenced
 
 
 def _bold_accept_lines(lines: list[str], head: str) -> bool:
@@ -473,21 +493,40 @@ def _bold_accept_lines(lines: list[str], head: str) -> bool:
     those are read exactly as before. Comments without a bold ACCEPT at the head are
     unchanged too.
     """
-    fenced = False
-    for raw in lines:
-        if raw.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+    fenced = _fenced_lines(lines)
+    in_details = False
+    for index, raw in enumerate(lines):
+        if index in fenced:
             continue
-        if fenced or raw.lstrip().startswith(">"):
+        if re.search(r"<details\b", raw, re.I):
+            in_details = True
+        if re.search(r"</details\s*>", raw, re.I):
+            in_details = False
             continue
-        line = _INLINE_CODE.sub(" ", raw)
-        for match in _BOLD_ACCEPT.finditer(line):
+        if in_details or raw.startswith(("    ", "\t")) or raw.lstrip().startswith(">"):
+            continue
+        struck = _struck_spans(raw)
+        for match in _BOLD_ACCEPT.finditer(raw):
             span = match.group(0)
             if re.search(r"\bCONDITIONAL\b|\b%s\b" % _REJECT_TOKEN, span):
                 continue
-            if _NEGATED_ACCEPT.search(span):
+            start, end = match.span()
+            if any(begin < end and start < finish for begin, finish in struck):
                 continue
-            if not head or names_head(span, head):
+            if any(
+                begin < end and start < finish
+                for begin, finish in (m.span() for m in _INLINE_CODE.finditer(raw))
+            ):
+                continue
+            plain_span = span.replace("**", "")
+            read_ahead = plain_span + raw[end:]
+            withdrawn_after = re.match(r"\s*[.,;:!()\-]*superseded\b", raw[end:], re.I)
+            if (
+                verdict_clauses(read_ahead)
+                and not withdrawn_after
+                and head
+                and names_head(plain_span, head)
+            ):
                 return True
     return False
 
@@ -1557,10 +1596,11 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
     own label binds it to another commit (r5 R1, R2), and is credited to the section's
     family even under a label a not-run word disabled (#3004).
     """
+    source_lines = _HTML_COMMENT.sub(" ", body).splitlines()
     lines: list[str] = []
     fenced_lines: set[int] = set()
     fenced = False
-    for raw in _HTML_COMMENT.sub(" ", body).splitlines():
+    for raw in source_lines:
         if raw.strip().startswith(("```", "~~~")):
             fenced = not fenced
             continue
@@ -1601,7 +1641,7 @@ def _classify(body: str, head: str, rejects_only: bool = False) -> dict[str, Any
             }
             rebuttals.append(((section_start + point[0], 1 << 30), event))
 
-    free_text_ok = _bold_accept_lines(unfenced, head)
+    free_text_ok = _bold_accept_lines(source_lines, head)
     for index, line in enumerate(lines):
         in_fence = index in fenced_lines
         reads: list[tuple[str, bool]] = []
@@ -1976,13 +2016,11 @@ def _conditional_record(
         if not isinstance(comment, dict) or not isinstance(comment.get("body"), str):
             continue
         body = _HTML_COMMENT.sub(" ", comment["body"])
-        fenced = False
+        source_lines = body.splitlines()
+        fenced = _fenced_lines(source_lines)
         lines = []
-        for line in body.splitlines():
-            if line.strip().startswith(("```", "~~~")):
-                fenced = not fenced
-                lines.append("")
-            elif fenced or line.lstrip().startswith(">") or line.lstrip().startswith("|"):
+        for line_index, line in enumerate(source_lines):
+            if line_index in fenced or line.lstrip().startswith((">", "|")):
                 lines.append("")
             else:
                 lines.append(line)

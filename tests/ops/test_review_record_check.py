@@ -225,6 +225,37 @@ def test_decoy_bold_accept_does_not_free_the_bullets(decoy):
     assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
 
 
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"~~**ACCEPT at {HEAD}**~~", id="struck"),
+        pytest.param(f"**ACCEPT at {HEAD} withdrawn**", id="withdrawn"),
+        pytest.param(f"    **ACCEPT at {HEAD}**", id="indented"),
+        pytest.param(f"<details>\n**ACCEPT at {HEAD}**\n</details>", id="details"),
+        pytest.param(f"````\n**ACCEPT at {HEAD}**\n```\n````", id="long fence"),
+    ],
+)
+def test_invalid_bold_accept_forms_do_not_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        pytest.param(f"**ACCEPT at {HEAD}?**", id="withdrawn"),
+        pytest.param(f"<del>**ACCEPT at {HEAD}**</del>", id="struck"),
+        pytest.param(f"<s>**ACCEPT at {HEAD}**</s>", id="struck"),
+        pytest.param(f"<strike>**ACCEPT at {HEAD}**</strike>", id="struck"),
+        pytest.param(f"**ACCEPT at {HEAD}** retracted", id="withdrawn"),
+        pytest.param(f"**ACCEPT at {HEAD}** (superseded)", id="withdrawn"),
+    ],
+)
+def test_other_invalid_bold_accept_forms_do_not_free_the_bullets(form):
+    body = f"Claude: ACCEPT at {HEAD}\n{form}\n- later Claude REJECT at {HEAD}\n"
+    assert rrc.evaluate(HEAD, DOCS, [_c(body)], [])["status"] == "MISSING_RECORD"
+
+
 def test_bold_accept_for_another_head_does_not_free_the_bullets():
     other = "1e9f3d4ec0000000000000000000000000000000"
     body = (
