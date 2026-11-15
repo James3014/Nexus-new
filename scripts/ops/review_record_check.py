@@ -772,8 +772,10 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         line_before = _plain(plain_line[window_start : start + span[0]]) if start >= 0 else before
         prefix_start = max(prior_token_end, plain_line.rfind(";", 0, token_at) + 1)
         prefix_text = plain_line[prefix_start:token_at]
+        # main's rule stays as is: a line-start "Withdrawn:" covers every verdict on the line.
+        line_withdrawn = _PREFIX_WITHDRAWN.match(plain_line)
         prefix_withdrawn = _PREFIX_WITHDRAWN.match(prefix_text)
-        if not prefix_withdrawn:
+        if not (line_withdrawn or prefix_withdrawn):
             for candidate in _INLINE_PREFIX_WITHDRAWN.finditer(prefix_text):
                 reviewer_prefix = prefix_text[: candidate.start()]
                 if reviewer_prefix.strip() and not _WITHDRAWN_REVIEWER_PREFIX.fullmatch(
@@ -790,7 +792,9 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
                 if not suffix[cursor:].strip():
                     prefix_withdrawn = candidate
                     break
-        if prefix_withdrawn:
+        if line_withdrawn:
+            line_before = line_before.replace(plain_line[: line_withdrawn.end()], "", 1)
+        elif prefix_withdrawn:
             line_before = line_before.replace(prefix_text[: prefix_withdrawn.end()], "", 1)
         after = clause[span[1] :]
         if _PRE_DENY.search(line_before) or _REJECT.search(before) or _QUOTE.search(line_before):
@@ -807,7 +811,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         withdrawn = withdrawn or (
             start >= 0 and bool(_POST_WITHDRAWN.match(plain_line, start + span[1]))
         )
-        withdrawn = withdrawn or bool(prefix_withdrawn)
+        withdrawn = withdrawn or bool(line_withdrawn or prefix_withdrawn)
         if not _hex_tokens(clause):
             # A verdict not bound by its own clause borrows the sha from later on the
             # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
