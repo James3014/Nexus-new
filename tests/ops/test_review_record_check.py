@@ -180,6 +180,93 @@ def test_conditional_verdict_token_is_not_an_ordinary_verdict_clause():
     assert rrc.verdict_clauses(conditional) == []
 
 
+@pytest.mark.parametrize(
+    "withdrawal",
+    [
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "retracted",
+        "revoked",
+        "rescinded",
+        "denied",
+        "no longer stands",
+        "no longer holds",
+        "no longer valid",
+    ],
+    ids=[
+        "pending",
+        "withdrawn",
+        "stale",
+        "void",
+        "withheld",
+        "retracted",
+        "revoked",
+        "rescinded",
+        "denied",
+        "no-longer-stands",
+        "no-longer-holds",
+        "no-longer-valid",
+    ],
+)
+@pytest.mark.parametrize(
+    "decoration",
+    ["{word}", "({word})", "— {word}", ", {word}"],
+    ids=["bare", "parentheses", "dash", "comma"],
+)
+@pytest.mark.parametrize("binding", ["@{sha}", "at {sha}"], ids=["at-sign", "at-word"])
+@pytest.mark.parametrize("sha", [HEAD[:9], HEAD], ids=["nine-hex", "forty-hex"])
+@pytest.mark.parametrize("mixed_case", [False, True], ids=["lowercase", "mixed-case"])
+def test_withdrawal_after_bound_accept_is_not_a_verdict(
+    withdrawal, decoration, binding, sha, mixed_case
+):
+    if mixed_case:
+        withdrawal = withdrawal.upper()
+    tail = decoration.format(word=withdrawal)
+    line = f"Claude review: Verdict: ACCEPT {binding.format(sha=sha)} {tail}"
+    assert rrc.verdict_clauses(line) == []
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["Withdrawn", "Retracted", "Void", "Stale", "Superseded", "Pending"],
+    ids=["withdrawn", "retracted", "void", "stale", "superseded", "pending"],
+)
+@pytest.mark.parametrize("binding", ["@{sha}", "at {sha}"], ids=["at-sign", "at-word"])
+@pytest.mark.parametrize("sha", [HEAD[:9], HEAD], ids=["nine-hex", "forty-hex"])
+@pytest.mark.parametrize("mixed_case", [False, True], ids=["lowercase", "mixed-case"])
+def test_withdrawal_prefix_before_accept_is_not_a_verdict(prefix, binding, sha, mixed_case):
+    if mixed_case:
+        prefix = prefix.upper()
+    line = f"{prefix}: Verdict: ACCEPT {binding.format(sha=sha)}"
+    assert rrc.verdict_clauses(line) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"Claude review: Verdict: ACCEPT@{HEAD}",
+        f"Claude review: ACCEPT@{HEAD}; Codex review still pending",
+        f"Claude review: ACCEPT@{HEAD} — all checks green",
+        f"Claude r1 ACCEPT@{HEAD}; r2 ACCEPT@{HEAD}",
+        f"Claude round 2: ACCEPT@{HEAD}",
+        "Codex review (pending)\nClaude review: ACCEPT@" + HEAD,
+    ],
+    ids=[
+        "plain-bound",
+        "other-review-pending",
+        "checks-green",
+        "round-list",
+        "round-marker",
+        "separate-header",
+    ],
+)
+def test_normal_accept_writings_remain_verdicts(line):
+    assert rrc.verdict_clauses(line)
+
+
 _BOLD_ACCEPT_LINE = f"**Independent Claude review**: **ACCEPT at {HEAD}**\n"
 
 

@@ -350,10 +350,13 @@ _POST_NOT = re.compile(r"^\s*not\b", re.IGNORECASE)  # "ACCEPT not given yet" (#
 # and neither is one used as an adjective ("withdrawn findings: none", "denied-path tests").
 _POST_WITHDRAWN = re.compile(
     r"\s*(?:(?:@|\bat\b|\bon\b)\s*[0-9a-f]{7,40}\b)?[\s.,;:!\-\u2013\u2014(\[]*"
-    r"(?:withdrawn|revoked|retracted|rescinded|denied"
+    r"(?:pending|withdrawn|stale|void|withheld|revoked|retracted|rescinded|denied"
     r"|no\s+longer\s+(?:stands?|holds?|valid|applies|counts?))\b"
     r"(?=\s*(?:$|[^\w\s-]|(?:by|after|because|due|since|as|in|for|until|per|pending)\b))",
     re.IGNORECASE,
+)
+_PREFIX_WITHDRAWN = re.compile(
+    r"^\s*(?:withdrawn|retracted|void|stale|superseded|pending)\s*:", re.IGNORECASE
 )
 # Struck-through text (GitHub ``~~text~~`` or ``~text~``, ``<del>``, ``<s>``, ``<strike>``)
 # is withdrawn: an ACCEPT inside it is not read. A REJECT inside it still is (fail closed).
@@ -765,6 +768,7 @@ def _verdict_reads(line: str) -> list[tuple[str, bool]]:
         withdrawn = withdrawn or (
             start >= 0 and bool(_POST_WITHDRAWN.match(plain_line, start + span[1]))
         )
+        withdrawn = withdrawn or bool(_PREFIX_WITHDRAWN.match(plain_line))
         if not _hex_tokens(clause):
             # A verdict not bound by its own clause borrows the sha from later on the
             # line, so a withdrawal later on the line ("ACCEPT, pending CI at <sha>",
