@@ -2769,6 +2769,25 @@ def test_r5_r4_the_same_header_named_reviewer_keeps_its_later_round():
 
 
 @pytest.mark.parametrize(
+    "label",
+    [
+        "Gemini 4 Hydrogen Medium",
+        "Gemini 4 Hydrogen (Medium)",
+        "Gemini 4 Argon",
+        "Gemini 4 Hydrogen High via agy",
+        "Gemini 3.8 Flash High via agy",  # control: already read as a label
+    ],
+)
+def test_gemini_4_tier_labels_still_reject(label):
+    comments = [
+        _c(f"Codex ACCEPT@{HEAD}"),
+        _c(f"Head reviewed: {HEAD}\n{label} REJECT"),
+        _c(CLAUDE_AT_HEAD),
+    ]
+    assert rrc.evaluate(HEAD, RISKY, comments, [])["status"] == "MISSING_CROSS_MODEL"
+
+
+@pytest.mark.parametrize(
     ("accepts", "reject", "files", "status"),
     [
         (
