@@ -272,7 +272,7 @@ _REJECT_LABEL_WORDS = frozenset({
 })
 # More label words before a REJECT: a status the label carries ("**Codex r2 fix in
 # progress**: REJECT", #3004) and a model's tier ("Codex gpt-5.5 xhigh", "Gemini 3.1 Pro",
-# "Gemini 3.8 Flash High via agy", "Gemini 4 Hydrogen Medium", "Gemini 4 Argon"; versions
+# "Gemini 3.8 Flash High via agy", "Gemini 4 Hydrogen Medium", "Gemini 4 Argon", "Gemini 4 Neon High"; versions
 # are in _REJECT_LABEL_WORD, r5 R5).
 _REJECT_LABEL_EXTRA = frozenset({
     "fix",
@@ -289,6 +289,8 @@ _REJECT_LABEL_EXTRA = frozenset({
     "flash",
     "hydrogen",
     "argon",
+    "neon",
+    "carbon",
     "high",
     "xhigh",
     "low",

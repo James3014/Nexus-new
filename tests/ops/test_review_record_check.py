@@ -2775,6 +2775,8 @@ def test_r5_r4_the_same_header_named_reviewer_keeps_its_later_round():
         "Gemini 4 Hydrogen (Medium)",
         "Gemini 4 Argon",
         "Gemini 4 Hydrogen High via agy",
+        "Gemini 4 Neon High",
+        "Gemini 4 Carbon (High) via agy",
         "Gemini 3.8 Flash High via agy",  # control: already read as a label
     ],
 )
